@@ -1,3 +1,64 @@
+# ============================================================
+# STREAMLIT CLOUD BACKGROUND ENGINE LAUNCHER
+# ============================================================
+
+import os as _os
+import sys as _sys
+import subprocess as _subprocess
+import time as _time
+
+def _start_background_engine():
+    if _os.environ.get("AI_ENGINE_WORKER") == "1":
+        return
+
+    worker_path = _os.path.join(
+        _os.path.dirname(_os.path.abspath(__file__)),
+        "worker_base.py"
+    )
+
+    if not _os.path.exists(worker_path):
+        return
+
+    lock_path = "/tmp/ai_stock_worker.pid"
+
+    try:
+        if _os.path.exists(lock_path):
+            with open(lock_path, "r") as f:
+                old_pid = int(f.read().strip())
+
+            try:
+                _os.kill(old_pid, 0)
+                return
+            except (OSError, ProcessLookupError):
+                pass
+
+        process = _subprocess.Popen(
+            [_sys.executable, worker_path],
+            cwd=_os.path.dirname(worker_path),
+            stdout=_subprocess.DEVNULL,
+            stderr=_subprocess.DEVNULL,
+            start_new_session=True,
+            env={
+                **_os.environ,
+                "AI_ENGINE_WORKER": "1"
+            }
+        )
+
+        with open(lock_path, "w") as f:
+            f.write(str(process.pid))
+
+        _time.sleep(0.2)
+
+    except Exception:
+        pass
+
+
+_start_background_engine()
+
+# ============================================================
+# END BACKGROUND ENGINE LAUNCHER
+# ============================================================
+
 import json, os, sqlite3, time, math, re
 from datetime import datetime, timezone
 import numpy as np
