@@ -629,9 +629,12 @@ def classify_decision(row):
     min_rr=float(CFGD.get('min_risk_reward_2',1.50))
     block_high=bool(CFGD.get('block_high_risk_signals',True)) and risk=='HIGH'
     strong_relative = rel>=52 and sector>=48
-    bearish_penalty = 0.03 if regime=='BEARISH' else (0.015 if regime=='HIGH_VOLATILITY' else 0.0)
-    if (rank_pct>=buy_rank and p_up==p_up and p_up>=buy_prob+bearish_penalty and
-        conf>=conf_gate and trend=='BULLISH' and strong_relative and rr>=min_rr and not block_high):
+    bearish_penalty = 0.04 if regime=='BEARISH' else (0.05 if regime=='HIGH_VOLATILITY' else (0.015 if regime=='SIDEWAYS' else 0.0))
+    regime_rank_gate = buy_rank if regime=='BULLISH' else max(buy_rank, 0.99 if regime in ('BEARISH','HIGH_VOLATILITY') else 0.985)
+    regime_conf_gate = conf_gate + (0.05 if regime in ('BEARISH','HIGH_VOLATILITY') else (0.02 if regime=='SIDEWAYS' else 0.0))
+    regime_rel_gate = 58 if regime in ('BEARISH','HIGH_VOLATILITY') else (54 if regime=='SIDEWAYS' else 52)
+    if (rank_pct>=regime_rank_gate and p_up==p_up and p_up>=buy_prob+bearish_penalty and
+        conf>=regime_conf_gate and trend=='BULLISH' and strong_relative and rel>=regime_rel_gate and rr>=min_rr and not block_high):
         ds=float(np.clip(.45*score+30*p_up*100+15*conf*100+10*min(rr/3,1)*100,0,100))
         return 'BUY',ds,'BUY: relative rank + model probability + trend + sector/relative strength + risk/reward agree'
     if (p_down==p_down and p_down>=float(CFGD.get('relative_sell_probability_min',0.56)) and
@@ -681,6 +684,16 @@ def analyze_all(universe,model=None):
         relative_strength=float(np.clip(50+(float(r.ret5)-ihsg_r5)*180,0,100)) if pd.notna(r.ret5) else 50.0
         score=.32*base + .28*(p_up*100 if np.isfinite(p_up) else base) + .15*market_score + .15*sscore + .10*relative_strength
         trend='BULLISH' if pd.notna(r.ma20) and pd.notna(r.ma50) and r.ma20>r.ma50 else 'BEARISH'
+        # Market-aware filter: IHSG is not decoration. Defensive regimes reward
+        # relative strength and bullish structure, while weak names lose weight.
+        if regime in ('BEARISH','HIGH_VOLATILITY'):
+            if relative_strength >= 58 and trend == 'BULLISH': score += 6.0
+            elif relative_strength < 48 or trend != 'BULLISH': score -= 8.0
+            else: score -= 2.0
+        elif regime == 'SIDEWAYS':
+            score += 3.0 if relative_strength >= 55 and trend == 'BULLISH' else (-3.0 if relative_strength < 48 else 0.0)
+        elif regime == 'BULLISH':
+            score += 3.0 if trend == 'BULLISH' else -2.0
         atr=float(r.atr14) if pd.notna(r.atr14) else np.nan; close=float(r.close)
         # Risk engine: combine volatility, momentum extremes and liquidity proxy.
         atr_pct=float(r.atr_pct) if pd.notna(r.atr_pct) else 0.0
@@ -1453,8 +1466,24 @@ def stock_search_panel(universe, res, forced_ticker=None):
     c1,c2=st.columns([1.45,1])
     with c1:
         st.markdown('### 📈 Price & Momentum')
-        chart=z[['date','close']].copy().set_index('date').tail(120)
-        st.line_chart(chart,width='stretch')
+        st.caption('Grafik ringkas bergaya aplikasi investasi. Pilih periode tanpa menjalankan ulang training AI.')
+        period=st.radio('Periode',['1M','3M','6M','1Y'],index=1,horizontal=True,key=f'chart_period_{selected_ticker}',label_visibility='collapsed')
+        days={'1M':22,'3M':66,'6M':132,'1Y':252}[period]
+        chart=z[['date','close']].copy().tail(days)
+        chart['date']=pd.to_datetime(chart['date'],errors='coerce')
+        chart=chart.dropna(subset=['date','close']).set_index('date')
+        if not chart.empty:
+            first=float(chart['close'].iloc[0]); last=float(chart['close'].iloc[-1])
+            period_ret=(last/first-1)*100 if first else np.nan
+            hi=float(chart['close'].max()); lo=float(chart['close'].min())
+            g1,g2,g3,g4=st.columns(4)
+            g1.metric('Harga',f'Rp {last:,.0f}')
+            g2.metric(f'Return {period}',f'{period_ret:+.2f}%' if np.isfinite(period_ret) else '—')
+            g3.metric('High',f'Rp {hi:,.0f}')
+            g4.metric('Low',f'Rp {lo:,.0f}')
+            st.area_chart(chart[['close']],width='stretch',height=330)
+        else:
+            st.info('Data grafik belum tersedia untuk periode ini.')
         t1,t2,t3,t4=st.columns(4)
         t1.metric('Trend','BULLISH' if pd.notna(r.ma20) and pd.notna(r.ma50) and r.ma20>r.ma50 else 'BEARISH')
         t2.metric('MA50',f'{float(r.ma50):,.0f}' if pd.notna(r.ma50) else '—')
@@ -1676,6 +1705,16 @@ def render_app():
     st.caption('Continuous Intelligence • Rank → Opportunity → Alert → Deep Analysis → Risk → Hold → Overnight')
     st.markdown('<div class="asi-row">'+_pill('READY' if ready else 'PREPARING', 'green' if ready else 'yellow')+_pill(f'Model {active_name}', 'green' if model else 'gray')+_pill(f'Snapshot {snap_at or "belum ada"}', 'green' if snap_at else 'gray')+'</div>', unsafe_allow_html=True)
 
+    forced_detail=str(st.query_params.get('ticker','')).upper().replace('.JK','').strip() or None
+    if forced_detail:
+        b1,b2=st.columns([1,5])
+        if b1.button('← Dashboard',key='back_dashboard',use_container_width=True):
+            st.query_params.clear()
+            st.rerun()
+        b2.caption(f'Deep Analysis aktif untuk {forced_detail}. Tombol ← Dashboard kembali ke halaman utama.')
+        stock_search_panel(universe,res,forced_ticker=forced_detail)
+        return
+
     tab_home, tab_opp, tab_search, tab_ai, tab_engine = st.tabs(['🏠 Ringkasan','🚀 Opportunity','🔎 Analisis Saham','🧠 AI & Validasi','⚙️ Engine / Log'])
 
     with tab_home:
@@ -1708,6 +1747,15 @@ def render_app():
 
         dyn = read_dynamic_opportunities(int(CFGD.get('dynamic_opportunity_count',5)))
         st.subheader('🚀 Top Opportunity Saat Ini')
+        if not dyn.empty:
+            st.caption('Sentuh ticker untuk membuka Deep Analysis. Tombol ini dibuat khusus agar navigasi tetap nyaman di HP/APK.')
+            touch_cols=st.columns(min(5,len(dyn.head(5))))
+            for idx,(_,tr) in enumerate(dyn.head(5).iterrows()):
+                ticker_touch=str(tr.get('ticker','')).upper()
+                label=f"#{int(tr.get('rank',idx+1))} {ticker_touch}"
+                if touch_cols[idx].button(label,key=f'touch_top_{ticker_touch}',use_container_width=True):
+                    st.query_params['ticker']=ticker_touch
+                    st.rerun()
         if dyn.empty:
             st.info('Belum ada kandidat yang memenuhi filter relatif + AI + risiko.')
         else:
