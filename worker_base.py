@@ -24,13 +24,24 @@ DB_DIR = app.DB_DIR
 # ============================================================
 
 def dbcon():
-    return sqlite3.connect(app.DB, check_same_thread=False)
+    con = sqlite3.connect(
+        app.DB,
+        check_same_thread=False,
+        timeout=60,
+    )
+
+    try:
+        con.execute("PRAGMA journal_mode=WAL")
+        con.execute("PRAGMA busy_timeout=60000")
+    except Exception:
+        pass
+
+    return con
 
 
 def ensure_tables():
     con = dbcon()
 
-    # Engine log is owned by the worker.
     con.execute("""
         CREATE TABLE IF NOT EXISTS engine_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,8 +55,10 @@ def ensure_tables():
     con.commit()
     con.close()
 
-    # Dynamic Opportunity owns its own V1.8.x tables.
-    dynamic_engine.ensure_tables()
+    try:
+        dynamic_engine.ensure_tables()
+    except Exception as exc:
+        log("DYNAMIC", "TABLE_ERROR", str(exc))
 
 
 def log(phase, status, detail=""):
@@ -54,8 +67,16 @@ def log(phase, status, detail=""):
     try:
         con = dbcon()
         con.execute(
-            "INSERT INTO engine_log(ts,phase,status,detail) VALUES(?,?,?,?)",
-            (now, str(phase), str(status), str(detail)[:2000]),
+            """
+            INSERT INTO engine_log(ts,phase,status,detail)
+            VALUES(?,?,?,?)
+            """,
+            (
+                now,
+                str(phase),
+                str(status),
+                str(detail)[:2000],
+            ),
         )
         con.commit()
         con.close()
@@ -125,7 +146,13 @@ def collect_fast(universe):
     if universe is None or universe.empty:
         return 0, 0, ["Universe kosong"]
 
-    tickers = universe["ticker"].astype(str).tolist()
+    tickers = (
+        universe["ticker"]
+        .astype(str)
+        .dropna()
+        .drop_duplicates()
+        .tolist()
+    )
 
     ok = 0
     rows = 0
@@ -175,6 +202,86 @@ def collect_fast(universe):
     )
 
     return ok, rows, errors
+
+
+# ============================================================
+# IHSG / MARKET DATA
+# ============================================================
+
+def refresh_market_data():
+    """
+    Model V1.8 menggunakan market features.
+    Worker mencoba memperbarui IHSG sebelum training.
+
+    Dibuat kompatibel dengan beberapa versi app.py.
+    Jika fungsi IHSG berbeda/tidak tersedia, worker utama
+    tetap berjalan.
+    """
+
+    log(
+        "MARKET_DATA",
+        "START",
+        "refreshing IHSG / market features",
+    )
+
+    try:
+        if not hasattr(app, "fetch_ihsg"):
+            log(
+                "MARKET_DATA",
+                "SKIP",
+                "app.fetch_ihsg not available",
+            )
+            return False
+
+        data = app.fetch_ihsg()
+
+        if data is None:
+            log(
+                "MARKET_DATA",
+                "SKIP",
+                "fetch_ihsg returned None",
+            )
+            return False
+
+        if hasattr(data, "empty") and data.empty:
+            log(
+                "MARKET_DATA",
+                "SKIP",
+                "IHSG dataframe empty",
+            )
+            return False
+
+        if hasattr(app, "save_ihsg"):
+            try:
+                app.save_ihsg(data)
+            except TypeError:
+                # Be tolerant if current app.py persists
+                # market data inside fetch_ihsg().
+                pass
+
+        app.state_set(
+            "market_data_updated_at",
+            datetime.now(timezone.utc).isoformat(),
+        )
+
+        log(
+            "MARKET_DATA",
+            "DONE",
+            "IHSG refresh completed",
+        )
+
+        return True
+
+    except Exception:
+        detail = traceback.format_exc()
+
+        log(
+            "MARKET_DATA",
+            "ERROR",
+            detail[-1800:],
+        )
+
+        return False
 
 
 # ============================================================
@@ -233,48 +340,53 @@ def prioritize_universe(universe):
 # ============================================================
 
 def save_opportunities(res, source):
-    """
-    Save the COMPLETE V1.8 analysis dataframe.
-
-    We intentionally do NOT use the old V1.7 fixed
-    opportunities schema. app.py V1.8.x produces additional
-    fields such as relative rank, percentile, decision,
-    risk/reward, market regime, etc.
-
-    The dataframe itself becomes the SQLite schema.
-    """
-
     if res is None or res.empty:
         return 0
 
     out = res.copy()
 
-    # Main dashboard expects a rank.
+    # Keep decision quality first when available.
+    sort_cols = []
+    ascending = []
+
+    if "decision_priority" in out.columns:
+        sort_cols.append("decision_priority")
+        ascending.append(True)
+
+    if "decision_score" in out.columns:
+        sort_cols.append("decision_score")
+        ascending.append(False)
+
     if "relative_rank_score" in out.columns:
-        out = out.sort_values(
-            ["relative_rank_score", "ai_score"],
-            ascending=False,
-        ).reset_index(drop=True)
+        sort_cols.append("relative_rank_score")
+        ascending.append(False)
 
-    elif "ai_score" in out.columns:
-        out = out.sort_values(
-            "ai_score",
-            ascending=False,
-        ).reset_index(drop=True)
+    if "ai_score" in out.columns:
+        sort_cols.append("ai_score")
+        ascending.append(False)
 
+    if sort_cols:
+        out = out.sort_values(
+            sort_cols,
+            ascending=ascending,
+        ).reset_index(drop=True)
     else:
         out = out.reset_index(drop=True)
 
-    out["rank"] = range(1, len(out) + 1)
+    out["rank"] = range(
+        1,
+        len(out) + 1
+    )
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(
+        timezone.utc
+    ).isoformat()
+
     out["updated_at"] = now
 
     con = dbcon()
 
     try:
-        # Replace the legacy V1.7 table with the actual
-        # dataframe produced by app.py V1.8.33.
         out.to_sql(
             "opportunities",
             con,
@@ -309,29 +421,64 @@ def save_opportunities(res, source):
 # ALERT SNAPSHOT
 # ============================================================
 
+def safe_number(value):
+    try:
+        if pd.isna(value):
+            return None
+
+        return round(
+            float(value),
+            6,
+        )
+
+    except Exception:
+        return None
+
+
 def write_alerts(res):
     if res is None or res.empty:
         return
 
     top = res.head(
-        int(CFG.get("max_opportunities", 10))
+        int(
+            CFG.get(
+                "max_opportunities",
+                10,
+            )
+        )
     ).copy()
 
     payload = {
         "generated_at":
-            datetime.now(timezone.utc).isoformat(),
-        "count": len(top),
-        "opportunities": [],
+            datetime.now(
+                timezone.utc
+            ).isoformat(),
+
+        "count":
+            len(top),
+
+        "opportunities":
+            [],
     }
 
     for _, row in top.iterrows():
 
         item = {
             "ticker":
-                str(row.get("ticker", "")),
+                str(
+                    row.get(
+                        "ticker",
+                        "",
+                    )
+                ),
 
             "company":
-                str(row.get("company", "")),
+                str(
+                    row.get(
+                        "company",
+                        "",
+                    )
+                ),
 
             "ai_score":
                 safe_number(
@@ -388,7 +535,9 @@ def write_alerts(res):
                 ),
         }
 
-        payload["opportunities"].append(item)
+        payload[
+            "opportunities"
+        ].append(item)
 
     path = os.path.join(
         DB_DIR,
@@ -410,19 +559,10 @@ def write_alerts(res):
 
     app.state_set(
         "last_alert_generation",
-        datetime.now(timezone.utc).isoformat(),
+        datetime.now(
+            timezone.utc
+        ).isoformat(),
     )
-
-
-def safe_number(value):
-    try:
-        if pd.isna(value):
-            return None
-
-        return round(float(value), 6)
-
-    except Exception:
-        return None
 
 
 # ============================================================
@@ -431,8 +571,8 @@ def safe_number(value):
 
 def load_model():
     """
-    Prefer the deployed V1.8 model.
-    Fall back to the older JST loader only if needed.
+    Prefer deployed V1.8 model.
+    Fall back to legacy JST loader.
     """
 
     try:
@@ -451,7 +591,52 @@ def load_model():
         return None
 
 
-def maybe_train(universe):
+def count_price_rows():
+    try:
+        con = dbcon()
+
+        row = con.execute(
+            "SELECT COUNT(*) FROM prices"
+        ).fetchone()
+
+        con.close()
+
+        return int(
+            row[0] if row else 0
+        )
+
+    except Exception:
+        return 0
+
+
+def count_ready_symbols(min_rows=60):
+    try:
+        con = dbcon()
+
+        row = con.execute(
+            """
+            SELECT COUNT(*)
+            FROM (
+                SELECT ticker
+                FROM prices
+                GROUP BY ticker
+                HAVING COUNT(*) >= ?
+            )
+            """,
+            (int(min_rows),),
+        ).fetchone()
+
+        con.close()
+
+        return int(
+            row[0] if row else 0
+        )
+
+    except Exception:
+        return 0
+
+
+def maybe_train(universe, force=False):
     hours = float(
         CFG.get(
             "jst_retrain_hours",
@@ -459,16 +644,77 @@ def maybe_train(universe):
         )
     )
 
-    if not stale(
-        "jst_trained_at",
-        hours,
+    existing_model = load_model()
+
+    if (
+        not force
+        and existing_model is not None
+        and not stale(
+            "jst_trained_at",
+            hours,
+        )
     ):
+        log(
+            "MODEL",
+            "SKIP",
+            "active model still fresh",
+        )
+
+        return "SKIP"
+
+    if universe is None or universe.empty:
+        log(
+            "MODEL",
+            "SKIP",
+            "empty universe",
+        )
+
+        return "SKIP"
+
+    price_rows = count_price_rows()
+    ready_symbols = count_ready_symbols(60)
+
+    log(
+        "MODEL",
+        "DATA_CHECK",
+        (
+            f"price_rows={price_rows} "
+            f"ready_symbols={ready_symbols} "
+            f"universe={len(universe)}"
+        ),
+    )
+
+    # app.py training itself remains the final authority.
+    # These checks only prevent obviously premature attempts.
+    if price_rows < 500:
+        log(
+            "MODEL",
+            "SKIP",
+            f"not enough stored prices: {price_rows}",
+        )
+
+        return "SKIP"
+
+    if ready_symbols < 3:
+        log(
+            "MODEL",
+            "SKIP",
+            (
+                "not enough symbols with "
+                ">=60 price rows"
+            ),
+        )
+
         return "SKIP"
 
     log(
         "MODEL",
         "START",
-        "scheduled model training",
+        (
+            f"training symbols={len(universe)} "
+            f"price_rows={price_rows} "
+            f"ready_symbols={ready_symbols}"
+        ),
     )
 
     try:
@@ -476,34 +722,67 @@ def maybe_train(universe):
             app.train_jst(universe)
         )
 
-        if model is not None:
+        if model is None:
             log(
                 "MODEL",
-                "DONE",
-                f"rows={rows} accuracy={accuracy}",
+                "SKIP",
+                (
+                    "train_jst returned no model; "
+                    f"training_rows={rows}"
+                ),
             )
 
-            return "DONE"
+            return "SKIP"
+
+        now = datetime.now(
+            timezone.utc
+        ).isoformat()
+
+        # Keep worker-side state as additional diagnostics.
+        # app.train_jst() remains responsible for its model files.
+        app.state_set(
+            "jst_trained_at",
+            now,
+        )
+
+        app.state_set(
+            "jst_training_rows",
+            rows,
+        )
+
+        if accuracy is not None:
+            app.state_set(
+                "jst_accuracy",
+                accuracy,
+            )
 
         log(
             "MODEL",
-            "SKIP",
-            "insufficient training data",
+            "DONE",
+            (
+                f"rows={rows} "
+                f"accuracy={accuracy}"
+            ),
         )
 
-        return "SKIP"
+        return "DONE"
 
-    except Exception as exc:
+    except Exception:
+        detail = traceback.format_exc()
+
         log(
             "MODEL",
             "ERROR",
-            str(exc),
+            detail[-1800:],
         )
 
         return "ERROR"
 
 
-def maybe_walk_forward(universe):
+def maybe_walk_forward(
+    universe,
+    force=False,
+):
     days = float(
         CFG.get(
             "walk_forward_days",
@@ -511,10 +790,24 @@ def maybe_walk_forward(universe):
         )
     )
 
-    if not stale(
-        "walk_forward_at",
-        days * 24,
+    if (
+        not force
+        and not stale(
+            "walk_forward_at",
+            days * 24,
+        )
     ):
+        return "SKIP"
+
+    model = load_model()
+
+    if model is None:
+        log(
+            "WALK_FORWARD",
+            "SKIP",
+            "no active model yet",
+        )
+
         return "SKIP"
 
     log(
@@ -536,19 +829,39 @@ def maybe_walk_forward(universe):
             )
         )
 
+        now = datetime.now(
+            timezone.utc
+        ).isoformat()
+
+        app.state_set(
+            "walk_forward_at",
+            now,
+        )
+
+        if mean is not None:
+            app.state_set(
+                "walk_forward_accuracy",
+                mean,
+            )
+
         log(
             "WALK_FORWARD",
             "DONE",
-            f"folds={len(out)} mean={mean}",
+            (
+                f"folds={len(out)} "
+                f"mean={mean}"
+            ),
         )
 
         return "DONE"
 
-    except Exception as exc:
+    except Exception:
+        detail = traceback.format_exc()
+
         log(
             "WALK_FORWARD",
             "ERROR",
-            str(exc),
+            detail[-1800:],
         )
 
         return "ERROR"
@@ -579,9 +892,9 @@ def analyze_and_publish(
         )
 
     except TypeError:
-        # Compatibility fallback in case model is optional
-        # in the current app.py implementation.
-        res = app.analyze_all(universe)
+        res = app.analyze_all(
+            universe
+        )
 
     if res is None or res.empty:
 
@@ -600,7 +913,6 @@ def analyze_and_publish(
 
     write_alerts(res)
 
-    # V1.8.23+ Dynamic Opportunity engine.
     try:
         dynamic = dynamic_engine.update(
             res,
@@ -620,7 +932,6 @@ def analyze_and_publish(
         )
 
     except Exception as exc:
-        # Dynamic failure must not destroy the main snapshot.
         log(
             "DYNAMIC",
             "ERROR",
@@ -672,10 +983,10 @@ def cycle():
         ),
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # PHASE 1
     # FAST BOOTSTRAP
-    # --------------------------------------------------------
+    # ========================================================
 
     bootstrap_n = min(
         int(
@@ -713,7 +1024,7 @@ def cycle():
         ),
     )
 
-    # First snapshot does NOT wait for training.
+    # Produce READY quickly, even before model training.
     bootstrap_res = analyze_and_publish(
         bootstrap,
         "technical-bootstrap",
@@ -727,12 +1038,17 @@ def cycle():
             f"count={len(bootstrap_res)}",
         )
 
-    # --------------------------------------------------------
+    # ========================================================
     # PHASE 2
-    # MODEL REFINE
-    # --------------------------------------------------------
+    # MARKET DATA + EARLY MODEL ATTEMPT
+    # ========================================================
 
-    maybe_train(bootstrap)
+    refresh_market_data()
+
+    maybe_train(
+        bootstrap,
+        force=False,
+    )
 
     model = load_model()
 
@@ -750,10 +1066,10 @@ def cycle():
                 f"count={len(refined)}",
             )
 
-    # --------------------------------------------------------
+    # ========================================================
     # PHASE 3
     # FULL UNIVERSE COLLECTION
-    # --------------------------------------------------------
+    # ========================================================
 
     log(
         "FULL_COLLECT",
@@ -775,20 +1091,42 @@ def cycle():
         ),
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # PHASE 4
-    # MODEL MAINTENANCE
-    # --------------------------------------------------------
+    # FINAL MODEL TRAINING
+    # ========================================================
 
-    maybe_train(universe)
-    maybe_walk_forward(universe)
+    refresh_market_data()
+
+    # Force another attempt because the full collection may
+    # have supplied the data that bootstrap did not have.
+    maybe_train(
+        universe,
+        force=True,
+    )
 
     model = load_model()
 
-    # --------------------------------------------------------
+    # Walk-forward only makes sense after a model exists.
+    if model is not None:
+        maybe_walk_forward(
+            universe,
+            force=False,
+        )
+    else:
+        log(
+            "MODEL",
+            "BACKGROUND",
+            (
+                "No deployable model after full collection. "
+                "Technical snapshot remains available."
+            ),
+        )
+
+    # ========================================================
     # PHASE 5
     # FULL V1.8 SNAPSHOT
-    # --------------------------------------------------------
+    # ========================================================
 
     result = analyze_and_publish(
         universe,
@@ -813,10 +1151,22 @@ def cycle():
         ),
     )
 
+    app.state_set(
+        "engine_model_status",
+        (
+            "ACTIVE"
+            if model is not None
+            else "BACKGROUND"
+        ),
+    )
+
     log(
         "ENGINE",
         "DONE",
-        f"results={len(result)}",
+        (
+            f"results={len(result)} "
+            f"model={'ACTIVE' if model is not None else 'BACKGROUND'}"
+        ),
     )
 
     return result
