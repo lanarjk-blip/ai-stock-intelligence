@@ -1235,40 +1235,31 @@ def _open_ticker_mobile(ticker):
 
 
 def render_clickable_dataframe(df, cols, round_digits=None):
-    """Render a table plus real Streamlit ticker buttons that work in Android WebView.
-
-    LinkColumn remains useful on desktop, but Android WebView can treat a dataframe
-    cell as a selection target instead of a link. The button strip is therefore the
-    authoritative touch target on mobile.
-    """
+    """Mobile-first table: every ticker is a real HTML touch link."""
+    import html
+    from urllib.parse import quote
     d=df[cols].copy()
     if round_digits is not None:
         try: d=d.round(round_digits)
         except Exception: pass
-    cfg={}
-    tickers=[]
-    if 'ticker' in d.columns:
-        tickers=[str(t).upper().replace('.JK','').strip() for t in df.loc[d.index,'ticker'].tolist()]
-        d['ticker']=[stock_deep_link(t) for t in tickers]
-        cfg['ticker']=st.column_config.LinkColumn('Ticker',display_text=r'\?ticker=([^&]+)')
-
-        # Mobile-first touch targets. Limit to the rows currently visible in the
-        # shortlist so this does not turn a 957-stock table into 957 buttons.
-        unique=[]
-        for t in tickers:
-            if t and t not in unique: unique.append(t)
-        if unique:
-            st.caption('📱 Tap ticker untuk buka Analisis Saham')
-            for start in range(0,min(len(unique),10),5):
-                batch=unique[start:start+5]
-                cc=st.columns(len(batch))
-                caller_line=inspect.currentframe().f_back.f_lineno
-                signature=hashlib.md5((str(caller_line)+'|'+('|'.join(map(str,cols)))+'|'+','.join(unique)).encode()).hexdigest()[:8]
-                for i,t in enumerate(batch):
-                    if cc[i].button(t,key=f'tap_{signature}_{start+i}_{t}',use_container_width=True):
-                        _open_ticker_mobile(t)
-                        st.rerun()
-    st.dataframe(d,width='stretch',hide_index=True,column_config=cfg)
+    def fmt(v):
+        if pd.isna(v): return '—'
+        if isinstance(v,(float,np.floating)):
+            return f'{float(v):,.{int(round_digits or 2)}f}'.rstrip('0').rstrip('.')
+        return str(v)
+    head=''.join(f'<th>{html.escape(str(c))}</th>' for c in d.columns)
+    rows=[]
+    for _,r in d.iterrows():
+        cells=[]
+        for c in d.columns:
+            if str(c).lower()=='ticker':
+                t=str(r[c]).upper().replace('.JK','').strip()
+                cell=f'<a class="ticker-link" href="?ticker={quote(t)}" target="_self">{html.escape(t)}</a>'
+            else: cell=html.escape(fmt(r[c]))
+            cells.append(f'<td>{cell}</td>')
+        rows.append('<tr>'+''.join(cells)+'</tr>')
+    css='<style>.ticker-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid rgba(128,128,128,.25);border-radius:14px;margin:.35rem 0 .8rem}.ticker-table{border-collapse:collapse;width:max-content;min-width:100%;font-size:.92rem}.ticker-table th{background:#242730;color:#d7d9df;text-align:left;padding:10px 12px;white-space:nowrap;border-bottom:1px solid rgba(128,128,128,.25)}.ticker-table td{padding:10px 12px;white-space:nowrap;border-bottom:1px solid rgba(128,128,128,.18)}.ticker-link{color:#42a5f5!important;text-decoration:none!important;font-weight:750;display:inline-block;min-width:48px;min-height:30px;line-height:30px}@media(max-width:700px){.ticker-table{font-size:.88rem}.ticker-table th,.ticker-table td{padding:9px 10px}}</style>'
+    st.markdown(css+f'<div class="ticker-table-wrap"><table class="ticker-table"><thead><tr>{head}</tr></thead><tbody>{"".join(rows)}</tbody></table></div>',unsafe_allow_html=True)
 
 def intraday_checkpoint_status():
     """Return current IDX regular-session checkpoint in WIB."""
@@ -1492,96 +1483,95 @@ def stock_search_panel(universe, res, forced_ticker=None):
     dc4.metric('News / Sentiment', 'NOT CONNECTED')
     st.caption('Fundamental dan News/Sentiment sengaja ditandai belum terhubung. Sistem tidak mengarang angka atau berita ketika sumber datanya belum tersedia.')
 
-    c1,c2=st.columns([1.45,1])
-    with c1:
-        st.markdown('### 📈 Live Market Chart')
-        session_name,next_checkpoint,session_note=intraday_checkpoint_status()
-        now_wib=datetime.now(ZoneInfo('Asia/Jakarta'))
-        market_open=session_name in ['SESI I','SESI II','PRE-CLOSING','POST-TRADING']
-        market_icon='🟢' if market_open else ('🟡' if session_name in ['PRE-MARKET','BREAK'] else '⚫')
-        st.markdown(f'**{market_icon} {session_name}** • {now_wib.strftime("%H:%M:%S WIB")} • {session_note}')
-        st.caption('1D/5D memakai data intraday 30 menit sehingga sumbu bawah menunjukkan jam perdagangan. Periode lebih panjang memakai data harian.')
-        period=st.radio('Periode',['1D','5D','1M','3M','1Y'],index=0,horizontal=True,key=f'chart_period_{selected_ticker}',label_visibility='collapsed')
-        chart_mode=st.radio('Mode',['Line','Candlestick'],index=0,horizontal=True,key=f'chart_mode_{selected_ticker}',label_visibility='collapsed')
+    st.markdown('### 📈 Market Chart')
+    session_name,next_checkpoint,session_note=intraday_checkpoint_status()
+    now_wib=datetime.now(ZoneInfo('Asia/Jakarta'))
+    market_open=session_name in ['SESI I','SESI II','PRE-CLOSING','POST-TRADING']
+    market_icon='🟢' if market_open else ('🟡' if session_name in ['PRE-MARKET','BREAK'] else '⚫')
+    st.caption(f'{market_icon} {session_name} • {now_wib.strftime("%H:%M WIB")} • {session_note}')
+    period=st.radio('Periode',['1D','1W','1M','3M','YTD','1Y','3Y','5Y'],index=0,horizontal=True,key=f'chart_period_{selected_ticker}',label_visibility='collapsed')
+    chart_mode=st.radio('Tampilan',['Line','Candlestick'],index=0,horizontal=True,key=f'chart_mode_{selected_ticker}',label_visibility='collapsed')
 
-        market=pd.DataFrame()
-        is_intraday=period in ['1D','5D']
-        if is_intraday:
-            market=_intraday_load(selected_ticker)
-            # Refresh on demand so opening the ticker during market hours can show
-            # the newest provider candle without retraining or rescanning the universe.
-            try:
-                fresh=fetch_chart(selected_ticker,7 if period=='5D' else 2,CFGD.get('intraday_interval','30m'))
-                if not fresh.empty:
-                    save_intraday(fresh,selected_ticker)
-                    market=_intraday_load(selected_ticker)
-            except Exception:
-                pass
-            if not market.empty:
-                market=market.copy()
-                market['wib']=market['ts'].dt.tz_convert('Asia/Jakarta')
-                market['trade_date']=market['wib'].dt.date
-                dates=sorted(market['trade_date'].dropna().unique())
-                keep=dates[-(5 if period=='5D' else 1):]
-                market=market[market['trade_date'].isin(keep)].copy()
-                market['x']=market['wib'].dt.tz_localize(None)
-        else:
-            days={'1M':22,'3M':66,'1Y':252}[period]
-            market=z[['date','open','high','low','close','volume']].copy().tail(days)
-            market['x']=pd.to_datetime(market['date'],errors='coerce')
-
-        market=market.dropna(subset=['x','close']) if not market.empty else market
+    market=pd.DataFrame(); is_intraday=(period=='1D')
+    if is_intraday:
+        market=_intraday_load(selected_ticker)
+        try:
+            fresh=fetch_chart(selected_ticker,2,CFGD.get('intraday_interval','30m'))
+            if not fresh.empty:
+                save_intraday(fresh,selected_ticker); market=_intraday_load(selected_ticker)
+        except Exception: pass
         if not market.empty:
-            first=float(market['close'].iloc[0]); last=float(market['close'].iloc[-1])
-            period_ret=(last/first-1)*100 if first else np.nan
-            hi=float(pd.to_numeric(market['high'],errors='coerce').max()) if 'high' in market else float(market['close'].max())
-            lo=float(pd.to_numeric(market['low'],errors='coerce').min()) if 'low' in market else float(market['close'].min())
-            g1,g2,g3,g4=st.columns(4)
-            g1.metric('Harga',f'Rp {last:,.0f}')
-            g2.metric(f'Return {period}',f'{period_ret:+.2f}%' if np.isfinite(period_ret) else '—')
-            g3.metric('High',f'Rp {hi:,.0f}')
-            g4.metric('Low',f'Rp {lo:,.0f}')
+            market=market.copy(); market['wib']=market['ts'].dt.tz_convert('Asia/Jakarta'); market['trade_date']=market['wib'].dt.date
+            dates=sorted(market['trade_date'].dropna().unique())
+            if dates: market=market[market['trade_date']==dates[-1]].copy()
+            market['x']=market['wib'].dt.tz_localize(None)
+    else:
+        day_map={'1W':7,'1M':31,'3M':93,'YTD':370,'1Y':370,'3Y':1100,'5Y':1830}
+        need_days=day_map[period]; long_prices=prices.copy()
+        if period in ['YTD','1Y','3Y','5Y']:
+            try:
+                extra=fetch_chart(selected_ticker,need_days,'1d')
+                if not extra.empty: long_prices=extra.copy()
+            except Exception: pass
+        base=long_prices.copy()
+        if 'date' not in base.columns and 'ts' in base.columns: base['date']=base['ts']
+        base['date']=pd.to_datetime(base['date'],errors='coerce')
+        if period=='YTD': base=base[base['date']>=pd.Timestamp(now_wib.year,1,1)]
+        else: base=base[base['date']>=pd.Timestamp.now()-pd.Timedelta(days=need_days)]
+        market=base[[c for c in ['date','open','high','low','close','volume'] if c in base.columns]].copy(); market['x']=market['date']
 
-            if chart_mode=='Candlestick' and all(c in market.columns for c in ['open','high','low','close']):
-                try:
-                    import altair as alt
-                    candles=market[['x','open','high','low','close']].dropna().copy()
-                    candles['direction']=np.where(candles['close']>=candles['open'],'UP','DOWN')
-                    rules=alt.Chart(candles).mark_rule().encode(x=alt.X('x:T',title='Jam (WIB)' if is_intraday else 'Tanggal'),y='low:Q',y2='high:Q',tooltip=['x:T','open:Q','high:Q','low:Q','close:Q'])
-                    bars=alt.Chart(candles).mark_bar(size=7).encode(x=alt.X('x:T',title='Jam (WIB)' if is_intraday else 'Tanggal'),y='open:Q',y2='close:Q',color=alt.Color('direction:N',scale=alt.Scale(domain=['UP','DOWN'],range=['#16a34a','#dc2626']),legend=None),tooltip=['x:T','open:Q','high:Q','low:Q','close:Q'])
-                    st.altair_chart((rules+bars).properties(height=340),use_container_width=True)
-                except Exception:
-                    line=market[['x','close']].set_index('x')
-                    st.line_chart(line,width='stretch',height=340)
+    market=market.dropna(subset=['x','close']) if not market.empty else market
+    if not market.empty:
+        first=float(market['close'].iloc[0]); last=float(market['close'].iloc[-1]); delta=last-first
+        period_ret=(last/first-1)*100 if first else np.nan
+        hi=float(pd.to_numeric(market['high'] if 'high' in market else market['close'],errors='coerce').max())
+        lo=float(pd.to_numeric(market['low'] if 'low' in market else market['close'],errors='coerce').min())
+        chart_color='#10b981' if delta>=0 else '#ef4444'; arrow='↗' if delta>=0 else '↘'
+        label_period='Hari Ini' if period=='1D' else {'1W':'1 Minggu Terakhir','1M':'1 Bulan Terakhir','3M':'3 Bulan Terakhir','YTD':'YTD','1Y':'1 Tahun Terakhir','3Y':'3 Tahun Terakhir','5Y':'5 Tahun Terakhir'}[period]
+        st.markdown(f'<div style="margin:.15rem 0 .35rem"><div style="font-size:2.35rem;font-weight:800;line-height:1.05">Rp {last:,.0f}</div><div style="font-size:1.05rem;color:{chart_color};margin-top:.35rem">{arrow} {delta:+,.0f} ({period_ret:+.2f}%) <span style="color:#8b8d96">{label_period}</span></div></div>',unsafe_allow_html=True)
+        try:
+            import altair as alt
+            plot=market[['x','close']+[c for c in ['open','high','low','volume'] if c in market.columns]].dropna(subset=['x','close']).copy()
+            xaxis=alt.Axis(format='%H:%M' if is_intraday else '%d %b',labelAngle=0,labelOverlap=True,title=None)
+            if chart_mode=='Candlestick' and all(c in plot.columns for c in ['open','high','low','close']):
+                plot['direction']=np.where(plot['close']>=plot['open'],'UP','DOWN')
+                clr=alt.Color('direction:N',scale=alt.Scale(domain=['UP','DOWN'],range=['#10b981','#ef4444']),legend=None)
+                rules=alt.Chart(plot).mark_rule().encode(x=alt.X('x:T',axis=xaxis),y=alt.Y('low:Q',title=None,scale=alt.Scale(zero=False)),y2='high:Q',color=clr,tooltip=[alt.Tooltip('x:T',title='Waktu'),alt.Tooltip('open:Q',title='Open',format=',.0f'),alt.Tooltip('high:Q',title='High',format=',.0f'),alt.Tooltip('low:Q',title='Low',format=',.0f'),alt.Tooltip('close:Q',title='Close',format=',.0f')])
+                bars=alt.Chart(plot).mark_bar(size=8).encode(x=alt.X('x:T',axis=xaxis),y=alt.Y('open:Q',title=None,scale=alt.Scale(zero=False)),y2='close:Q',color=clr,tooltip=[alt.Tooltip('x:T',title='Waktu'),alt.Tooltip('close:Q',title='Harga',format=',.0f')])
+                price_chart=(rules+bars).properties(height=360)
             else:
-                line=market[['x','close']].set_index('x')
-                st.line_chart(line,width='stretch',height=340)
+                nearest=alt.selection_point(nearest=True,on='pointerover',fields=['x'],empty=False)
+                base=alt.Chart(plot).encode(x=alt.X('x:T',axis=xaxis),y=alt.Y('close:Q',title=None,scale=alt.Scale(zero=False)))
+                line=base.mark_line(strokeWidth=3,color=chart_color)
+                points=base.mark_point(size=75,color=chart_color).encode(opacity=alt.condition(nearest,alt.value(1),alt.value(0))).add_params(nearest)
+                rule=alt.Chart(plot).mark_rule(color='#777',strokeDash=[3,3]).encode(x='x:T').transform_filter(nearest)
+                ref=alt.Chart(pd.DataFrame({'y':[first]})).mark_rule(color='#8b8d96',strokeDash=[6,5],opacity=.65).encode(y='y:Q')
+                price_chart=(ref+line+points+rule).properties(height=360)
+            st.altair_chart(price_chart,use_container_width=True)
+        except Exception:
+            st.line_chart(market[['x','close']].set_index('x'),width='stretch',height=360)
+        last_fmt='%H:%M WIB' if is_intraday else '%d %b %Y'
+        st.caption(f'Low Rp {lo:,.0f} • High Rp {hi:,.0f} • data terakhir {pd.Timestamp(market["x"].iloc[-1]).strftime(last_fmt)} • feed provider dapat terlambat dari broker realtime.')
+    else:
+        st.info('Data grafik belum tersedia untuk periode ini.')
 
-            if 'volume' in market.columns and pd.to_numeric(market['volume'],errors='coerce').notna().any():
-                vol=market[['x','volume']].copy(); vol['volume']=pd.to_numeric(vol['volume'],errors='coerce'); vol=vol.dropna().set_index('x')
-                st.caption('Volume')
-                st.bar_chart(vol,width='stretch',height=120)
-            latest_x=market['x'].iloc[-1]
-            latest_label=pd.Timestamp(latest_x).strftime('%d %b %Y • %H:%M WIB') if is_intraday else pd.Timestamp(latest_x).strftime('%d %b %Y')
-            st.caption(f'Candle/data terakhir: {latest_label} • interval {CFGD.get("intraday_interval","30m") if is_intraday else "1d"} • data provider dapat terlambat dibanding feed broker realtime.')
-        else:
-            st.info('Data grafik belum tersedia untuk periode ini.')
-        t1,t2,t3,t4=st.columns(4)
+    with st.expander('📊 Technical Analysis'):
+        t1,t2,t3,t4,t5=st.columns(5)
         t1.metric('Trend','BULLISH' if pd.notna(r.ma20) and pd.notna(r.ma50) and r.ma20>r.ma50 else 'BEARISH')
-        t2.metric('MA50',f'{float(r.ma50):,.0f}' if pd.notna(r.ma50) else '—')
-        t3.metric('MACD',f'{float(r.macd):.4f}' if pd.notna(r.macd) else '—')
-        t4.metric('ATR',f'{float(r.atr14):,.2f}' if pd.notna(r.atr14) else '—')
-    with c2:
-        st.markdown('### 🧠 AI Intelligence')
-        if not row.empty:
-            rr=row.iloc[0]
-            ai=float(rr.ai_score); decision=str(rr.decision); pu=float(rr.jst_p_up)*100 if pd.notna(rr.jst_p_up) else np.nan; pdn=float(rr.jst_p_down)*100 if pd.notna(rr.jst_p_down) else np.nan; conf=float(rr.jst_confidence)*100 if pd.notna(rr.jst_confidence) else np.nan
-            a,b=st.columns(2); a.metric('AI Score',f'{ai:.1f}/100'); b.metric('Decision',decision)
-            a,b=st.columns(2); a.metric('Probability UP',f'{pu:.1f}%' if np.isfinite(pu) else '—'); b.metric('Probability DOWN',f'{pdn:.1f}%' if np.isfinite(pdn) else '—')
-            a,b=st.columns(2); a.metric('Confidence',f'{conf:.1f}%' if np.isfinite(conf) else '—'); b.metric('Relative rank',f"{int(rr['rank'])} / {len(universe)}")
-            st.info(f"Alasan keputusan: {rr.decision_reason}")
-        else:
-            st.warning('Saham dikenali, tetapi model on-demand belum dapat dihitung karena data historis/fitur belum cukup.')
+        t2.metric('MA20',f'{float(r.ma20):,.0f}' if pd.notna(r.ma20) else '—'); t3.metric('MA50',f'{float(r.ma50):,.0f}' if pd.notna(r.ma50) else '—')
+        t4.metric('RSI14',f'{float(r.rsi14):.1f}' if pd.notna(r.rsi14) else '—'); t5.metric('MACD',f'{float(r.macd):.4f}' if pd.notna(r.macd) else '—')
+        if 'volume' in market.columns and pd.to_numeric(market['volume'],errors='coerce').notna().any():
+            vol=market[['x','volume']].copy(); vol['volume']=pd.to_numeric(vol['volume'],errors='coerce'); vol=vol.dropna().set_index('x'); st.caption('Volume'); st.bar_chart(vol,width='stretch',height=120)
+
+    st.markdown('### 🧠 AI Intelligence')
+    if not row.empty:
+        rr=row.iloc[0]
+        ai=float(rr.ai_score); decision=str(rr.decision); pu=float(rr.jst_p_up)*100 if pd.notna(rr.jst_p_up) else np.nan; pdn=float(rr.jst_p_down)*100 if pd.notna(rr.jst_p_down) else np.nan; conf=float(rr.jst_confidence)*100 if pd.notna(rr.jst_confidence) else np.nan
+        a,b,c,d=st.columns(4); a.metric('AI Score',f'{ai:.1f}/100'); b.metric('Decision',decision); c.metric('Probability UP',f'{pu:.1f}%' if np.isfinite(pu) else '—'); d.metric('Confidence',f'{conf:.1f}%' if np.isfinite(conf) else '—')
+        st.info(f"Alasan keputusan: {rr.decision_reason}")
+    else:
+        st.warning('Saham dikenali, tetapi model on-demand belum dapat dihitung karena data historis/fitur belum cukup.')
+
 
     if not row.empty:
         rr=row.iloc[0]
@@ -1829,15 +1819,6 @@ def render_app():
 
         dyn = read_dynamic_opportunities(int(CFGD.get('dynamic_opportunity_count',5)))
         st.subheader('🚀 Top Opportunity Saat Ini')
-        if not dyn.empty:
-            st.caption('Sentuh ticker untuk membuka Deep Analysis. Tombol ini dibuat khusus agar navigasi tetap nyaman di HP/APK.')
-            touch_cols=st.columns(min(5,len(dyn.head(5))))
-            for idx,(_,tr) in enumerate(dyn.head(5).iterrows()):
-                ticker_touch=str(tr.get('ticker','')).upper()
-                label=f"#{int(tr.get('rank',idx+1))} {ticker_touch}"
-                if touch_cols[idx].button(label,key=f'touch_top_{ticker_touch}',use_container_width=True):
-                    st.query_params['ticker']=ticker_touch
-                    st.rerun()
         if dyn.empty:
             st.info('Belum ada kandidat yang memenuhi filter relatif + AI + risiko.')
         else:
