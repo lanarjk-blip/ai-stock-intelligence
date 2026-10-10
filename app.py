@@ -103,8 +103,12 @@ def ihsg_snapshot():
     save_ihsg(d)
     r=d.iloc[-1]; close=float(r.close); ch=float(r.change_pct) if pd.notna(r.change_pct) else np.nan
     ma20=float(d.close.tail(20).mean()) if len(d)>=20 else np.nan
-    trend='BULLISH' if pd.notna(ma20) and close>ma20 else ('BEARISH' if pd.notna(ma20) else 'N/A')
-    return {'close':close,'change_pct':ch,'ma20':ma20,'trend':trend,'date':str(r.date)}
+    if pd.notna(ma20) and ma20 != 0:
+        ma_gap=(close/ma20-1)*100
+        trend='BULLISH' if ma_gap>0.5 else ('BEARISH' if ma_gap<-0.5 else 'SIDEWAYS')
+    else:
+        ma_gap=np.nan; trend='N/A'
+    return {'close':close,'change_pct':ch,'ma20':ma20,'ma_gap_pct':ma_gap,'trend':trend,'date':str(r.date)}
 
 def _fetch_chart_symbol(symbol, period_days, interval):
     end=int(time.time()); start=end-int(period_days*86400)
@@ -1424,8 +1428,6 @@ def stock_search_panel(universe, res, forced_ticker=None):
             showa=alerts.rename(columns={'generated_at':'Waktu','ticker':'Ticker','company':'Company','severity':'Priority','title':'Alert','detail':'Perubahan','old_value':'Sebelum','new_value':'Sesudah'})
             st.dataframe(showa[['Waktu','Ticker','Company','Priority','Alert','Perubahan','Sebelum','Sesudah']],width='stretch',hide_index=True)
 
-    render_alert_simulator()
-
     st.markdown('### 🛡️ Hold / Overnight Detail')
     if hr is None:
         st.info('Hold Intelligence belum memiliki record untuk ticker ini pada snapshot terakhir.')
@@ -1685,6 +1687,25 @@ def render_app():
         c4.metric('Active model', active_name if model else 'BACKGROUND')
         c5.metric('WF accuracy', f'{float(wf)*100:.1f}%' if wf else '—')
 
+        st.subheader('🇮🇩 IHSG • Market Context')
+        if ihsg:
+            trend=str(ihsg.get('trend','N/A'))
+            gap=ihsg.get('ma_gap_pct',np.nan)
+            market_note = ('Pasar mendukung posisi agresif secara relatif, tetapi sinyal saham tetap wajib lolos filter AI + risiko.' if trend=='BULLISH' else
+                           'Pasar netral. Prioritaskan saham dengan relative strength dan entry window yang lebih kuat.' if trend=='SIDEWAYS' else
+                           'Pasar sedang defensif. Kandidat Top 5 tetap ditampilkan, tetapi konteks risiko IHSG perlu diberi bobot lebih besar.' if trend=='BEARISH' else
+                           'Data IHSG belum cukup untuk menentukan regime.')
+            i1,i2,i3,i4,i5=st.columns(5)
+            i1.metric('IHSG',f"{ihsg['close']:,.2f}")
+            i2.metric('Perubahan 1D',f"{ihsg['change_pct']:+.2f}%" if np.isfinite(ihsg['change_pct']) else '—')
+            i3.metric('MA20',f"{ihsg['ma20']:,.2f}" if np.isfinite(ihsg['ma20']) else '—')
+            i4.metric('Jarak vs MA20',f"{gap:+.2f}%" if np.isfinite(gap) else '—')
+            i5.metric('Market Regime',trend)
+            st.markdown('<div class="asi-card"><div class="asi-row">'+_pill(trend,_kind(trend))+'</div><div style="margin-top:8px">'+market_note+'</div></div>',unsafe_allow_html=True)
+            st.caption('IHSG juga sudah menjadi bagian dari konteks model/opportunity melalui fitur market regime, relative strength, market score, dan alignment yang tersedia pada engine.')
+        else:
+            st.warning('Data IHSG belum tersedia pada snapshot ini. Ranking saham tetap berjalan, tetapi market context belum dapat ditampilkan.')
+
         dyn = read_dynamic_opportunities(int(CFGD.get('dynamic_opportunity_count',5)))
         st.subheader('🚀 Top Opportunity Saat Ini')
         if dyn.empty:
@@ -1700,15 +1721,6 @@ def render_app():
             render_clickable_dataframe(dshow.head(5), cols)
             top=dyn.iloc[0]
             st.markdown('<div class="asi-card"><b>#1 '+str(top.ticker)+'</b><br><div class="asi-row">'+_pill(getattr(top,'state','—'),_kind(getattr(top,'state','—')))+_pill('Entry '+str(getattr(top,'entry_status','—')),_kind(getattr(top,'entry_status','—')))+_pill('Risk '+str(getattr(top,'risk','—')),_kind(getattr(top,'risk','—')))+'</div></div>',unsafe_allow_html=True)
-
-        if ihsg:
-            st.subheader('Market Context • IHSG')
-            m1,m2,m3,m4=st.columns(4)
-            m1.metric('IHSG',f"{ihsg['close']:,.2f}")
-            m2.metric('IHSG 1D',f"{ihsg['change_pct']:+.2f}%" if np.isfinite(ihsg['change_pct']) else '—')
-            m3.metric('IHSG MA20',f"{ihsg['ma20']:,.2f}" if np.isfinite(ihsg['ma20']) else '—')
-            m4.metric('Market Trend',ihsg['trend'])
-            st.markdown(_pill(ihsg['trend'],_kind(ihsg['trend'])),unsafe_allow_html=True)
 
         st.subheader('🧭 Next-Session Intelligence')
         if outlook:
