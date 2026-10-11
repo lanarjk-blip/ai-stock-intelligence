@@ -12,6 +12,7 @@ os.environ["AI_ENGINE_WORKER"] = "1"
 import pandas as pd
 import app
 import dynamic_engine
+import recommendation_history
 
 
 BASE = app.BASE
@@ -59,6 +60,11 @@ def ensure_tables():
         dynamic_engine.ensure_tables()
     except Exception as exc:
         log("DYNAMIC", "TABLE_ERROR", str(exc))
+
+    try:
+        recommendation_history.ensure_tables(app.DB)
+    except Exception as exc:
+        log("HISTORY", "TABLE_ERROR", str(exc))
 
 
 def log(phase, status, detail=""):
@@ -913,6 +919,7 @@ def analyze_and_publish(
 
     write_alerts(res)
 
+    dynamic = pd.DataFrame()
     try:
         dynamic = dynamic_engine.update(
             res,
@@ -937,6 +944,31 @@ def analyze_and_publish(
             "ERROR",
             str(exc),
         )
+
+    # V1.8.40 foundation: immutable recommendation history + paper portfolio.
+    # Only the final full-universe snapshot is locked for evaluation. Bootstrap
+    # snapshots remain operational and are deliberately excluded from history.
+    if str(source).lower() == "full-universe":
+        try:
+            rec = recommendation_history.record_snapshot(
+                app.DB, dynamic, CFG, source_phase=source
+            )
+            shadow = recommendation_history.update_shadow_portfolio(
+                app.DB, CFG
+            )
+            app.state_set("recommendation_history_at", datetime.now(timezone.utc).isoformat())
+            app.state_set("recommendation_history_last_run_id", rec.get("run_id") or "")
+            app.state_set("recommendation_history_last_count", rec.get("recommendations", 0))
+            app.state_set("shadow_portfolio_at", datetime.now(timezone.utc).isoformat())
+            log(
+                "HISTORY",
+                "UPDATED",
+                f"recommendations={rec.get('recommendations',0)} "
+                f"shadow_seeded={rec.get('shadow_seeded',0)} "
+                f"shadow_changed={shadow.get('changed',0)}",
+            )
+        except Exception:
+            log("HISTORY", "ERROR", traceback.format_exc()[-1800:])
 
     top = res.iloc[0]
 
