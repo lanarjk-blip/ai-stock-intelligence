@@ -1252,7 +1252,7 @@ def render_clickable_dataframe(df, cols, round_digits=None):
     for _,r in d.iterrows():
         cells=[]
         for c in d.columns:
-            if str(c).lower()=='ticker':
+            if str(c).lower() in ('ticker','kode saham','symbol'):
                 t=str(r[c]).upper().replace('.JK','').strip()
                 cell=f'<a class="ticker-link" href="?ticker={quote(t)}" target="_self">{html.escape(t)}</a>'
             else: cell=html.escape(fmt(r[c]))
@@ -1260,6 +1260,20 @@ def render_clickable_dataframe(df, cols, round_digits=None):
         rows.append('<tr>'+''.join(cells)+'</tr>')
     css='<style>.ticker-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid rgba(128,128,128,.25);border-radius:14px;margin:.35rem 0 .8rem}.ticker-table{border-collapse:collapse;width:max-content;min-width:100%;font-size:.92rem}.ticker-table th{background:#242730;color:#d7d9df;text-align:left;padding:10px 12px;white-space:nowrap;border-bottom:1px solid rgba(128,128,128,.25)}.ticker-table td{padding:10px 12px;white-space:nowrap;border-bottom:1px solid rgba(128,128,128,.18)}.ticker-link{color:#42a5f5!important;text-decoration:none!important;font-weight:750;display:inline-block;min-width:48px;min-height:30px;line-height:30px}@media(max-width:700px){.ticker-table{font-size:.88rem}.ticker-table th,.ticker-table td{padding:9px 10px}}</style>'
     st.markdown(css+f'<div class="ticker-table-wrap"><table class="ticker-table"><thead><tr>{head}</tr></thead><tbody>{"".join(rows)}</tbody></table></div>',unsafe_allow_html=True)
+
+def render_smart_dataframe(df, width='stretch', hide_index=True, round_digits=None):
+    """Use touch-safe ticker links whenever a table contains a ticker/symbol column."""
+    if df is None:
+        return
+    d=df.copy()
+    ticker_cols=[c for c in d.columns if str(c).lower() in ('ticker','kode saham','symbol')]
+    if ticker_cols:
+        render_clickable_dataframe(d,d.columns.tolist(),round_digits)
+    else:
+        if round_digits is not None:
+            try: d=d.round(round_digits)
+            except Exception: pass
+        st.dataframe(d,width=width,hide_index=hide_index)
 
 def intraday_checkpoint_status():
     """Return current IDX regular-session checkpoint in WIB."""
@@ -1459,7 +1473,7 @@ def stock_search_panel(universe, res, forced_ticker=None):
                 else: st.info(f'🔵 LOW • {msg}')
         with st.expander('Lihat alert terbaru seluruh universe',expanded=False):
             showa=alerts.rename(columns={'generated_at':'Waktu','ticker':'Ticker','company':'Company','severity':'Priority','title':'Alert','detail':'Perubahan','old_value':'Sebelum','new_value':'Sesudah'})
-            st.dataframe(showa[['Waktu','Ticker','Company','Priority','Alert','Perubahan','Sebelum','Sesudah']],width='stretch',hide_index=True)
+            render_smart_dataframe(showa[['Waktu','Ticker','Company','Priority','Alert','Perubahan','Sebelum','Sesudah']])
 
     st.markdown('### 🛡️ Hold / Overnight Detail')
     if hr is None:
@@ -1490,7 +1504,8 @@ def stock_search_panel(universe, res, forced_ticker=None):
     market_icon='🟢' if market_open else ('🟡' if session_name in ['PRE-MARKET','BREAK'] else '⚫')
     st.caption(f'{market_icon} {session_name} • {now_wib.strftime("%H:%M WIB")} • {session_note}')
     period=st.radio('Periode',['1D','1W','1M','3M','YTD','1Y','3Y','5Y'],index=0,horizontal=True,key=f'chart_period_{selected_ticker}',label_visibility='collapsed')
-    chart_mode=st.radio('Tampilan',['Line','Candlestick'],index=0,horizontal=True,key=f'chart_mode_{selected_ticker}',label_visibility='collapsed')
+    default_chart_mode=1 if period=='1W' else 0
+    chart_mode=st.radio('Tampilan',['Line','Candlestick'],index=default_chart_mode,horizontal=True,key=f'chart_mode_{selected_ticker}_{period}',label_visibility='collapsed')
 
     market=pd.DataFrame(); is_intraday=(period=='1D')
     if is_intraday:
@@ -1543,7 +1558,7 @@ def stock_search_panel(universe, res, forced_ticker=None):
                 nearest=alt.selection_point(nearest=True,on='pointerover',fields=['x'],empty=False)
                 base=alt.Chart(plot).encode(x=alt.X('x:T',axis=xaxis),y=alt.Y('close:Q',title=None,scale=alt.Scale(zero=False)))
                 line=base.mark_line(strokeWidth=3,color=chart_color)
-                points=base.mark_point(size=75,color=chart_color).encode(opacity=alt.condition(nearest,alt.value(1),alt.value(0))).add_params(nearest)
+                points=base.mark_point(size=90,color=chart_color).encode(opacity=alt.condition(nearest,alt.value(1),alt.value(0)),tooltip=[alt.Tooltip('x:T',title='Waktu',format='%H:%M' if is_intraday else '%d %b %Y'),alt.Tooltip('close:Q',title='Harga',format=',.0f')]).add_params(nearest)
                 rule=alt.Chart(plot).mark_rule(color='#777',strokeDash=[3,3]).encode(x='x:T').transform_filter(nearest)
                 ref=alt.Chart(pd.DataFrame({'y':[first]})).mark_rule(color='#8b8d96',strokeDash=[6,5],opacity=.65).encode(y='y:Q')
                 price_chart=(ref+line+points+rule).properties(height=360)
@@ -1654,7 +1669,7 @@ def stock_search_panel(universe, res, forced_ticker=None):
     st.caption('Fundamental, berita/sentimen, dan market-cap akan ditambahkan setelah sumber data fundamental/news resmi masuk. Modul ini sengaja tidak mengarang angka.')
 
 def render_alert_simulator():
-    """V1.8.33 simulator for alert rules + WhatsApp Cloud API delivery."""
+    """V1.8.34 simulator for alert rules + WhatsApp Cloud API delivery."""
     st.markdown('#### 🧪 Notification Simulator')
     st.caption('Menguji Smart Alert + Notification Queue memakai data sintetis. Tidak mengirim WhatsApp dan tidak mengubah snapshot real.')
 
@@ -1727,10 +1742,10 @@ def render_alert_simulator():
         except Exception:
             pass
 
-    st.caption('Aturan inti: Top-5 bersifat dinamis; saham di luar Top-5 tetap dapat memicu alert jika Opportunity Score menembus ambang kuat atau Entry Window menjadi ACTIVE dengan kondisi memadai. V1.8.33 menggabungkan beberapa event satu ticker menjadi satu pesan dan mempertahankan status delivery di outbox.')
+    st.caption('Aturan inti: Top-5 bersifat dinamis; saham di luar Top-5 tetap dapat memicu alert jika Opportunity Score menembus ambang kuat atau Entry Window menjadi ACTIVE dengan kondisi memadai. V1.8.34 menggabungkan beberapa event satu ticker menjadi satu pesan dan mempertahankan status delivery di outbox.')
 
 def render_app():
-    st.set_page_config(page_title='AI Stock Intelligence V1.8.33', page_icon='📈', layout='wide')
+    st.set_page_config(page_title='AI Stock Intelligence V1.8.34', page_icon='📈', layout='wide')
     st.markdown("""
     <style>
       .block-container{padding-top:1.15rem;padding-bottom:2rem;max-width:1500px}
@@ -1773,7 +1788,7 @@ def render_app():
         if any(k in x for k in ['WATCH','WAIT','NEAR','DEVELOP','SIDEWAYS','WARNING','MEDIUM','PREPAR']): return 'yellow'
         return 'gray'
 
-    st.title('📈 AI Stock Intelligence V1.8.33')
+    st.title('📈 AI Stock Intelligence V1.8.34')
     st.caption('Continuous Intelligence • Rank → Opportunity → Alert → Deep Analysis → Risk → Hold → Overnight')
     st.markdown('<div class="asi-row">'+_pill('READY' if ready else 'PREPARING', 'green' if ready else 'yellow')+_pill(f'Model {active_name}', 'green' if model else 'gray')+_pill(f'Snapshot {snap_at or "belum ada"}', 'green' if snap_at else 'gray')+'</div>', unsafe_allow_html=True)
 
@@ -1920,7 +1935,7 @@ def render_app():
         with st.expander('🧪 Data Quality Audit'):
             audit=data_quality_audit(universe,res); collected=int(state_get('last_collection_ok') or 0); collection_errors=int(state_get('last_collection_errors') or 0); coverage=float(state_get('last_collection_coverage_pct') or (100*collected/len(universe) if len(universe) else 0))
             a1,a2,a3,a4=st.columns(4); a1.metric('Collected',f'{collected}/{len(universe)}'); a2.metric('Errors',collection_errors); a3.metric('Analyzed',len(res)); a4.metric('Coverage',f'{coverage:.1f}%')
-            if not audit.empty: st.dataframe(audit.head(100),width='stretch',hide_index=True)
+            if not audit.empty: render_smart_dataframe(audit.head(100),round_digits=3)
             else: st.success('Semua saham dalam snapshot memiliki data yang cukup.')
 
         with st.expander('🛡️ Risk Engine Audit'):
@@ -1945,14 +1960,14 @@ def render_app():
             registry=read_universe_registry(250)
             if not registry.empty:
                 show_cols=[c for c in ['ticker','company','provider_symbol','status','confidence','source','last_checked','note'] if c in registry.columns]
-                st.dataframe(registry[show_cols],width='stretch',hide_index=True)
+                render_smart_dataframe(registry[show_cols],round_digits=3)
 
         with st.expander('🔔 Notification & WhatsApp Simulator'):
             render_alert_simulator()
 
         with st.expander('📊 Semua Ranking AI'):
             if res.empty: st.info('Belum ada ranking tersimpan.')
-            else: st.dataframe(res.round(3),width='stretch',hide_index=True)
+            else: render_smart_dataframe(res,round_digits=3)
 
 if __name__ == '__main__':
     render_app()
