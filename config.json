@@ -46,18 +46,14 @@
   "model_validation_hours": 0,
   "model_validation_folds": 4,
   "primary_target_horizon": 3,
-  "validation_target_horizons": [
-    1,
-    3,
-    5
-  ],
+  "validation_target_horizons": [1,3,5],
   "min_risk_reward_2": 1.5,
   "risk_atr_multiple": 1.5,
   "entry_zone_atr_low": 0.5,
   "entry_zone_atr_high": 0.1,
   "risk_engine_version": "1.8.10",
   "data_recovery_version": "1.8.11",
-  "engine_version": "1.8.33",
+  "engine_version": "1.8.40",
   "collector_resolver_enabled": true,
   "collector_cache_fallback_min_rows": 60,
   "provider_not_found_cooldown_hours": 6,
@@ -110,5 +106,14 @@
   "fcm_enabled": false,
   "fcm_project_id": "",
   "fcm_service_account_json": "",
-  "fcm_device_token": ""
+  "fcm_device_token": "",
+  "recommendation_history_version": "1.8.40",
+  "recommendation_history_enabled": true,
+  "recommendation_history_lock_phase": "full-universe",
+  "shadow_portfolio_version": "1.8.40",
+  "shadow_portfolio_enabled": true,
+  "shadow_entry_expiry_days": 2,
+  "shadow_max_holding_days": 5,
+  "shadow_activation_rule": "NEXT_SESSION",
+  "shadow_ambiguous_daily_bar_policy": "MARK_AMBIGUOUS_EXCLUDE_FROM_WINRATE"
 }
