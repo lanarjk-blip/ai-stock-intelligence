@@ -970,6 +970,13 @@ def analyze_and_publish(
         except Exception:
             log("HISTORY", "ERROR", traceback.format_exc()[-1800:])
 
+        # V1.8.41 Stage 2: Pre-Market is separate from live Dynamic Opportunity.
+        try:
+            pre = lock_premarket_picks(res, source_phase=source)
+            app.state_set("premarket_status", pre.get("status", ""))
+        except Exception:
+            log("PREMARKET", "ERROR", traceback.format_exc()[-1800:])
+
     top = res.iloc[0]
 
     log(
@@ -985,6 +992,141 @@ def analyze_and_publish(
     )
 
     return res
+
+
+
+# ============================================================
+# V1.8.41 STAGE 2 - PRE-MARKET TOP PICKS + NO TRADE
+# ============================================================
+
+def _wib_now():
+    return datetime.now(timezone.utc) + timedelta(hours=7)
+
+def _pm_num(value, default=None):
+    try:
+        if value is None or pd.isna(value):
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+def ensure_premarket_tables():
+    con = dbcon()
+    try:
+        con.execute("""CREATE TABLE IF NOT EXISTS premarket_picks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            market_date TEXT NOT NULL, generated_at TEXT NOT NULL,
+            rank INTEGER, ticker TEXT, company TEXT, decision TEXT,
+            confidence REAL, ai_score REAL, risk TEXT,
+            entry_low REAL, entry_high REAL, stop_loss REAL,
+            target_1 REAL, target_2 REAL, ihsg_regime TEXT,
+            reason TEXT, source_phase TEXT,
+            UNIQUE(market_date, rank))""")
+        con.execute("""CREATE TABLE IF NOT EXISTS premarket_runs (
+            market_date TEXT PRIMARY KEY, generated_at TEXT NOT NULL,
+            status TEXT NOT NULL, pick_count INTEGER NOT NULL, note TEXT)""")
+        con.commit()
+    finally:
+        con.close()
+
+def premarket_market_date():
+    d = _wib_now().date()
+    if d.weekday() == 5:
+        d += timedelta(days=2)
+    elif d.weekday() == 6:
+        d += timedelta(days=1)
+    return d.isoformat()
+
+def lock_premarket_picks(res, source_phase="full-universe"):
+    ensure_premarket_tables()
+    market_date = premarket_market_date()
+    generated_at = datetime.now(timezone.utc).isoformat()
+
+    con = dbcon()
+    try:
+        old = con.execute(
+            "SELECT status,pick_count FROM premarket_runs WHERE market_date=?",
+            (market_date,)).fetchone()
+        if old:
+            return {"status":old[0], "pick_count":int(old[1] or 0)}
+    finally:
+        con.close()
+
+    c = pd.DataFrame() if res is None else res.copy()
+    if not c.empty:
+        if "decision" in c.columns:
+            d = c["decision"].astype(str).str.upper()
+            c = c[~d.isin(["SELL","EXIT","AVOID"])].copy()
+            d = c["decision"].astype(str).str.upper()
+            buy = c[d.isin(["BUY","STRONG_BUY"])].copy()
+            if not buy.empty:
+                c = buy
+        if "ai_score" in c.columns:
+            s = pd.to_numeric(c["ai_score"], errors="coerce")
+            c = c[s >= float(CFG.get("premarket_min_ai_score",60.0))].copy()
+        if "jst_p_up" in c.columns:
+            p = pd.to_numeric(c["jst_p_up"], errors="coerce")
+            p = p.where(p <= 1.0, p/100.0)
+            c = c[p.isna() | (p >= float(CFG.get("premarket_min_p_up",0.55)))].copy()
+
+        cols=[]; asc=[]
+        for col,a in [("decision_priority",True),("decision_score",False),
+                      ("relative_rank_score",False),("ai_score",False)]:
+            if col in c.columns:
+                cols.append(col); asc.append(a)
+        if cols:
+            c = c.sort_values(cols, ascending=asc)
+        c = c.head(max(0,min(5,int(CFG.get("premarket_max_picks",5))))).reset_index(drop=True)
+
+    con = dbcon()
+    try:
+        if c.empty:
+            con.execute("""INSERT OR IGNORE INTO premarket_runs
+                (market_date,generated_at,status,pick_count,note)
+                VALUES(?,?,?,?,?)""",
+                (market_date,generated_at,"NO_TRADE",0,
+                 "No candidate passed pre-market quality gates."))
+            con.commit()
+            log("PREMARKET","NO_TRADE",f"market_date={market_date}")
+            return {"status":"NO_TRADE","pick_count":0}
+
+        rows=[]
+        for i,row in c.iterrows():
+            conf=_pm_num(row.get("confidence"))
+            if conf is None: conf=_pm_num(row.get("jst_p_up"))
+            if conf is not None and conf <= 1: conf*=100
+            close=_pm_num(row.get("close"))
+            lo=_pm_num(row.get("entry_low"))
+            hi=_pm_num(row.get("entry_high"))
+            if lo is None and close is not None: lo=close*0.985
+            if hi is None and close is not None: hi=close*1.015
+            reason=f"{str(row.get('decision','WATCH'))} • AI {_pm_num(row.get('ai_score'),0):.1f}"
+            rows.append((market_date,generated_at,i+1,str(row.get("ticker","")),
+                str(row.get("company","")),str(row.get("decision","WATCH")),
+                conf,_pm_num(row.get("ai_score")),str(row.get("risk","")),
+                lo,hi,_pm_num(row.get("stop_loss")),_pm_num(row.get("target_1")),
+                _pm_num(row.get("target_2")),str(row.get("market_regime","")),
+                reason,str(source_phase)))
+        con.executemany("""INSERT OR IGNORE INTO premarket_picks
+            (market_date,generated_at,rank,ticker,company,decision,confidence,
+             ai_score,risk,entry_low,entry_high,stop_loss,target_1,target_2,
+             ihsg_regime,reason,source_phase)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", rows)
+        con.execute("""INSERT OR IGNORE INTO premarket_runs
+            (market_date,generated_at,status,pick_count,note)
+            VALUES(?,?,?,?,?)""",
+            (market_date,generated_at,"LOCKED",len(rows),
+             "Immutable first selection for this market date."))
+        con.commit()
+    finally:
+        con.close()
+
+    app.state_set("premarket_locked_at",generated_at)
+    app.state_set("premarket_market_date",market_date)
+    app.state_set("premarket_pick_count",len(rows))
+    log("PREMARKET","LOCKED",
+        f"market_date={market_date} picks={len(rows)} tickers={','.join(r[3] for r in rows)}")
+    return {"status":"LOCKED","pick_count":len(rows)}
 
 
 # ============================================================
