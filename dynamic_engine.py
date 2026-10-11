@@ -44,6 +44,7 @@ def ensure_tables():
     for col,typ in [('market_regime','TEXT'),('market_score','REAL'),('ihsg_alignment','REAL'),('regime_adjustment','REAL')]:
         if col not in existing: con.execute(f'ALTER TABLE dynamic_opportunities ADD COLUMN {col} {typ}')
     con.commit(); con.close()
+    _ensure_opening_tables()
 
 
 def read_current():
@@ -127,6 +128,207 @@ def _dynamic_entry(row, ts):
     if hi2<lo2: hi2=lo2
     return float(lo2),float(hi2)
 
+
+
+# ============================================================
+# V1.8.42 STAGE 3 - OPENING CONFIRMATION
+# ============================================================
+
+def _ensure_opening_tables():
+    con=dbcon()
+    try:
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS opening_confirmation (
+                market_date TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                generated_at TEXT NOT NULL,
+                premarket_rank INTEGER,
+                company TEXT,
+                reference_price REAL,
+                open_price REAL,
+                current_price REAL,
+                entry_low REAL,
+                entry_high REAL,
+                gap_pct REAL,
+                status TEXT,
+                reason TEXT,
+                PRIMARY KEY(market_date,ticker)
+            )
+        """)
+        con.commit()
+    finally:
+        con.close()
+
+
+def _market_date_wib():
+    now = datetime.now(timezone.utc) + pd.Timedelta(hours=7)
+    return now.date().isoformat()
+
+
+def _latest_intraday_open(ticker):
+    """Return today's first intraday price when available."""
+    try:
+        con=dbcon()
+        d=pd.read_sql_query(
+            """SELECT ts,open,close
+               FROM intraday
+               WHERE ticker=?
+               ORDER BY ts""",
+            con, params=(str(ticker).upper(),)
+        )
+        con.close()
+        if d.empty:
+            return None,None
+        d['ts']=pd.to_datetime(d['ts'],utc=True,errors='coerce')
+        d=d.dropna(subset=['ts'])
+        if d.empty:
+            return None,None
+        d['wib']=d['ts'].dt.tz_convert('Asia/Jakarta')
+        today=(datetime.now(timezone.utc)+pd.Timedelta(hours=7)).date()
+        d=d[d['wib'].dt.date==today]
+        if d.empty:
+            return None,None
+        first=d.iloc[0]
+        last=d.iloc[-1]
+        op=float(first['open']) if pd.notna(first['open']) else float(first['close'])
+        cur=float(last['close']) if pd.notna(last['close']) else op
+        return op,cur
+    except Exception:
+        return None,None
+
+
+def _daily_open_fallback(ticker):
+    """Fallback to latest daily candle when intraday opening data is unavailable."""
+    try:
+        con=dbcon()
+        row=con.execute(
+            """SELECT open,close FROM prices
+               WHERE ticker=?
+               ORDER BY date DESC LIMIT 1""",
+            (str(ticker).upper(),)
+        ).fetchone()
+        con.close()
+        if not row:
+            return None,None
+        op=float(row[0]) if row[0] is not None else None
+        cur=float(row[1]) if row[1] is not None else op
+        return op,cur
+    except Exception:
+        return None,None
+
+
+def update_opening_confirmation():
+    """
+    Evaluate the immutable Pre-Market picks against the actual opening/current price.
+    Does not rewrite the Pre-Market list.
+    """
+    _ensure_opening_tables()
+    market_date=_market_date_wib()
+
+    con=dbcon()
+    try:
+        picks=pd.read_sql_query(
+            """SELECT market_date,rank,ticker,company,reference_price,
+                      entry_low,entry_high,stop_loss,target_1,target_2
+               FROM premarket_picks
+               WHERE market_date=?
+               ORDER BY rank""",
+            con, params=(market_date,)
+        )
+    except Exception:
+        con.close()
+        return pd.DataFrame()
+    con.close()
+
+    if picks.empty:
+        return pd.DataFrame()
+
+    rows=[]
+    now=datetime.now(timezone.utc).isoformat()
+    dont_chase_gap=float(CFG.get('opening_dont_chase_gap_pct',3.0))
+    cancel_gap=float(CFG.get('opening_cancel_gap_pct',-4.0))
+    cancel_below_entry=float(CFG.get('opening_cancel_below_entry_pct',-2.0))
+
+    for _,r in picks.iterrows():
+        ticker=str(r.ticker)
+        op,cur=_latest_intraday_open(ticker)
+        if op is None:
+            op,cur=_daily_open_fallback(ticker)
+        if op is None:
+            status='WAIT'
+            reason='Opening price belum tersedia.'
+            gap=None
+        else:
+            ref=float(r.reference_price) if pd.notna(r.reference_price) else (
+                float(r.entry_high) if pd.notna(r.entry_high) else op
+            )
+            lo=float(r.entry_low) if pd.notna(r.entry_low) else ref
+            hi=float(r.entry_high) if pd.notna(r.entry_high) else ref
+            gap=((op/ref)-1)*100 if ref else 0.0
+
+            if gap <= cancel_gap:
+                status='CANCEL'
+                reason=f'Gap turun {gap:+.2f}% melewati batas pembatalan.'
+            elif op < lo*(1+cancel_below_entry/100):
+                status='CANCEL'
+                reason=f'Open {op:,.2f} terlalu jauh di bawah entry zone.'
+            elif op > hi:
+                chase=((op/hi)-1)*100 if hi else 0.0
+                if gap >= dont_chase_gap or chase >= 1.0:
+                    status="DON'T CHASE"
+                    reason=f'Open {op:,.2f} di atas entry high {hi:,.2f}; hindari mengejar harga.'
+                else:
+                    status='WAIT'
+                    reason=f'Open sedikit di atas entry zone; tunggu pullback/konfirmasi.'
+            elif lo <= op <= hi:
+                status='BUY'
+                reason=f'Open {op:,.2f} masih di dalam entry zone {lo:,.2f}-{hi:,.2f}.'
+            else:
+                status='STILL STRONG'
+                reason=f'Open {op:,.2f} masih dekat setup; pantau konfirmasi sebelum entry.'
+
+        rows.append({
+            'market_date':market_date,
+            'ticker':ticker,
+            'generated_at':now,
+            'premarket_rank':int(r['rank']) if pd.notna(r['rank']) else None,
+            'company':str(r['company']),
+            'reference_price':float(r['reference_price']) if pd.notna(r['reference_price']) else None,
+            'open_price':op,
+            'current_price':cur,
+            'entry_low':float(r['entry_low']) if pd.notna(r['entry_low']) else None,
+            'entry_high':float(r['entry_high']) if pd.notna(r['entry_high']) else None,
+            'gap_pct':gap,
+            'status':status,
+            'reason':reason
+        })
+
+    out=pd.DataFrame(rows)
+    con=dbcon()
+    try:
+        for _,r in out.iterrows():
+            con.execute("""
+                INSERT OR REPLACE INTO opening_confirmation
+                (market_date,ticker,generated_at,premarket_rank,company,
+                 reference_price,open_price,current_price,entry_low,entry_high,
+                 gap_pct,status,reason)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,(
+                r.market_date,r.ticker,r.generated_at,
+                int(r.premarket_rank) if pd.notna(r.premarket_rank) else None,
+                r.company,r.reference_price,r.open_price,r.current_price,
+                r.entry_low,r.entry_high,r.gap_pct,r.status,r.reason
+            ))
+        con.commit()
+    finally:
+        con.close()
+
+    try:
+        app.state_set('opening_confirmation_at',now)
+        app.state_set('opening_confirmation_count',len(out))
+    except Exception:
+        pass
+    return out
 
 def update(res, phase='CLOSED'):
     ensure_tables()
@@ -231,4 +433,12 @@ def update(res, phase='CLOSED'):
     app.state_set('dynamic_opportunity_at',datetime.now().isoformat())
     app.state_set('dynamic_opportunity_phase',phase)
     app.state_set('dynamic_opportunity_count',len(out))
+
+    # Stage 3: only evaluates today's immutable Pre-Market list.
+    # It never mutates the locked picks themselves.
+    try:
+        update_opening_confirmation()
+    except Exception:
+        pass
+
     return pd.DataFrame(out)
