@@ -12,7 +12,7 @@ import recommendation_history
 BASE=os.path.dirname(os.path.abspath(__file__))
 WORKER_MODE=os.environ.get('AI_ENGINE_WORKER')=='1'
 
-# V1.8.40: start exactly one background engine process per Streamlit server.
+# V1.8.41: start exactly one background engine process per Streamlit server.
 # A file lock prevents Streamlit reruns/sessions from spawning duplicate workers.
 def _ensure_background_worker():
     if WORKER_MODE:
@@ -1854,8 +1854,140 @@ def render_alert_simulator():
 
     st.caption('Aturan inti: Top-5 bersifat dinamis; saham di luar Top-5 tetap dapat memicu alert jika Opportunity Score menembus ambang kuat atau Entry Window menjadi ACTIVE dengan kondisi memadai. V1.8.34 menggabungkan beberapa event satu ticker menjadi satu pesan dan mempertahankan status delivery di outbox.')
 
+
+# ============================================================
+# V1.8.41 STAGE 2 - PRE-MARKET TOP PICKS UI
+# ============================================================
+
+def read_premarket_run():
+    """Read the newest immutable Pre-Market run produced by worker_base.py."""
+    try:
+        con=dbcon()
+        row=con.execute(
+            """SELECT market_date,generated_at,status,pick_count,note
+               FROM premarket_runs
+               ORDER BY market_date DESC, generated_at DESC
+               LIMIT 1"""
+        ).fetchone()
+        con.close()
+        if not row:
+            return None
+        return {
+            'market_date':row[0],
+            'generated_at':row[1],
+            'status':row[2],
+            'pick_count':int(row[3] or 0),
+            'note':row[4] or '',
+        }
+    except Exception:
+        return None
+
+
+def read_premarket_picks(market_date=None, limit=5):
+    """Read locked picks. They are separate from live Dynamic Opportunity."""
+    try:
+        con=dbcon()
+        if market_date:
+            d=pd.read_sql_query(
+                """SELECT market_date,generated_at,rank,ticker,company,decision,
+                          confidence,ai_score,risk,entry_low,entry_high,stop_loss,
+                          target_1,target_2,ihsg_regime,reason,source_phase
+                   FROM premarket_picks
+                   WHERE market_date=?
+                   ORDER BY rank
+                   LIMIT ?""",
+                con, params=(str(market_date),int(limit))
+            )
+        else:
+            d=pd.read_sql_query(
+                """SELECT market_date,generated_at,rank,ticker,company,decision,
+                          confidence,ai_score,risk,entry_low,entry_high,stop_loss,
+                          target_1,target_2,ihsg_regime,reason,source_phase
+                   FROM premarket_picks
+                   ORDER BY market_date DESC, rank
+                   LIMIT ?""",
+                con, params=(int(limit),)
+            )
+        con.close()
+        return d
+    except Exception:
+        return pd.DataFrame()
+
+
+def render_premarket_panel():
+    run=read_premarket_run()
+    st.subheader('🌅 Pre-Market Top Picks')
+    st.caption(
+        'Daftar ini adalah pilihan yang dikunci untuk sesi berikutnya. '
+        'Setelah LOCKED, daftar tidak boleh diganti hanya karena hasil pasar berubah. '
+        'Live Opportunity tetap berada di tab Opportunity dan boleh berubah intraday.'
+    )
+
+    if not run:
+        st.info('Pre-Market belum memiliki locked run. Worker akan membuatnya setelah full-universe cycle.')
+        return
+
+    status=str(run.get('status','')).upper()
+    market_date=str(run.get('market_date') or '—')
+    generated=str(run.get('generated_at') or '—')
+    count=int(run.get('pick_count') or 0)
+
+    a,b,c,d=st.columns(4)
+    a.metric('Sesi',market_date)
+    b.metric('Status',status or '—')
+    c.metric('Jumlah Pick',count)
+    d.metric('Locked At',generated[:19].replace('T',' ') if generated and generated!='—' else '—')
+
+    if status=='NO_TRADE':
+        st.warning(
+            '🚫 **NO TRADE** • Tidak ada saham yang lolos quality gate Pre-Market. '
+            'Sistem sengaja tidak memaksa lima rekomendasi.'
+        )
+        if run.get('note'):
+            st.caption(run['note'])
+        return
+
+    picks=read_premarket_picks(market_date,5)
+    if picks.empty:
+        st.warning('Status Pre-Market sudah LOCKED, tetapi detail pick belum tersedia pada database.')
+        return
+
+    show=picks.copy()
+    for col in ['confidence','ai_score','entry_low','entry_high','stop_loss','target_1','target_2']:
+        if col in show.columns:
+            show[col]=pd.to_numeric(show[col],errors='coerce')
+    if 'confidence' in show.columns:
+        show['confidence']=show['confidence'].round(1)
+    if 'ai_score' in show.columns:
+        show['ai_score']=show['ai_score'].round(1)
+    for col in ['entry_low','entry_high','stop_loss','target_1','target_2']:
+        if col in show.columns:
+            show[col]=show[col].round(2)
+
+    show=show.rename(columns={
+        'rank':'Rank','ticker':'ticker','company':'Company','decision':'Decision',
+        'confidence':'Confidence %','ai_score':'AI Score','risk':'Risk',
+        'entry_low':'Entry Low','entry_high':'Entry High','stop_loss':'Stop Loss',
+        'target_1':'Target 1','target_2':'Target 2','ihsg_regime':'IHSG Regime',
+        'reason':'Why','generated_at':'Locked At'
+    })
+    cols=[c for c in [
+        'Rank','ticker','Company','Decision','Confidence %','AI Score','Risk',
+        'Entry Low','Entry High','Stop Loss','Target 1','Target 2','IHSG Regime','Why'
+    ] if c in show.columns]
+    render_clickable_dataframe(show,cols,2)
+
+    st.success(
+        f'🔒 **{count} pick terkunci untuk sesi {market_date}.** '
+        'Daftar ini dipakai sebagai bukti evaluasi Pre-Market dan tidak mengikuti perubahan Live Opportunity.'
+    )
+    st.caption(
+        'Opening Confirmation pada tahap berikutnya akan memeriksa harga pembukaan terhadap Entry Low/High '
+        'untuk menentukan BUY, WAIT / DON’T CHASE, atau CANCEL.'
+    )
+
 def render_app():
-    st.set_page_config(page_title='AI Stock Intelligence V1.8.40', page_icon='📈', layout='wide')
+    st.set_page_config(page_title='AI Stock Intelligence V1.8.41', page_icon='📈', layout='wide')
     st.markdown("""
     <style>
       .block-container{padding-top:1.15rem;padding-bottom:2rem;max-width:1500px}
@@ -1870,7 +2002,7 @@ def render_app():
       .asi-red{color:#dc2626;background:rgba(220,38,38,.12);border-color:rgba(220,38,38,.25)}
       .asi-yellow{color:#d97706;background:rgba(217,119,6,.13);border-color:rgba(217,119,6,.27)}
       .asi-gray{color:#6b7280;background:rgba(107,114,128,.12);border-color:rgba(107,114,128,.22)}
-      @media(max-width:700px){.block-container{padding-left:.75rem;padding-right:.75rem}.asi-card{padding:11px 12px}div[data-testid="stMetric"]{padding:9px 10px}}
+      @media(max-width:700px){.block-container{padding-left:.75rem;padding-right:.75rem}.asi-card{padding:11px 12px}div[data-testid="stMetric"]{padding:9px 10px}div[data-testid="stMetricValue"]{font-size:clamp(1.15rem,6vw,1.7rem)!important;line-height:1.05!important}div[data-testid="stMetricLabel"]{font-size:.82rem!important}}
     </style>
     """, unsafe_allow_html=True)
 
@@ -1898,7 +2030,7 @@ def render_app():
         if any(k in x for k in ['WATCH','WAIT','NEAR','DEVELOP','SIDEWAYS','WARNING','MEDIUM','PREPAR']): return 'yellow'
         return 'gray'
 
-    st.title('📈 AI Stock Intelligence V1.8.40')
+    st.title('📈 AI Stock Intelligence V1.8.41')
     st.caption('Continuous Intelligence • Rank → Opportunity → Alert → Deep Analysis → Risk → Hold → Overnight')
     st.markdown('<div class="asi-row">'+_pill('READY' if ready else 'PREPARING', 'green' if ready else 'yellow')+_pill(f'Model {active_name}', 'green' if model else 'gray')+_pill(f'Snapshot {snap_at or "belum ada"}', 'green' if snap_at else 'gray')+'</div>', unsafe_allow_html=True)
 
@@ -1912,7 +2044,7 @@ def render_app():
         stock_search_panel(universe,res,forced_ticker=forced_detail)
         return
 
-    tab_home, tab_opp, tab_search, tab_history, tab_ai, tab_engine = st.tabs(['🏠 Ringkasan','🚀 Opportunity','🔎 Analisis Saham','📚 History & Shadow','🧠 AI & Validasi','⚙️ Engine / Log'])
+    tab_home, tab_premarket, tab_opp, tab_search, tab_history, tab_ai, tab_engine = st.tabs(['🏠 Ringkasan','🌅 Pre-Market','🚀 Opportunity','🔎 Analisis Saham','📚 History & Shadow','🧠 AI & Validasi','⚙️ Engine / Log'])
 
     with tab_home:
         st.subheader('Ringkasan Sistem')
@@ -1942,8 +2074,25 @@ def render_app():
         else:
             st.warning('Data IHSG belum tersedia pada snapshot ini. Ranking saham tetap berjalan, tetapi market context belum dapat ditampilkan.')
 
+        pm_run=read_premarket_run()
+        st.subheader('🌅 Pre-Market untuk Sesi Berikutnya')
+        if pm_run:
+            pm_status=str(pm_run.get('status','')).upper()
+            pm_date=str(pm_run.get('market_date') or '—')
+            pm_count=int(pm_run.get('pick_count') or 0)
+            pma,pmb,pmc=st.columns(3)
+            pma.metric('Sesi',pm_date)
+            pmb.metric('Status',pm_status or '—')
+            pmc.metric('Locked Picks',pm_count)
+            if pm_status=='NO_TRADE':
+                st.warning('🚫 NO TRADE • Tidak ada kandidat yang lolos quality gate Pre-Market.')
+            else:
+                st.success(f'🔒 {pm_count} Pre-Market pick sudah dikunci untuk {pm_date}. Lihat tab 🌅 Pre-Market untuk detail.')
+        else:
+            st.info('Pre-Market belum memiliki locked run.')
+
         dyn = read_dynamic_opportunities(int(CFGD.get('dynamic_opportunity_count',5)))
-        st.subheader('🚀 Top Opportunity Saat Ini')
+        st.subheader('🚀 Live Opportunity Saat Ini')
         if dyn.empty:
             st.info('Belum ada kandidat yang memenuhi filter relatif + AI + risiko.')
         else:
@@ -1965,6 +2114,10 @@ def render_app():
             st.caption(f"Snapshot {outlook['market_status']} • generated {outlook['generated_at']}")
         else:
             st.info('AI sedang menyiapkan snapshot sesi berikutnya.')
+
+
+    with tab_premarket:
+        render_premarket_panel()
 
     with tab_opp:
         st.subheader('🚀 Dynamic Opportunity Engine')
