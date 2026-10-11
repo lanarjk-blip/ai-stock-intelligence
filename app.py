@@ -11,6 +11,47 @@ import recommendation_history
 
 BASE=os.path.dirname(os.path.abspath(__file__))
 WORKER_MODE=os.environ.get('AI_ENGINE_WORKER')=='1'
+
+# V1.8.40: start exactly one background engine process per Streamlit server.
+# A file lock prevents Streamlit reruns/sessions from spawning duplicate workers.
+def _ensure_background_worker():
+    if WORKER_MODE:
+        return
+    try:
+        import subprocess, sys, atexit
+        lock_path=os.path.join('/tmp','ai_stock_intelligence_worker.lock')
+        lock_file=open(lock_path,'a+')
+        try:
+            import fcntl
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (ImportError, BlockingIOError, OSError):
+            lock_file.close()
+            return
+
+        env=os.environ.copy()
+        env['AI_ENGINE_WORKER']='1'
+        worker_path=os.path.join(BASE,'worker_base.py')
+        if not os.path.exists(worker_path):
+            lock_file.close()
+            return
+
+        proc=subprocess.Popen(
+            [sys.executable, worker_path],
+            cwd=BASE,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        # Keep both references alive for this Streamlit server process.
+        st.session_state['_asi_worker_pid']=proc.pid
+        st.session_state['_asi_worker_lock']=lock_file
+        atexit.register(lambda: lock_file.close() if not lock_file.closed else None)
+    except Exception:
+        # Dashboard must remain usable even if the worker cannot be launched.
+        pass
+
+_ensure_background_worker()
 def cache_data(ttl):
     return (lambda f: f) if WORKER_MODE else (lambda f: st.cache_data(ttl=ttl)(f))
 DB_DIR=os.path.join(BASE,'db'); os.makedirs(DB_DIR, exist_ok=True)
@@ -1814,7 +1855,7 @@ def render_alert_simulator():
     st.caption('Aturan inti: Top-5 bersifat dinamis; saham di luar Top-5 tetap dapat memicu alert jika Opportunity Score menembus ambang kuat atau Entry Window menjadi ACTIVE dengan kondisi memadai. V1.8.34 menggabungkan beberapa event satu ticker menjadi satu pesan dan mempertahankan status delivery di outbox.')
 
 def render_app():
-    st.set_page_config(page_title='AI Stock Intelligence V1.8.34', page_icon='📈', layout='wide')
+    st.set_page_config(page_title='AI Stock Intelligence V1.8.40', page_icon='📈', layout='wide')
     st.markdown("""
     <style>
       .block-container{padding-top:1.15rem;padding-bottom:2rem;max-width:1500px}
@@ -1857,7 +1898,7 @@ def render_app():
         if any(k in x for k in ['WATCH','WAIT','NEAR','DEVELOP','SIDEWAYS','WARNING','MEDIUM','PREPAR']): return 'yellow'
         return 'gray'
 
-    st.title('📈 AI Stock Intelligence V1.8.34')
+    st.title('📈 AI Stock Intelligence V1.8.40')
     st.caption('Continuous Intelligence • Rank → Opportunity → Alert → Deep Analysis → Risk → Hold → Overnight')
     st.markdown('<div class="asi-row">'+_pill('READY' if ready else 'PREPARING', 'green' if ready else 'yellow')+_pill(f'Model {active_name}', 'green' if model else 'gray')+_pill(f'Snapshot {snap_at or "belum ada"}', 'green' if snap_at else 'gray')+'</div>', unsafe_allow_html=True)
 
