@@ -7,6 +7,7 @@ import requests
 import streamlit as st
 import smart_alerts
 import notification_engine
+import recommendation_history
 
 BASE=os.path.dirname(os.path.abspath(__file__))
 WORKER_MODE=os.environ.get('AI_ENGINE_WORKER')=='1'
@@ -1668,6 +1669,74 @@ def stock_search_panel(universe, res, forced_ticker=None):
     st.dataframe(tech.round(3),width='stretch',hide_index=True)
     st.caption('Fundamental, berita/sentimen, dan market-cap akan ditambahkan setelah sumber data fundamental/news resmi masuk. Modul ini sengaja tidak mengarang angka.')
 
+
+def render_history_shadow():
+    """V1.8.40 immutable recommendation history + shadow portfolio dashboard."""
+    recommendation_history.ensure_tables(DB)
+    st.subheader('📚 Recommendation History + Shadow Portfolio')
+    st.caption('Fondasi evaluasi jujur: rekomendasi full-universe dikunci saat dibuat. Hasil setelahnya tidak boleh mengganti rekomendasi lama. Shadow Portfolio memakai data sesi berikutnya untuk menghindari look-ahead.')
+
+    perf = recommendation_history.performance_summary(DB)
+    m1,m2,m3,m4,m5,m6 = st.columns(6)
+    m1.metric('Paper positions', perf.get('positions',0))
+    m2.metric('Aktif / menunggu', perf.get('open',0))
+    m3.metric('Closed valid', perf.get('closed',0))
+    wr=perf.get('win_rate')
+    m4.metric('Win rate', f'{wr:.1f}%' if wr is not None else '—')
+    ar=perf.get('avg_return')
+    m5.metric('Avg return', f'{ar:+.2f}%' if ar is not None else '—')
+    dd=perf.get('max_drawdown')
+    m6.metric('Max drawdown', f'{dd:.2f}%' if dd is not None else '—')
+
+    p1,p2,p3,p4=st.columns(4)
+    aw=perf.get('avg_win'); al=perf.get('avg_loss'); pf=perf.get('profit_factor')
+    p1.metric('Wins', perf.get('wins',0))
+    p2.metric('Losses', perf.get('losses',0))
+    p3.metric('Avg win / loss', (f'{aw:+.2f}% / {al:+.2f}%' if aw is not None and al is not None else '—'))
+    p4.metric('Profit factor', ('∞' if pf == float('inf') else (f'{pf:.2f}' if pf is not None else '—')))
+
+    st.info('Aturan fondasi V1.8.40: snapshot hanya dikunci dari phase **full-universe**. Entry paper trade baru dievaluasi mulai **sesi berikutnya**. Jika satu candle harian menyentuh stop dan target sekaligus, hasil diberi status **AMBIGUOUS** dan tidak dipaksa menjadi menang/kalah.')
+
+    shadow = recommendation_history.read_shadow(DB, 300)
+    st.markdown('### 🧪 Shadow Portfolio')
+    if shadow.empty:
+        st.info('Belum ada paper position. Setelah worker menyelesaikan full-universe cycle berikutnya, kandidat Top Opportunity akan mulai dicatat otomatis.')
+    else:
+        show=shadow.copy()
+        for c in ['entry_price','planned_stop','planned_target_1','planned_target_2','last_price','exit_price','return_pct','max_favorable_pct','max_adverse_pct']:
+            if c in show: show[c]=pd.to_numeric(show[c],errors='coerce').round(2)
+        show=show.rename(columns={
+            'ticker':'ticker','company':'Company','recommended_at':'Recommended At','rank':'Rank','status':'Status',
+            'entry_low':'Entry Low','entry_high':'Entry High','entry_at':'Entry At','entry_price':'Entry Price',
+            'planned_stop':'Stop','planned_target_1':'Target 1','planned_target_2':'Target 2','last_price':'Last Price',
+            'closed_at':'Closed At','exit_price':'Exit Price','return_pct':'Return %','exit_reason':'Exit Reason',
+            'max_favorable_pct':'MFE %','max_adverse_pct':'MAE %'
+        })
+        cols=[c for c in ['ticker','Company','Rank','Status','Recommended At','Entry Low','Entry High','Entry At','Entry Price','Stop','Target 1','Target 2','Last Price','Closed At','Exit Price','Return %','MFE %','MAE %','Exit Reason'] if c in show.columns]
+        render_clickable_dataframe(show,cols,2)
+
+    hist = recommendation_history.read_history(DB, 500)
+    st.markdown('### 🔒 Locked Recommendation History')
+    if hist.empty:
+        st.info('Belum ada locked recommendation snapshot.')
+    else:
+        hs=hist.copy()
+        for c in ['opportunity_score','ai_score','p_up','p_down','confidence','reference_price','entry_low','entry_high','stop_loss','target_1','target_2','risk_reward','outcome_return_pct']:
+            if c in hs: hs[c]=pd.to_numeric(hs[c],errors='coerce').round(3)
+        for c in ['p_up','p_down','confidence']:
+            if c in hs: hs[c]=(pd.to_numeric(hs[c],errors='coerce')*100).round(1)
+        hs=hs.rename(columns={
+            'generated_at':'Generated','market_date':'Market Date','rank':'Rank','recommendation':'Recommendation',
+            'opportunity_state':'State','entry_status':'Entry Window','opportunity_score':'Opportunity Score','ai_score':'AI Score',
+            'p_up':'P(UP) %','p_down':'P(DOWN) %','confidence':'Confidence %','reference_price':'Reference Price',
+            'entry_low':'Entry Low','entry_high':'Entry High','stop_loss':'Stop','target_1':'Target 1','target_2':'Target 2',
+            'risk_reward':'R/R','risk':'Risk','market_regime':'IHSG Regime','outcome_status':'Outcome','outcome_return_pct':'Outcome %','outcome_at':'Outcome At'
+        })
+        cols=[c for c in ['Generated','Market Date','Rank','ticker','company','Recommendation','State','Entry Window','Opportunity Score','AI Score','P(UP) %','Confidence %','Reference Price','Entry Low','Entry High','Stop','Target 1','Target 2','R/R','Risk','IHSG Regime','Outcome','Outcome %','Outcome At'] if c in hs.columns]
+        render_clickable_dataframe(hs,cols,2)
+
+    st.caption(f"History last update: {state_get('recommendation_history_at') or 'belum ada'} • Shadow last update: {state_get('shadow_portfolio_at') or 'belum ada'}")
+
 def render_alert_simulator():
     """V1.8.34 simulator for alert rules + WhatsApp Cloud API delivery."""
     st.markdown('#### 🧪 Notification Simulator')
@@ -1802,7 +1871,7 @@ def render_app():
         stock_search_panel(universe,res,forced_ticker=forced_detail)
         return
 
-    tab_home, tab_opp, tab_search, tab_ai, tab_engine = st.tabs(['🏠 Ringkasan','🚀 Opportunity','🔎 Analisis Saham','🧠 AI & Validasi','⚙️ Engine / Log'])
+    tab_home, tab_opp, tab_search, tab_history, tab_ai, tab_engine = st.tabs(['🏠 Ringkasan','🚀 Opportunity','🔎 Analisis Saham','📚 History & Shadow','🧠 AI & Validasi','⚙️ Engine / Log'])
 
     with tab_home:
         st.subheader('Ringkasan Sistem')
@@ -1901,6 +1970,9 @@ def render_app():
     with tab_search:
         forced_ticker=str(st.query_params.get('ticker','')).upper().replace('.JK','').strip() or None
         stock_search_panel(universe,res,forced_ticker=forced_ticker)
+
+    with tab_history:
+        render_history_shadow()
 
     with tab_ai:
         st.subheader('🧠 AI Intelligence Detail')
