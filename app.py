@@ -1,13 +1,55 @@
-import json, os, sqlite3, time, math, re
+import json, os, sqlite3, time, math, re, hashlib, inspect
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
-import smart_alerts
+import recommendation_history
 
 BASE=os.path.dirname(os.path.abspath(__file__))
 WORKER_MODE=os.environ.get('AI_ENGINE_WORKER')=='1'
+
+# V1.8.41: start exactly one background engine process per Streamlit server.
+# A file lock prevents Streamlit reruns/sessions from spawning duplicate workers.
+def _ensure_background_worker():
+    if WORKER_MODE:
+        return
+    try:
+        import subprocess, sys, atexit
+        lock_path=os.path.join('/tmp','ai_stock_intelligence_worker.lock')
+        lock_file=open(lock_path,'a+')
+        try:
+            import fcntl
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (ImportError, BlockingIOError, OSError):
+            lock_file.close()
+            return
+
+        env=os.environ.copy()
+        env['AI_ENGINE_WORKER']='1'
+        worker_path=os.path.join(BASE,'worker_base.py')
+        if not os.path.exists(worker_path):
+            lock_file.close()
+            return
+
+        proc=subprocess.Popen(
+            [sys.executable, worker_path],
+            cwd=BASE,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        # Keep both references alive for this Streamlit server process.
+        st.session_state['_asi_worker_pid']=proc.pid
+        st.session_state['_asi_worker_lock']=lock_file
+        atexit.register(lambda: lock_file.close() if not lock_file.closed else None)
+    except Exception:
+        # Dashboard must remain usable even if the worker cannot be launched.
+        pass
+
+_ensure_background_worker()
 def cache_data(ttl):
     return (lambda f: f) if WORKER_MODE else (lambda f: st.cache_data(ttl=ttl)(f))
 DB_DIR=os.path.join(BASE,'db'); os.makedirs(DB_DIR, exist_ok=True)
@@ -102,8 +144,12 @@ def ihsg_snapshot():
     save_ihsg(d)
     r=d.iloc[-1]; close=float(r.close); ch=float(r.change_pct) if pd.notna(r.change_pct) else np.nan
     ma20=float(d.close.tail(20).mean()) if len(d)>=20 else np.nan
-    trend='BULLISH' if pd.notna(ma20) and close>ma20 else ('BEARISH' if pd.notna(ma20) else 'N/A')
-    return {'close':close,'change_pct':ch,'ma20':ma20,'trend':trend,'date':str(r.date)}
+    if pd.notna(ma20) and ma20 != 0:
+        ma_gap=(close/ma20-1)*100
+        trend='BULLISH' if ma_gap>0.5 else ('BEARISH' if ma_gap<-0.5 else 'SIDEWAYS')
+    else:
+        ma_gap=np.nan; trend='N/A'
+    return {'close':close,'change_pct':ch,'ma20':ma20,'ma_gap_pct':ma_gap,'trend':trend,'date':str(r.date)}
 
 def _fetch_chart_symbol(symbol, period_days, interval):
     end=int(time.time()); start=end-int(period_days*86400)
@@ -624,9 +670,12 @@ def classify_decision(row):
     min_rr=float(CFGD.get('min_risk_reward_2',1.50))
     block_high=bool(CFGD.get('block_high_risk_signals',True)) and risk=='HIGH'
     strong_relative = rel>=52 and sector>=48
-    bearish_penalty = 0.03 if regime=='BEARISH' else (0.015 if regime=='HIGH_VOLATILITY' else 0.0)
-    if (rank_pct>=buy_rank and p_up==p_up and p_up>=buy_prob+bearish_penalty and
-        conf>=conf_gate and trend=='BULLISH' and strong_relative and rr>=min_rr and not block_high):
+    bearish_penalty = 0.04 if regime=='BEARISH' else (0.05 if regime=='HIGH_VOLATILITY' else (0.015 if regime=='SIDEWAYS' else 0.0))
+    regime_rank_gate = buy_rank if regime=='BULLISH' else max(buy_rank, 0.99 if regime in ('BEARISH','HIGH_VOLATILITY') else 0.985)
+    regime_conf_gate = conf_gate + (0.05 if regime in ('BEARISH','HIGH_VOLATILITY') else (0.02 if regime=='SIDEWAYS' else 0.0))
+    regime_rel_gate = 58 if regime in ('BEARISH','HIGH_VOLATILITY') else (54 if regime=='SIDEWAYS' else 52)
+    if (rank_pct>=regime_rank_gate and p_up==p_up and p_up>=buy_prob+bearish_penalty and
+        conf>=regime_conf_gate and trend=='BULLISH' and strong_relative and rel>=regime_rel_gate and rr>=min_rr and not block_high):
         ds=float(np.clip(.45*score+30*p_up*100+15*conf*100+10*min(rr/3,1)*100,0,100))
         return 'BUY',ds,'BUY: relative rank + model probability + trend + sector/relative strength + risk/reward agree'
     if (p_down==p_down and p_down>=float(CFGD.get('relative_sell_probability_min',0.56)) and
@@ -676,6 +725,16 @@ def analyze_all(universe,model=None):
         relative_strength=float(np.clip(50+(float(r.ret5)-ihsg_r5)*180,0,100)) if pd.notna(r.ret5) else 50.0
         score=.32*base + .28*(p_up*100 if np.isfinite(p_up) else base) + .15*market_score + .15*sscore + .10*relative_strength
         trend='BULLISH' if pd.notna(r.ma20) and pd.notna(r.ma50) and r.ma20>r.ma50 else 'BEARISH'
+        # Market-aware filter: IHSG is not decoration. Defensive regimes reward
+        # relative strength and bullish structure, while weak names lose weight.
+        if regime in ('BEARISH','HIGH_VOLATILITY'):
+            if relative_strength >= 58 and trend == 'BULLISH': score += 6.0
+            elif relative_strength < 48 or trend != 'BULLISH': score -= 8.0
+            else: score -= 2.0
+        elif regime == 'SIDEWAYS':
+            score += 3.0 if relative_strength >= 55 and trend == 'BULLISH' else (-3.0 if relative_strength < 48 else 0.0)
+        elif regime == 'BULLISH':
+            score += 3.0 if trend == 'BULLISH' else -2.0
         atr=float(r.atr14) if pd.notna(r.atr14) else np.nan; close=float(r.close)
         # Risk engine: combine volatility, momentum extremes and liquidity proxy.
         atr_pct=float(r.atr_pct) if pd.notna(r.atr_pct) else 0.0
@@ -1210,22 +1269,55 @@ def clickable_ticker_frame(df, ticker_col='ticker', company_col='company'):
         d[ticker_col]=d[ticker_col].astype(str).map(lambda t: stock_deep_link(t))
     return d
 
+def _open_ticker_mobile(ticker):
+    """Touch-safe same-app navigation for Android WebView and desktop."""
+    st.query_params['ticker']=str(ticker).upper().replace('.JK','').strip()
+
+
 def render_clickable_dataframe(df, cols, round_digits=None):
-    """Render ticker and company as same-app Deep Analysis links."""
+    """Mobile-first table: every ticker is a real HTML touch link."""
+    import html
+    from urllib.parse import quote
     d=df[cols].copy()
     if round_digits is not None:
         try: d=d.round(round_digits)
         except Exception: pass
-    cfg={}
-    if 'ticker' in d.columns:
-        original=df.loc[d.index,'ticker'].astype(str).tolist()
-        d['ticker']=[stock_deep_link(t) for t in original]
-        cfg['ticker']=st.column_config.LinkColumn('Ticker',display_text=r'\?ticker=([^&]+)',validate='^\\?ticker=[A-Z0-9]{2,6}$')
-    st.dataframe(d,width='stretch',hide_index=True,column_config=cfg)
+    def fmt(v):
+        if pd.isna(v): return '—'
+        if isinstance(v,(float,np.floating)):
+            return f'{float(v):,.{int(round_digits or 2)}f}'.rstrip('0').rstrip('.')
+        return str(v)
+    head=''.join(f'<th>{html.escape(str(c))}</th>' for c in d.columns)
+    rows=[]
+    for _,r in d.iterrows():
+        cells=[]
+        for c in d.columns:
+            if str(c).lower() in ('ticker','kode saham','symbol'):
+                t=str(r[c]).upper().replace('.JK','').strip()
+                cell=f'<a class="ticker-link" href="?ticker={quote(t)}" target="_self">{html.escape(t)}</a>'
+            else: cell=html.escape(fmt(r[c]))
+            cells.append(f'<td>{cell}</td>')
+        rows.append('<tr>'+''.join(cells)+'</tr>')
+    css='<style>.ticker-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid rgba(128,128,128,.25);border-radius:14px;margin:.35rem 0 .8rem}.ticker-table{border-collapse:collapse;width:max-content;min-width:100%;font-size:.92rem}.ticker-table th{background:#242730;color:#d7d9df;text-align:left;padding:10px 12px;white-space:nowrap;border-bottom:1px solid rgba(128,128,128,.25)}.ticker-table td{padding:10px 12px;white-space:nowrap;border-bottom:1px solid rgba(128,128,128,.18)}.ticker-link{color:#42a5f5!important;text-decoration:none!important;font-weight:750;display:inline-block;min-width:48px;min-height:30px;line-height:30px}@media(max-width:700px){.ticker-table{font-size:.88rem}.ticker-table th,.ticker-table td{padding:9px 10px}}</style>'
+    st.markdown(css+f'<div class="ticker-table-wrap"><table class="ticker-table"><thead><tr>{head}</tr></thead><tbody>{"".join(rows)}</tbody></table></div>',unsafe_allow_html=True)
+
+def render_smart_dataframe(df, width='stretch', hide_index=True, round_digits=None):
+    """Use touch-safe ticker links whenever a table contains a ticker/symbol column."""
+    if df is None:
+        return
+    d=df.copy()
+    ticker_cols=[c for c in d.columns if str(c).lower() in ('ticker','kode saham','symbol')]
+    if ticker_cols:
+        render_clickable_dataframe(d,d.columns.tolist(),round_digits)
+    else:
+        if round_digits is not None:
+            try: d=d.round(round_digits)
+            except Exception: pass
+        st.dataframe(d,width=width,hide_index=hide_index)
 
 def intraday_checkpoint_status():
     """Return current IDX regular-session checkpoint in WIB."""
-    now=datetime.now(timezone.utc).astimezone().replace(tzinfo=None)
+    now=datetime.now(ZoneInfo('Asia/Jakarta')).replace(tzinfo=None)
     wd=now.weekday(); hm=now.hour*60+now.minute
     if wd>=5:
         return 'WEEKEND','—','Tidak ada sesi reguler'
@@ -1421,9 +1513,7 @@ def stock_search_panel(universe, res, forced_ticker=None):
                 else: st.info(f'🔵 LOW • {msg}')
         with st.expander('Lihat alert terbaru seluruh universe',expanded=False):
             showa=alerts.rename(columns={'generated_at':'Waktu','ticker':'Ticker','company':'Company','severity':'Priority','title':'Alert','detail':'Perubahan','old_value':'Sebelum','new_value':'Sesudah'})
-            st.dataframe(showa[['Waktu','Ticker','Company','Priority','Alert','Perubahan','Sebelum','Sesudah']],width='stretch',hide_index=True)
-
-    render_apk_notification_center()
+            render_smart_dataframe(showa[['Waktu','Ticker','Company','Priority','Alert','Perubahan','Sebelum','Sesudah']])
 
     st.markdown('### 🛡️ Hold / Overnight Detail')
     if hr is None:
@@ -1447,27 +1537,96 @@ def stock_search_panel(universe, res, forced_ticker=None):
     dc4.metric('News / Sentiment', 'NOT CONNECTED')
     st.caption('Fundamental dan News/Sentiment sengaja ditandai belum terhubung. Sistem tidak mengarang angka atau berita ketika sumber datanya belum tersedia.')
 
-    c1,c2=st.columns([1.45,1])
-    with c1:
-        st.markdown('### 📈 Price & Momentum')
-        chart=z[['date','close']].copy().set_index('date').tail(120)
-        st.line_chart(chart,width='stretch')
-        t1,t2,t3,t4=st.columns(4)
+    st.markdown('### 📈 Market Chart')
+    session_name,next_checkpoint,session_note=intraday_checkpoint_status()
+    now_wib=datetime.now(ZoneInfo('Asia/Jakarta'))
+    market_open=session_name in ['SESI I','SESI II','PRE-CLOSING','POST-TRADING']
+    market_icon='🟢' if market_open else ('🟡' if session_name in ['PRE-MARKET','BREAK'] else '⚫')
+    st.caption(f'{market_icon} {session_name} • {now_wib.strftime("%H:%M WIB")} • {session_note}')
+    period=st.radio('Periode',['1D','1W','1M','3M','YTD','1Y','3Y','5Y'],index=0,horizontal=True,key=f'chart_period_{selected_ticker}',label_visibility='collapsed')
+    default_chart_mode=1 if period=='1W' else 0
+    chart_mode=st.radio('Tampilan',['Line','Candlestick'],index=default_chart_mode,horizontal=True,key=f'chart_mode_{selected_ticker}_{period}',label_visibility='collapsed')
+
+    market=pd.DataFrame(); is_intraday=(period=='1D')
+    if is_intraday:
+        market=_intraday_load(selected_ticker)
+        try:
+            fresh=fetch_chart(selected_ticker,2,CFGD.get('intraday_interval','30m'))
+            if not fresh.empty:
+                save_intraday(fresh,selected_ticker); market=_intraday_load(selected_ticker)
+        except Exception: pass
+        if not market.empty:
+            market=market.copy(); market['wib']=market['ts'].dt.tz_convert('Asia/Jakarta'); market['trade_date']=market['wib'].dt.date
+            dates=sorted(market['trade_date'].dropna().unique())
+            if dates: market=market[market['trade_date']==dates[-1]].copy()
+            market['x']=market['wib'].dt.tz_localize(None)
+    else:
+        day_map={'1W':7,'1M':31,'3M':93,'YTD':370,'1Y':370,'3Y':1100,'5Y':1830}
+        need_days=day_map[period]; long_prices=prices.copy()
+        if period in ['YTD','1Y','3Y','5Y']:
+            try:
+                extra=fetch_chart(selected_ticker,need_days,'1d')
+                if not extra.empty: long_prices=extra.copy()
+            except Exception: pass
+        base=long_prices.copy()
+        if 'date' not in base.columns and 'ts' in base.columns: base['date']=base['ts']
+        base['date']=pd.to_datetime(base['date'],errors='coerce')
+        if period=='YTD': base=base[base['date']>=pd.Timestamp(now_wib.year,1,1)]
+        else: base=base[base['date']>=pd.Timestamp.now()-pd.Timedelta(days=need_days)]
+        market=base[[c for c in ['date','open','high','low','close','volume'] if c in base.columns]].copy(); market['x']=market['date']
+
+    market=market.dropna(subset=['x','close']) if not market.empty else market
+    if not market.empty:
+        first=float(market['close'].iloc[0]); last=float(market['close'].iloc[-1]); delta=last-first
+        period_ret=(last/first-1)*100 if first else np.nan
+        hi=float(pd.to_numeric(market['high'] if 'high' in market else market['close'],errors='coerce').max())
+        lo=float(pd.to_numeric(market['low'] if 'low' in market else market['close'],errors='coerce').min())
+        chart_color='#10b981' if delta>=0 else '#ef4444'; arrow='↗' if delta>=0 else '↘'
+        label_period='Hari Ini' if period=='1D' else {'1W':'1 Minggu Terakhir','1M':'1 Bulan Terakhir','3M':'3 Bulan Terakhir','YTD':'YTD','1Y':'1 Tahun Terakhir','3Y':'3 Tahun Terakhir','5Y':'5 Tahun Terakhir'}[period]
+        st.markdown(f'<div style="margin:.15rem 0 .35rem"><div style="font-size:2.35rem;font-weight:800;line-height:1.05">Rp {last:,.0f}</div><div style="font-size:1.05rem;color:{chart_color};margin-top:.35rem">{arrow} {delta:+,.0f} ({period_ret:+.2f}%) <span style="color:#8b8d96">{label_period}</span></div></div>',unsafe_allow_html=True)
+        try:
+            import altair as alt
+            plot=market[['x','close']+[c for c in ['open','high','low','volume'] if c in market.columns]].dropna(subset=['x','close']).copy()
+            xaxis=alt.Axis(format='%H:%M' if is_intraday else '%d %b',labelAngle=0,labelOverlap=True,title=None)
+            if chart_mode=='Candlestick' and all(c in plot.columns for c in ['open','high','low','close']):
+                plot['direction']=np.where(plot['close']>=plot['open'],'UP','DOWN')
+                clr=alt.Color('direction:N',scale=alt.Scale(domain=['UP','DOWN'],range=['#10b981','#ef4444']),legend=None)
+                rules=alt.Chart(plot).mark_rule().encode(x=alt.X('x:T',axis=xaxis),y=alt.Y('low:Q',title=None,scale=alt.Scale(zero=False)),y2='high:Q',color=clr,tooltip=[alt.Tooltip('x:T',title='Waktu'),alt.Tooltip('open:Q',title='Open',format=',.0f'),alt.Tooltip('high:Q',title='High',format=',.0f'),alt.Tooltip('low:Q',title='Low',format=',.0f'),alt.Tooltip('close:Q',title='Close',format=',.0f')])
+                bars=alt.Chart(plot).mark_bar(size=8).encode(x=alt.X('x:T',axis=xaxis),y=alt.Y('open:Q',title=None,scale=alt.Scale(zero=False)),y2='close:Q',color=clr,tooltip=[alt.Tooltip('x:T',title='Waktu'),alt.Tooltip('close:Q',title='Harga',format=',.0f')])
+                price_chart=(rules+bars).properties(height=360)
+            else:
+                nearest=alt.selection_point(nearest=True,on='pointerover',fields=['x'],empty=False)
+                base=alt.Chart(plot).encode(x=alt.X('x:T',axis=xaxis),y=alt.Y('close:Q',title=None,scale=alt.Scale(zero=False)))
+                line=base.mark_line(strokeWidth=3,color=chart_color)
+                points=base.mark_point(size=90,color=chart_color).encode(opacity=alt.condition(nearest,alt.value(1),alt.value(0)),tooltip=[alt.Tooltip('x:T',title='Waktu',format='%H:%M' if is_intraday else '%d %b %Y'),alt.Tooltip('close:Q',title='Harga',format=',.0f')]).add_params(nearest)
+                rule=alt.Chart(plot).mark_rule(color='#777',strokeDash=[3,3]).encode(x='x:T').transform_filter(nearest)
+                ref=alt.Chart(pd.DataFrame({'y':[first]})).mark_rule(color='#8b8d96',strokeDash=[6,5],opacity=.65).encode(y='y:Q')
+                price_chart=(ref+line+points+rule).properties(height=360)
+            st.altair_chart(price_chart,use_container_width=True)
+        except Exception:
+            st.line_chart(market[['x','close']].set_index('x'),width='stretch',height=360)
+        last_fmt='%H:%M WIB' if is_intraday else '%d %b %Y'
+        st.caption(f'Low Rp {lo:,.0f} • High Rp {hi:,.0f} • data terakhir {pd.Timestamp(market["x"].iloc[-1]).strftime(last_fmt)} • feed provider dapat terlambat dari broker realtime.')
+    else:
+        st.info('Data grafik belum tersedia untuk periode ini.')
+
+    with st.expander('📊 Technical Analysis'):
+        t1,t2,t3,t4,t5=st.columns(5)
         t1.metric('Trend','BULLISH' if pd.notna(r.ma20) and pd.notna(r.ma50) and r.ma20>r.ma50 else 'BEARISH')
-        t2.metric('MA50',f'{float(r.ma50):,.0f}' if pd.notna(r.ma50) else '—')
-        t3.metric('MACD',f'{float(r.macd):.4f}' if pd.notna(r.macd) else '—')
-        t4.metric('ATR',f'{float(r.atr14):,.2f}' if pd.notna(r.atr14) else '—')
-    with c2:
-        st.markdown('### 🧠 AI Intelligence')
-        if not row.empty:
-            rr=row.iloc[0]
-            ai=float(rr.ai_score); decision=str(rr.decision); pu=float(rr.jst_p_up)*100 if pd.notna(rr.jst_p_up) else np.nan; pdn=float(rr.jst_p_down)*100 if pd.notna(rr.jst_p_down) else np.nan; conf=float(rr.jst_confidence)*100 if pd.notna(rr.jst_confidence) else np.nan
-            a,b=st.columns(2); a.metric('AI Score',f'{ai:.1f}/100'); b.metric('Decision',decision)
-            a,b=st.columns(2); a.metric('Probability UP',f'{pu:.1f}%' if np.isfinite(pu) else '—'); b.metric('Probability DOWN',f'{pdn:.1f}%' if np.isfinite(pdn) else '—')
-            a,b=st.columns(2); a.metric('Confidence',f'{conf:.1f}%' if np.isfinite(conf) else '—'); b.metric('Relative rank',f"{int(rr['rank'])} / {len(universe)}")
-            st.info(f"Alasan keputusan: {rr.decision_reason}")
-        else:
-            st.warning('Saham dikenali, tetapi model on-demand belum dapat dihitung karena data historis/fitur belum cukup.')
+        t2.metric('MA20',f'{float(r.ma20):,.0f}' if pd.notna(r.ma20) else '—'); t3.metric('MA50',f'{float(r.ma50):,.0f}' if pd.notna(r.ma50) else '—')
+        t4.metric('RSI14',f'{float(r.rsi14):.1f}' if pd.notna(r.rsi14) else '—'); t5.metric('MACD',f'{float(r.macd):.4f}' if pd.notna(r.macd) else '—')
+        if 'volume' in market.columns and pd.to_numeric(market['volume'],errors='coerce').notna().any():
+            vol=market[['x','volume']].copy(); vol['volume']=pd.to_numeric(vol['volume'],errors='coerce'); vol=vol.dropna().set_index('x'); st.caption('Volume'); st.bar_chart(vol,width='stretch',height=120)
+
+    st.markdown('### 🧠 AI Intelligence')
+    if not row.empty:
+        rr=row.iloc[0]
+        ai=float(rr.ai_score); decision=str(rr.decision); pu=float(rr.jst_p_up)*100 if pd.notna(rr.jst_p_up) else np.nan; pdn=float(rr.jst_p_down)*100 if pd.notna(rr.jst_p_down) else np.nan; conf=float(rr.jst_confidence)*100 if pd.notna(rr.jst_confidence) else np.nan
+        a,b,c,d=st.columns(4); a.metric('AI Score',f'{ai:.1f}/100'); b.metric('Decision',decision); c.metric('Probability UP',f'{pu:.1f}%' if np.isfinite(pu) else '—'); d.metric('Confidence',f'{conf:.1f}%' if np.isfinite(conf) else '—')
+        st.info(f"Alasan keputusan: {rr.decision_reason}")
+    else:
+        st.warning('Saham dikenali, tetapi model on-demand belum dapat dihitung karena data historis/fitur belum cukup.')
+
 
     if not row.empty:
         rr=row.iloc[0]
@@ -1549,352 +1708,456 @@ def stock_search_panel(universe, res, forced_ticker=None):
     st.dataframe(tech.round(3),width='stretch',hide_index=True)
     st.caption('Fundamental, berita/sentimen, dan market-cap akan ditambahkan setelah sumber data fundamental/news resmi masuk. Modul ini sengaja tidak mengarang angka.')
 
-def _safe_fcm_result(value):
-    """Redact credential-like fields before showing FCM diagnostics in the UI."""
-    if isinstance(value, dict):
-        out = {}
-        for k, v in value.items():
-            key = str(k).lower()
-            if any(x in key for x in ("token", "private", "credential", "authorization", "service_account")):
-                out[k] = "***REDACTED***"
-            else:
-                out[k] = _safe_fcm_result(v)
-        return out
-    if isinstance(value, list):
-        return [_safe_fcm_result(v) for v in value]
-    return value
 
+def render_history_shadow():
+    """V1.8.40 immutable recommendation history + shadow portfolio dashboard."""
+    recommendation_history.ensure_tables(DB)
+    st.subheader('📚 Recommendation History + Shadow Portfolio')
+    st.caption('Fondasi evaluasi jujur: rekomendasi full-universe dikunci saat dibuat. Hasil setelahnya tidak boleh mengganti rekomendasi lama. Shadow Portfolio memakai data sesi berikutnya untuk menghindari look-ahead.')
 
-def _send_live_fcm_test():
-    """Send exactly one real APK push to verify the permanent FCM channel."""
-    import inspect
-    import fcm_adapter
+    perf = recommendation_history.performance_summary(DB)
+    m1,m2,m3,m4,m5,m6 = st.columns(6)
+    m1.metric('Paper positions', perf.get('positions',0))
+    m2.metric('Aktif / menunggu', perf.get('open',0))
+    m3.metric('Closed valid', perf.get('closed',0))
+    wr=perf.get('win_rate')
+    m4.metric('Win rate', f'{wr:.1f}%' if wr is not None else '—')
+    ar=perf.get('avg_return')
+    m5.metric('Avg return', f'{ar:+.2f}%' if ar is not None else '—')
+    dd=perf.get('max_drawdown')
+    m6.metric('Max drawdown', f'{dd:.2f}%' if dd is not None else '—')
 
-    status = fcm_adapter.fcm_status(CFGD)
-    if status.get("mode") != "FCM_SEND_READY":
-        return {"ok": False, "stage": "READINESS", "status": status}
+    p1,p2,p3,p4=st.columns(4)
+    aw=perf.get('avg_win'); al=perf.get('avg_loss'); pf=perf.get('profit_factor')
+    p1.metric('Wins', perf.get('wins',0))
+    p2.metric('Losses', perf.get('losses',0))
+    p3.metric('Avg win / loss', (f'{aw:+.2f}% / {al:+.2f}%' if aw is not None and al is not None else '—'))
+    p4.metric('Profit factor', ('∞' if pf == float('inf') else (f'{pf:.2f}' if pf is not None else '—')))
 
-    fn = fcm_adapter.send_fcm
-    params = inspect.signature(fn).parameters
-    payload_data = {
-        "type": "SYSTEM_TEST",
-        "ticker": "TEST",
-        "screen": "stock_deep_analysis",
-        "source": "streamlit_fcm_healthcheck",
-    }
-    values = {
-        "title": "AI Stock Intelligence",
-        "body": "Notifikasi APK aktif dan terhubung ke Firebase FCM.",
-        "message": "Notifikasi APK aktif dan terhubung ke Firebase FCM.",
-        "data": payload_data,
-        "config": CFGD,
-        "cfg": CFGD,
-        "dry_run": False,
-    }
-    kwargs = {name: values[name] for name in params if name in values}
-    result = fn(**kwargs)
-    if isinstance(result, dict):
-        return result
-    return {"ok": bool(result), "result": str(result)}
+    st.info('Aturan fondasi V1.8.40: snapshot hanya dikunci dari phase **full-universe**. Entry paper trade baru dievaluasi mulai **sesi berikutnya**. Jika satu candle harian menyentuh stop dan target sekaligus, hasil diberi status **AMBIGUOUS** dan tidak dipaksa menjadi menang/kalah.')
 
+    shadow = recommendation_history.read_shadow(DB, 300)
+    st.markdown('### 🧪 Shadow Portfolio')
+    if shadow.empty:
+        st.info('Belum ada paper position. Setelah worker menyelesaikan full-universe cycle berikutnya, kandidat Top Opportunity akan mulai dicatat otomatis.')
+    else:
+        show=shadow.copy()
+        for c in ['entry_price','planned_stop','planned_target_1','planned_target_2','last_price','exit_price','return_pct','max_favorable_pct','max_adverse_pct']:
+            if c in show: show[c]=pd.to_numeric(show[c],errors='coerce').round(2)
+        show=show.rename(columns={
+            'ticker':'ticker','company':'Company','recommended_at':'Recommended At','rank':'Rank','status':'Status',
+            'entry_low':'Entry Low','entry_high':'Entry High','entry_at':'Entry At','entry_price':'Entry Price',
+            'planned_stop':'Stop','planned_target_1':'Target 1','planned_target_2':'Target 2','last_price':'Last Price',
+            'closed_at':'Closed At','exit_price':'Exit Price','return_pct':'Return %','exit_reason':'Exit Reason',
+            'max_favorable_pct':'MFE %','max_adverse_pct':'MAE %'
+        })
+        cols=[c for c in ['ticker','Company','Rank','Status','Recommended At','Entry Low','Entry High','Entry At','Entry Price','Stop','Target 1','Target 2','Last Price','Closed At','Exit Price','Return %','MFE %','MAE %','Exit Reason'] if c in show.columns]
+        render_clickable_dataframe(show,cols,2)
 
-def render_apk_notification_center():
-    """Permanent APK notification status. WhatsApp/simulator path intentionally removed."""
-    st.markdown('#### 🔔 APK Notification')
-    st.caption('Channel permanen: AI Stock Intelligence → Firebase FCM → APK. Alert Top-5 dikirim otomatis oleh background engine saat ada event yang memenuhi aturan.')
+    hist = recommendation_history.read_history(DB, 500)
+    st.markdown('### 🔒 Locked Recommendation History')
+    if hist.empty:
+        st.info('Belum ada locked recommendation snapshot.')
+    else:
+        hs=hist.copy()
+        for c in ['opportunity_score','ai_score','p_up','p_down','confidence','reference_price','entry_low','entry_high','stop_loss','target_1','target_2','risk_reward','outcome_return_pct']:
+            if c in hs: hs[c]=pd.to_numeric(hs[c],errors='coerce').round(3)
+        for c in ['p_up','p_down','confidence']:
+            if c in hs: hs[c]=(pd.to_numeric(hs[c],errors='coerce')*100).round(1)
+        hs=hs.rename(columns={
+            'generated_at':'Generated','market_date':'Market Date','rank':'Rank','recommendation':'Recommendation',
+            'opportunity_state':'State','entry_status':'Entry Window','opportunity_score':'Opportunity Score','ai_score':'AI Score',
+            'p_up':'P(UP) %','p_down':'P(DOWN) %','confidence':'Confidence %','reference_price':'Reference Price',
+            'entry_low':'Entry Low','entry_high':'Entry High','stop_loss':'Stop','target_1':'Target 1','target_2':'Target 2',
+            'risk_reward':'R/R','risk':'Risk','market_regime':'IHSG Regime','outcome_status':'Outcome','outcome_return_pct':'Outcome %','outcome_at':'Outcome At'
+        })
+        cols=[c for c in ['Generated','Market Date','Rank','ticker','company','Recommendation','State','Entry Window','Opportunity Score','AI Score','P(UP) %','Confidence %','Reference Price','Entry Low','Entry High','Stop','Target 1','Target 2','R/R','Risk','IHSG Regime','Outcome','Outcome %','Outcome At'] if c in hs.columns]
+        render_clickable_dataframe(hs,cols,2)
 
+    st.caption(f"History last update: {state_get('recommendation_history_at') or 'belum ada'} • Shadow last update: {state_get('shadow_portfolio_at') or 'belum ada'}")
+
+# ============================================================
+# APK notifications are delivered permanently by the background worker
+# through top5_timeline -> Firebase Cloud Messaging (FCM).
+# Legacy WhatsApp/simulator UI intentionally removed.
+# ============================================================
+
+# ============================================================
+# V1.8.41 STAGE 2 - PRE-MARKET TOP PICKS UI
+# ============================================================
+
+def read_premarket_run():
+    """Read the newest immutable Pre-Market run produced by worker_base.py."""
     try:
-        import fcm_adapter
-        fstat = fcm_adapter.fcm_status(CFGD)
-        mode = str(fstat.get('mode', 'UNKNOWN'))
-        c1, c2 = st.columns([1, 3])
-        with c1:
-            st.metric('FCM', mode)
-        with c2:
-            if mode == 'FCM_SEND_READY':
-                st.success('✅ APK notification siap. Pengiriman otomatis aktif untuk event yang memenuhi aturan.')
-            else:
-                st.error('❌ APK notification belum siap. Sistem tidak akan pura-pura menganggap notifikasi terkirim.')
-                st.json(_safe_fcm_result(fstat))
+        con=dbcon()
+        row=con.execute(
+            """SELECT market_date,generated_at,status,pick_count,note
+               FROM premarket_runs
+               ORDER BY market_date DESC, generated_at DESC
+               LIMIT 1"""
+        ).fetchone()
+        con.close()
+        if not row:
+            return None
+        return {
+            'market_date':row[0],
+            'generated_at':row[1],
+            'status':row[2],
+            'pick_count':int(row[3] or 0),
+            'note':row[4] or '',
+        }
+    except Exception:
+        return None
 
-        # Health-check nyata, bukan simulator. Tombol ini tidak membuat event Top-5 palsu.
-        if st.button('📲 Kirim 1 Notifikasi Tes ke APK', key='fcm_healthcheck'):
-            with st.spinner('Mengirim melalui channel FCM yang sama dengan notifikasi permanen...'):
-                try:
-                    result = _send_live_fcm_test()
-                    if result.get('ok'):
-                        st.success('✅ FCM menerima pengiriman. Cek notification tray HP.')
-                    else:
-                        st.error('❌ Pengiriman gagal. Detail aman ditampilkan di bawah.')
-                    st.json(_safe_fcm_result(result))
-                except Exception as exc:
-                    st.error(f'❌ FCM error: {type(exc).__name__}: {str(exc)[:500]}')
-    except Exception as exc:
-        st.error(f'FCM adapter tidak dapat dimuat: {type(exc).__name__}: {str(exc)[:500]}')
+
+def read_premarket_picks(market_date=None, limit=5):
+    """Read locked picks. They are separate from live Dynamic Opportunity."""
+    try:
+        con=dbcon()
+        if market_date:
+            d=pd.read_sql_query(
+                """SELECT market_date,generated_at,rank,ticker,company,decision,
+                          confidence,ai_score,risk,entry_low,entry_high,stop_loss,
+                          target_1,target_2,ihsg_regime,reason,source_phase
+                   FROM premarket_picks
+                   WHERE market_date=?
+                   ORDER BY rank
+                   LIMIT ?""",
+                con, params=(str(market_date),int(limit))
+            )
+        else:
+            d=pd.read_sql_query(
+                """SELECT market_date,generated_at,rank,ticker,company,decision,
+                          confidence,ai_score,risk,entry_low,entry_high,stop_loss,
+                          target_1,target_2,ihsg_regime,reason,source_phase
+                   FROM premarket_picks
+                   ORDER BY market_date DESC, rank
+                   LIMIT ?""",
+                con, params=(int(limit),)
+            )
+        con.close()
+        return d
+    except Exception:
+        return pd.DataFrame()
+
+
+def render_premarket_panel():
+    run=read_premarket_run()
+    st.subheader('🌅 Pre-Market Top Picks')
+    st.caption(
+        'Daftar ini adalah pilihan yang dikunci untuk sesi berikutnya. '
+        'Setelah LOCKED, daftar tidak boleh diganti hanya karena hasil pasar berubah. '
+        'Live Opportunity tetap berada di tab Opportunity dan boleh berubah intraday.'
+    )
+
+    if not run:
+        st.info('Pre-Market belum memiliki locked run. Worker akan membuatnya setelah full-universe cycle.')
+        return
+
+    status=str(run.get('status','')).upper()
+    market_date=str(run.get('market_date') or '—')
+    generated=str(run.get('generated_at') or '—')
+    count=int(run.get('pick_count') or 0)
+
+    a,b,c,d=st.columns(4)
+    a.metric('Sesi',market_date)
+    b.metric('Status',status or '—')
+    c.metric('Jumlah Pick',count)
+    d.metric('Locked At',generated[:19].replace('T',' ') if generated and generated!='—' else '—')
+
+    if status=='NO_TRADE':
+        st.warning(
+            '🚫 **NO TRADE** • Tidak ada saham yang lolos quality gate Pre-Market. '
+            'Sistem sengaja tidak memaksa lima rekomendasi.'
+        )
+        if run.get('note'):
+            st.caption(run['note'])
+        return
+
+    picks=read_premarket_picks(market_date,5)
+    if picks.empty:
+        st.warning('Status Pre-Market sudah LOCKED, tetapi detail pick belum tersedia pada database.')
+        return
+
+    show=picks.copy()
+    for col in ['confidence','ai_score','entry_low','entry_high','stop_loss','target_1','target_2']:
+        if col in show.columns:
+            show[col]=pd.to_numeric(show[col],errors='coerce')
+    if 'confidence' in show.columns:
+        show['confidence']=show['confidence'].round(1)
+    if 'ai_score' in show.columns:
+        show['ai_score']=show['ai_score'].round(1)
+    for col in ['entry_low','entry_high','stop_loss','target_1','target_2']:
+        if col in show.columns:
+            show[col]=show[col].round(2)
+
+    show=show.rename(columns={
+        'rank':'Rank','ticker':'ticker','company':'Company','decision':'Decision',
+        'confidence':'Confidence %','ai_score':'AI Score','risk':'Risk',
+        'entry_low':'Entry Low','entry_high':'Entry High','stop_loss':'Stop Loss',
+        'target_1':'Target 1','target_2':'Target 2','ihsg_regime':'IHSG Regime',
+        'reason':'Why','generated_at':'Locked At'
+    })
+    cols=[c for c in [
+        'Rank','ticker','Company','Decision','Confidence %','AI Score','Risk',
+        'Entry Low','Entry High','Stop Loss','Target 1','Target 2','IHSG Regime','Why'
+    ] if c in show.columns]
+    render_clickable_dataframe(show,cols,2)
+
+    st.success(
+        f'🔒 **{count} pick terkunci untuk sesi {market_date}.** '
+        'Daftar ini dipakai sebagai bukti evaluasi Pre-Market dan tidak mengikuti perubahan Live Opportunity.'
+    )
+    st.caption(
+        'Opening Confirmation pada tahap berikutnya akan memeriksa harga pembukaan terhadap Entry Low/High '
+        'untuk menentukan BUY, WAIT / DON’T CHASE, atau CANCEL.'
+    )
 
 def render_app():
-    st.set_page_config(page_title='AI Stock Intelligence V1.8.42 • APK FCM',layout='wide')
-    st.title('AI Stock Intelligence V1.8.42 • APK FCM')
-    st.caption('Continuous Intelligence • Rank → Opportunity → Alert → APK FCM → Deep Analysis → Risk → Hold → Overnight')
-    universe,source=load_universe(); res=read_opportunities(100); model=load_active_model()
-    forced_ticker=str(st.query_params.get('ticker','')).upper().replace('.JK','').strip() or None
-    stock_search_panel(universe,res,forced_ticker=forced_ticker)
-    engine_last=state_get('engine_last_run'); trained=state_get('active_model_trained_at') or state_get('jst_trained_at'); acc=state_get('jst_test_accuracy'); wf=state_get('walk_forward_accuracy'); active_name=state_get('active_model_name') or ('JST' if model else 'BACKGROUND')
-    snap_at,snap_source=_snapshot_status(); outlook=read_outlook(); ihsg=ihsg_snapshot()
+    st.set_page_config(page_title='AI Stock Intelligence V1.8.41', page_icon='📈', layout='wide')
+    st.markdown("""
+    <style>
+      .block-container{padding-top:1.15rem;padding-bottom:2rem;max-width:1500px}
+      h1{font-size:clamp(1.55rem,3vw,2.35rem)!important;margin-bottom:.15rem!important}
+      h2,h3{letter-spacing:-.02em}
+      div[data-testid="stMetric"]{border:1px solid rgba(128,128,128,.22);border-radius:14px;padding:12px 14px;background:rgba(128,128,128,.045)}
+      div[data-testid="stMetricLabel"]{font-weight:650}
+      .asi-card{border:1px solid rgba(128,128,128,.22);border-radius:16px;padding:14px 16px;margin:.35rem 0 .8rem 0;background:rgba(128,128,128,.04)}
+      .asi-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+      .asi-pill{display:inline-block;padding:5px 10px;border-radius:999px;font-weight:750;font-size:.82rem;border:1px solid transparent}
+      .asi-green{color:#16a34a;background:rgba(22,163,74,.12);border-color:rgba(22,163,74,.25)}
+      .asi-red{color:#dc2626;background:rgba(220,38,38,.12);border-color:rgba(220,38,38,.25)}
+      .asi-yellow{color:#d97706;background:rgba(217,119,6,.13);border-color:rgba(217,119,6,.27)}
+      .asi-gray{color:#6b7280;background:rgba(107,114,128,.12);border-color:rgba(107,114,128,.22)}
+      @media(max-width:700px){.block-container{padding-left:.75rem;padding-right:.75rem}.asi-card{padding:11px 12px}div[data-testid="stMetric"]{padding:9px 10px}div[data-testid="stMetricValue"]{font-size:clamp(1.15rem,6vw,1.7rem)!important;line-height:1.05!important}div[data-testid="stMetricLabel"]{font-size:.82rem!important}}
+    </style>
+    """, unsafe_allow_html=True)
 
-    c1,c2,c3,c4,c5=st.columns(5)
-    c1.metric('Universe',len(universe),'auto')
-    c2.metric('Intelligence','READY' if snap_at and not res.empty else 'PREPARING')
-    c3.metric('Snapshot',snap_at or 'Belum ada')
-    c4.metric('Active model',active_name if model else 'BACKGROUND')
-    c5.metric('WF accuracy',f'{float(wf)*100:.1f}%' if wf else '—')
+    universe, source = load_universe()
+    res = read_opportunities(100)
+    model = load_active_model()
+    engine_last = state_get('engine_last_run')
+    trained = state_get('active_model_trained_at') or state_get('jst_trained_at')
+    wf = state_get('walk_forward_accuracy')
+    wf_at = state_get('walk_forward_at')
+    active_name = state_get('active_model_name') or ('JST' if model else 'BACKGROUND')
+    snap_at, snap_source = _snapshot_status()
+    outlook = read_outlook()
+    ihsg = ihsg_snapshot()
+    ready = bool(snap_at and not res.empty)
 
-    st.subheader('🚀 Dynamic Opportunity Engine')
-    dyn=read_dynamic_opportunities(int(CFGD.get('dynamic_opportunity_count',5)))
-    if dyn.empty:
-        st.info('Dynamic Opportunity Engine belum memiliki kandidat yang memenuhi filter relatif + AI + risiko.')
-    else:
-        dshow=dyn.copy()
-        for c in ['opportunity_score','ai_score']:
-            if c in dshow: dshow[c]=pd.to_numeric(dshow[c],errors='coerce').round(1)
-        for c in ['p_up','p_down','confidence','relative_percentile','time_edge','time_confidence']:
-            if c in dshow: dshow[c]=(pd.to_numeric(dshow[c],errors='coerce')*100).round(1)
-        dshow=dshow.rename(columns={'opportunity_score':'Opportunity Score','market_regime':'IHSG Regime','market_score':'IHSG Score','ihsg_alignment':'IHSG Alignment','regime_adjustment':'IHSG Adj.','state':'State','entry_status':'Entry Window','horizon':'Horizon','close':'Price','entry_low':'Entry Low','entry_high':'Entry High','stop_loss':'Stop Loss','target_1':'Target 1','target_2':'Target 2','risk_reward':'R/R','risk':'Risk','ai_score':'AI Score','p_up':'P(UP) %','p_down':'P(DOWN) %','confidence':'AI Conf. %','relative_percentile':'Relative %','time_edge':'Time Edge %','time_confidence':'Time Conf. %','stable_cycles':'Stable Cycles'})
-        cols=[c for c in ['rank','ticker','company','Opportunity Score','State','Entry Window','Horizon','IHSG Regime','IHSG Score','IHSG Alignment','IHSG Adj.','Price','Entry Low','Entry High','Stop Loss','Target 1','Target 2','R/R','Risk','AI Score','P(UP) %','P(DOWN) %','AI Conf. %','Relative %','Time Edge %','Time Conf. %','Stable Cycles'] if c in dshow.columns]
-        render_clickable_dataframe(dshow,cols)
-        top=dyn.iloc[0]
-        st.info(f"#1 {top.ticker} • {top.state} • Opportunity Score {top.opportunity_score:.1f} • Entry Window {top.entry_status} • IHSG {getattr(top,'market_regime','—')} ({float(getattr(top,'market_score',50)):.1f}) • Alignment {float(getattr(top,'ihsg_alignment',50)):.1f}")
-        st.caption('V1.8.28 tidak memaksa Top-5. Kandidat dapat masuk/keluar berdasarkan perubahan kondisi. Hysteresis menjaga agar ranking tidak berganti hanya karena perubahan kecil. Nilai probabilistik, bukan jaminan hasil.')
+    def _pill(text, kind='gray'):
+        safe = str(text).replace('<','&lt;').replace('>','&gt;')
+        return f'<span class="asi-pill asi-{kind}">{safe}</span>'
+
+    def _kind(value):
+        x = str(value or '').upper()
+        if any(k in x for k in ['READY','BUY','UP','ACTIVE','BULL','GOOD','PASS','LOW']): return 'green'
+        if any(k in x for k in ['SELL','AVOID','DOWN','ERROR','FAILED','BEAR','HIGH']): return 'red'
+        if any(k in x for k in ['WATCH','WAIT','NEAR','DEVELOP','SIDEWAYS','WARNING','MEDIUM','PREPAR']): return 'yellow'
+        return 'gray'
+
+    st.title('📈 AI Stock Intelligence V1.8.42')
+    st.caption('Continuous Intelligence • Rank → Opportunity → Alert → Deep Analysis → Risk → Hold → Overnight')
+    st.markdown('<div class="asi-row">'+_pill('READY' if ready else 'PREPARING', 'green' if ready else 'yellow')+_pill(f'Model {active_name}', 'green' if model else 'gray')+_pill(f'Snapshot {snap_at or "belum ada"}', 'green' if snap_at else 'gray')+'</div>', unsafe_allow_html=True)
+
+    forced_detail=str(st.query_params.get('ticker','')).upper().replace('.JK','').strip() or None
+    if forced_detail:
+        b1,b2=st.columns([1,5])
+        if b1.button('← Dashboard',key='back_dashboard',use_container_width=True):
+            st.query_params.clear()
+            st.rerun()
+        b2.caption(f'Deep Analysis aktif untuk {forced_detail}. Tombol ← Dashboard kembali ke halaman utama.')
+        stock_search_panel(universe,res,forced_ticker=forced_detail)
+        return
+
+    tab_home, tab_premarket, tab_opp, tab_search, tab_history, tab_ai, tab_engine = st.tabs(['🏠 Ringkasan','🌅 Pre-Market','🚀 Opportunity','🔎 Analisis Saham','📚 History & Shadow','🧠 AI & Validasi','⚙️ Engine / Log'])
+
+    with tab_home:
+        st.subheader('Ringkasan Sistem')
+        c1,c2,c3,c4,c5 = st.columns(5)
+        c1.metric('Universe', len(universe))
+        c2.metric('Intelligence', 'READY' if ready else 'PREPARING')
+        c3.metric('Snapshot', snap_at or 'Belum ada')
+        c4.metric('Active model', active_name if model else 'BACKGROUND')
+        c5.metric('WF accuracy', f'{float(wf)*100:.1f}%' if wf else '—')
+
+        st.subheader('🇮🇩 IHSG • Market Context')
+        if ihsg:
+            trend=str(ihsg.get('trend','N/A'))
+            gap=ihsg.get('ma_gap_pct',np.nan)
+            market_note = ('Pasar mendukung posisi agresif secara relatif, tetapi sinyal saham tetap wajib lolos filter AI + risiko.' if trend=='BULLISH' else
+                           'Pasar netral. Prioritaskan saham dengan relative strength dan entry window yang lebih kuat.' if trend=='SIDEWAYS' else
+                           'Pasar sedang defensif. Kandidat Top 5 tetap ditampilkan, tetapi konteks risiko IHSG perlu diberi bobot lebih besar.' if trend=='BEARISH' else
+                           'Data IHSG belum cukup untuk menentukan regime.')
+            i1,i2,i3,i4,i5=st.columns(5)
+            i1.metric('IHSG',f"{ihsg['close']:,.2f}")
+            i2.metric('Perubahan 1D',f"{ihsg['change_pct']:+.2f}%" if np.isfinite(ihsg['change_pct']) else '—')
+            i3.metric('MA20',f"{ihsg['ma20']:,.2f}" if np.isfinite(ihsg['ma20']) else '—')
+            i4.metric('Jarak vs MA20',f"{gap:+.2f}%" if np.isfinite(gap) else '—')
+            i5.metric('Market Regime',trend)
+            st.markdown('<div class="asi-card"><div class="asi-row">'+_pill(trend,_kind(trend))+'</div><div style="margin-top:8px">'+market_note+'</div></div>',unsafe_allow_html=True)
+            st.caption('IHSG juga sudah menjadi bagian dari konteks model/opportunity melalui fitur market regime, relative strength, market score, dan alignment yang tersedia pada engine.')
+        else:
+            st.warning('Data IHSG belum tersedia pada snapshot ini. Ranking saham tetap berjalan, tetapi market context belum dapat ditampilkan.')
+
+        pm_run=read_premarket_run()
+        st.subheader('🌅 Pre-Market untuk Sesi Berikutnya')
+        if pm_run:
+            pm_status=str(pm_run.get('status','')).upper()
+            pm_date=str(pm_run.get('market_date') or '—')
+            pm_count=int(pm_run.get('pick_count') or 0)
+            pma,pmb,pmc=st.columns(3)
+            pma.metric('Sesi',pm_date)
+            pmb.metric('Status',pm_status or '—')
+            pmc.metric('Locked Picks',pm_count)
+            if pm_status=='NO_TRADE':
+                st.warning('🚫 NO TRADE • Tidak ada kandidat yang lolos quality gate Pre-Market.')
+            else:
+                st.success(f'🔒 {pm_count} Pre-Market pick sudah dikunci untuk {pm_date}. Lihat tab 🌅 Pre-Market untuk detail.')
+        else:
+            st.info('Pre-Market belum memiliki locked run.')
+
+        dyn = read_dynamic_opportunities(int(CFGD.get('dynamic_opportunity_count',5)))
+        st.subheader('🚀 Live Opportunity Saat Ini')
+        if dyn.empty:
+            st.info('Belum ada kandidat yang memenuhi filter relatif + AI + risiko.')
+        else:
+            dshow=dyn.copy()
+            for c in ['opportunity_score','ai_score']:
+                if c in dshow: dshow[c]=pd.to_numeric(dshow[c],errors='coerce').round(1)
+            for c in ['p_up','p_down','confidence','relative_percentile','time_edge','time_confidence']:
+                if c in dshow: dshow[c]=(pd.to_numeric(dshow[c],errors='coerce')*100).round(1)
+            dshow=dshow.rename(columns={'opportunity_score':'Opportunity Score','state':'State','entry_status':'Entry Window','close':'Price','entry_low':'Entry Low','entry_high':'Entry High','stop_loss':'Stop Loss','target_1':'Target 1','target_2':'Target 2','risk':'Risk','ai_score':'AI Score','p_up':'P(UP) %','p_down':'P(DOWN) %','confidence':'AI Conf. %','market_regime':'IHSG Regime'})
+            cols=[c for c in ['rank','ticker','company','Opportunity Score','State','Entry Window','Price','Entry Low','Entry High','Stop Loss','Target 1','Target 2','Risk','AI Score','P(UP) %','P(DOWN) %','AI Conf. %','IHSG Regime'] if c in dshow.columns]
+            render_clickable_dataframe(dshow.head(5), cols)
+            top=dyn.iloc[0]
+            st.markdown('<div class="asi-card"><b>#1 '+str(top.ticker)+'</b><br><div class="asi-row">'+_pill(getattr(top,'state','—'),_kind(getattr(top,'state','—')))+_pill('Entry '+str(getattr(top,'entry_status','—')),_kind(getattr(top,'entry_status','—')))+_pill('Risk '+str(getattr(top,'risk','—')),_kind(getattr(top,'risk','—')))+'</div></div>',unsafe_allow_html=True)
+
+        st.subheader('🧭 Next-Session Intelligence')
+        if outlook:
+            o1,o2,o3,o4,o5=st.columns(5)
+            o1.metric('Next session',outlook['next_session']); o2.metric('🟢 BUY',outlook['buy_count']); o3.metric('🔴 SELL/AVOID',outlook['sell_count']); o4.metric('🟡 NEAR ENTRY',outlook['near_count']); o5.metric('⚪ WAIT',outlook['wait_count'])
+            st.caption(f"Snapshot {outlook['market_status']} • generated {outlook['generated_at']}")
+        else:
+            st.info('AI sedang menyiapkan snapshot sesi berikutnya.')
 
 
-    if ihsg:
-        st.subheader('Market Context • IHSG')
-        m1,m2,m3,m4=st.columns(4)
-        m1.metric('IHSG',f"{ihsg['close']:,.2f}")
-        m2.metric('IHSG 1D',f"{ihsg['change_pct']:+.2f}%" if np.isfinite(ihsg['change_pct']) else '—')
-        m3.metric('IHSG MA20',f"{ihsg['ma20']:,.2f}" if np.isfinite(ihsg['ma20']) else '—')
-        m4.metric('Market Trend',ihsg['trend'])
+    with tab_premarket:
+        render_premarket_panel()
 
-    st.subheader('🧭 Next-Session Intelligence')
-    if outlook:
-        o1,o2,o3,o4,o5=st.columns(5)
-        o1.metric('Next session',outlook['next_session'])
-        o2.metric('🟢 BUY',outlook['buy_count'])
-        o3.metric('🔴 SELL/AVOID',outlook['sell_count'])
-        o4.metric('🟡 NEAR ENTRY',outlook['near_count'])
-        o5.metric('⚪ WAIT',outlook['wait_count'])
-        st.caption(f"Snapshot {outlook['market_status']} • generated {outlook['generated_at']}")
-    else:
-        st.info('AI sedang menyiapkan snapshot pertama. Setelah tersedia, dashboard akan membaca hasil terakhir tanpa scan ulang.')
+    with tab_opp:
+        st.subheader('🚀 Dynamic Opportunity Engine')
+        dyn=read_dynamic_opportunities(int(CFGD.get('dynamic_opportunity_count',5)))
+        if dyn.empty:
+            st.info('Belum ada kandidat Dynamic Opportunity.')
+        else:
+            dshow=dyn.copy()
+            for c in ['opportunity_score','ai_score']:
+                if c in dshow: dshow[c]=pd.to_numeric(dshow[c],errors='coerce').round(1)
+            for c in ['p_up','p_down','confidence','relative_percentile','time_edge','time_confidence']:
+                if c in dshow: dshow[c]=(pd.to_numeric(dshow[c],errors='coerce')*100).round(1)
+            dshow=dshow.rename(columns={'opportunity_score':'Opportunity Score','market_regime':'IHSG Regime','state':'State','entry_status':'Entry Window','horizon':'Horizon','close':'Price','entry_low':'Entry Low','entry_high':'Entry High','stop_loss':'Stop Loss','target_1':'Target 1','target_2':'Target 2','risk_reward':'R/R','risk':'Risk','ai_score':'AI Score','p_up':'P(UP) %','p_down':'P(DOWN) %','confidence':'AI Conf. %','relative_percentile':'Relative %','time_edge':'Time Edge %','time_confidence':'Time Conf. %'})
+            cols=[c for c in ['rank','ticker','company','Opportunity Score','State','Entry Window','Horizon','IHSG Regime','Price','Entry Low','Entry High','Stop Loss','Target 1','Target 2','R/R','Risk','AI Score','P(UP) %','P(DOWN) %','AI Conf. %','Relative %','Time Edge %','Time Conf. %'] if c in dshow.columns]
+            render_clickable_dataframe(dshow,cols)
+            st.caption('Top-5 bersifat dinamis. Kandidat dapat masuk atau keluar ketika kondisi berubah. Output probabilistik, bukan jaminan hasil.')
 
-    st.subheader('🔥 Adaptive AI Opportunities')
-    if res.empty:
-        st.warning('Belum ada snapshot yang tersimpan.')
-    else:
-        maxn=int(CFGD.get('max_opportunities',10))
-        # Stored worker decisions are authoritative. No fixed Top-10 requirement.
-        buy=res[res.decision=='BUY'].head(maxn)
-        near=res[res.decision=='NEAR ENTRY'].head(maxn)
-        sell=res[res.decision=='SELL/AVOID'].head(maxn)
-        watch=res[res.decision=='WATCH'].head(15)
-        wait=res[res.decision=='WAIT'].head(20)
-        if buy.empty:
-            st.warning('🟡 NO STRONG BUY • AI tidak memaksakan rekomendasi. Kandidat yang belum cukup kuat tetap dipisahkan sebagai NEAR ENTRY/WAIT.')
-        st.markdown('### 🟢 BUY SETUPS')
-        if not buy.empty:
-            cols=['rank','ticker','company','close','ai_score','jst_p_up','jst_confidence','risk','entry_low','entry_high','stop_loss','target_1','target_2','risk_reward_2','decision_score']
-            render_clickable_dataframe(buy,cols,3)
-        else: st.info('Tidak ada BUY setup yang memenuhi threshold saat ini.')
-        st.markdown('### 🟡 NEAR ENTRY')
-        if not near.empty:
-            cols=['rank','ticker','company','close','ai_score','jst_p_up','jst_confidence','sector','sector_score','market_regime','risk','entry_low','entry_high','risk_reward_2','decision_score']
-            render_clickable_dataframe(near,cols,3)
-        else: st.info('Tidak ada saham yang mendekati kondisi entry.')
-        st.markdown('### 🔴 SELL / AVOID')
-        if not sell.empty:
-            cols=['rank','ticker','company','close','ai_score','jst_p_down','jst_confidence','risk','decision_score']
-            render_clickable_dataframe(sell,cols,3)
-        else: st.info('Tidak ada SELL/AVOID setup yang memenuhi threshold saat ini.')
-        st.markdown('### 👀 WATCH')
-        if not watch.empty:
-            cols=['rank','ticker','company','close','ai_score','jst_p_up','jst_confidence','sector','sector_score','market_regime','trend','risk','risk_reward_2','decision_score']
-            render_clickable_dataframe(watch,cols,3)
-        else: st.info('Tidak ada kandidat WATCH yang cukup kuat.')
-        st.markdown('### 🟡 WATCH / WAIT')
-        if not wait.empty:
-            cols=['rank','ticker','company','close','ai_score','jst_p_up','jst_p_down','jst_signal','jst_confidence','sector','sector_score','market_regime','trend','risk']
-            render_clickable_dataframe(wait,cols,3)
-        else: st.write('Tidak ada kandidat WAIT yang tersimpan.')
-        st.caption('Decision engine adaptif: BUY 0–10, NEAR ENTRY/WATCH mengikuti kualitas peluang. Tidak ada kuota wajib. Semua output bersifat probabilistik, bukan jaminan profit atau instruksi transaksi.')
+        st.subheader('🔥 Adaptive AI Opportunities')
+        if res.empty:
+            st.warning('Belum ada snapshot yang tersimpan.')
+        else:
+            maxn=int(CFGD.get('max_opportunities',10))
+            groups=[('🟢 BUY SETUPS','BUY',maxn),('🟡 NEAR ENTRY','NEAR ENTRY',maxn),('👀 WATCH','WATCH',15),('🔴 SELL / AVOID','SELL/AVOID',maxn),('⚪ WAIT','WAIT',20)]
+            for title,decision,n in groups:
+                part=res[res.decision==decision].head(n)
+                with st.expander(f'{title} • {len(part)}', expanded=(decision in ['BUY','NEAR ENTRY'])):
+                    if part.empty: st.info('Tidak ada kandidat pada status ini.')
+                    else:
+                        cols=[c for c in ['rank','ticker','company','close','ai_score','jst_p_up','jst_p_down','jst_confidence','market_regime','trend','risk','entry_low','entry_high','stop_loss','target_1','target_2','risk_reward_2','decision_score'] if c in part.columns]
+                        render_clickable_dataframe(part,cols,3)
 
-    st.subheader('🕒 Hold Horizon + Overnight Intelligence')
-    hold=read_hold_intelligence(int(CFGD.get('hold_candidate_pool',20)))
-    if hold.empty:
-        st.info('Hold Intelligence belum memiliki kandidat yang memenuhi filter relatif + AI.')
-    else:
-        hshow=hold.copy()
-        for c in ['hold_score','p_hold','p_up','p_down','confidence','time_edge','overnight_score']:
-            if c in hshow: hshow[c]=pd.to_numeric(hshow[c],errors='coerce') * (1 if c=='hold_score' or c=='overnight_score' else 100)
-        hshow=hshow.rename(columns={'hold_score':'Hold Score','state':'State','hold_horizon':'Hold Horizon','p_hold':'P(Hold) %','p_up':'P(UP) %','p_down':'P(DOWN) %','confidence':'Confidence %','overnight_state':'Overnight','next_session_bias':'Next Session','overnight_score':'Overnight Score','current_price':'Price','stop_loss':'Stop Loss','target_1':'Target 1','risk_reward':'R/R','risk':'Risk','time_edge':'Time Edge %','opportunity_rank':'Opp Rank','market_regime':'IHSG Regime','market_score':'IHSG Score','ihsg_alignment':'IHSG Alignment','regime_effect':'IHSG Effect'})
-        cols=[c for c in ['opportunity_rank','ticker','company','Hold Score','State','Hold Horizon','Overnight','Next Session','Overnight Score','IHSG Regime','IHSG Score','IHSG Alignment','IHSG Effect','P(Hold) %','P(UP) %','P(DOWN) %','Confidence %','Price','Stop Loss','Target 1','R/R','Risk','Time Edge %'] if c in hshow.columns]
-        render_clickable_dataframe(hshow,cols,2)
-        top=hold.iloc[0]
-        st.info(f"#1 {top.ticker} • {top.state} • Hold Horizon {top.hold_horizon} • Overnight {top.overnight_state} • Next Session {top.next_session_bias} • IHSG {getattr(top,'market_regime','—')}")
-        st.caption('Hold Horizon mengukur keberlanjutan kondisi pendukung, bukan jaminan harga naik. Overnight Intelligence menilai apakah tesis saat ini masih valid untuk sesi berikutnya dan dapat berubah menjadi INVALIDATING ketika bukti memburuk.')
+        st.subheader('🕒 Hold Horizon + Overnight Intelligence')
+        hold=read_hold_intelligence(int(CFGD.get('hold_candidate_pool',20)))
+        if hold.empty:
+            st.info('Hold Intelligence belum memiliki kandidat.')
+        else:
+            hshow=hold.copy()
+            for c in ['p_hold','p_up','p_down','confidence','time_edge']:
+                if c in hshow: hshow[c]=(pd.to_numeric(hshow[c],errors='coerce')*100).round(1)
+            hshow=hshow.rename(columns={'hold_score':'Hold Score','state':'State','hold_horizon':'Hold Horizon','p_hold':'P(Hold) %','p_up':'P(UP) %','p_down':'P(DOWN) %','confidence':'Confidence %','overnight_state':'Overnight','next_session_bias':'Next Session','current_price':'Price','stop_loss':'Stop Loss','target_1':'Target 1','risk':'Risk','market_regime':'IHSG Regime'})
+            cols=[c for c in ['opportunity_rank','ticker','company','Hold Score','State','Hold Horizon','Overnight','Next Session','IHSG Regime','P(Hold) %','P(UP) %','P(DOWN) %','Confidence %','Price','Stop Loss','Target 1','Risk'] if c in hshow.columns]
+            render_clickable_dataframe(hshow,cols,2)
 
-    st.subheader('🧠 AI Intelligence Detail')
-    st.caption('Penjelasan ranking relatif, probabilitas JST, confidence, kekuatan relatif, sektor, risiko, dan alasan keputusan. Nilai probabilistik, bukan jaminan hasil.')
-    detail=intelligence_detail(res)
-    if not detail.empty:
-        top_detail=detail.head(25).copy()
-        render_clickable_dataframe(top_detail,top_detail.columns.tolist(),3)
+    with tab_search:
+        forced_ticker=str(st.query_params.get('ticker','')).upper().replace('.JK','').strip() or None
+        stock_search_panel(universe,res,forced_ticker=forced_ticker)
 
-    st.subheader('🧪 Data Quality Audit')
-    audit=data_quality_audit(universe,res)
-    # Separate collection coverage from the current decision snapshot. The latter
-    # may intentionally contain only the validated/usable rows.
-    collected=int(state_get('last_collection_ok') or 0)
-    collection_errors=int(state_get('last_collection_errors') or 0)
-    a1,a2,a3,a4,a5,a6,a7=st.columns(7)
-    a1.metric('Universe',len(universe))
-    a2.metric('Collected',f'{collected}/{len(universe)}')
-    a3.metric('Collection errors',collection_errors)
-    a4.metric('Snapshot analyzed',len(res))
-    a5.metric('Snapshot excluded',len(audit))
-    resolved=int(state_get('last_collection_resolved') or 0); cached=int(state_get('last_collection_cached') or 0); unresolved=int(state_get('last_collection_unresolved') or 0)
-    a6.metric('Recovered',f'{resolved}+{cached}')
-    coverage=float(state_get('last_collection_coverage_pct') or (100*collected/len(universe) if len(universe) else 0))
-    cov_label='GOOD' if coverage>=95 else ('DEGRADED' if coverage>=90 else 'WARNING')
-    a7.metric('Coverage',f'{coverage:.1f}%')
-    st.caption(f'Coverage status: {cov_label} • direct={int(state_get('last_collection_direct') or 0)} • resolved={resolved} • cached fallback={cached} • provider not found={int(state_get('last_collection_provider_not_found') or 0)} • unresolved={unresolved} • other errors={int(state_get('last_collection_other_errors') or 0)}')
+    with tab_history:
+        render_history_shadow()
 
-    if not audit.empty:
-        counts=audit['reason'].value_counts().rename_axis('reason').reset_index(name='count')
-        st.dataframe(counts,width='stretch',hide_index=True)
-        with st.expander('Daftar saham yang belum bisa dianalisis'):
-            st.dataframe(audit.head(100),width='stretch',hide_index=True)
-    else:
-        st.success('Semua saham dalam universe memiliki data yang cukup untuk masuk ke analisis saat snapshot ini.')
-    st.subheader('🛡️ Risk Engine Audit')
-    ra=risk_engine_audit(res)
-    if ra:
-        r1,r2,r3,r4,r5=st.columns(5)
-        r1.metric('Risk levels',f"{ra['risk_levels']}/{ra['analyzed']}")
-        r2.metric('Entry levels',f"{ra['entry_levels']}/{ra['analyzed']}")
-        r3.metric('Stop loss',f"{ra['stop_loss']}/{ra['analyzed']}")
-        r4.metric('R/R qualified',f"{ra['rr_qualified']}/{ra['analyzed']}")
-        r5.metric('High risk',ra['high_risk'])
-        st.caption(f"Risk coverage {ra['coverage_pct']:.1f}% • R/R ≥ {float(CFGD.get('min_risk_reward_2',1.5)):.2f}: {ra['rr_qualified_pct']:.1f}% • Risk Engine {CFGD.get('risk_engine_version','1.8.10')}")
-    recovery_text=state_get('last_collection_recovery')
-    regsum=registry_summary()
-    st.subheader('🧭 Universe & Ticker Intelligence')
-    rc1,rc2,rc3,rc4,rc5=st.columns(5)
-    rc1.metric('Registry',regsum['total'])
-    rc2.metric('Direct',regsum['direct'])
-    rc3.metric('Resolved',regsum['resolved'])
-    rc4.metric('Provider not found',regsum['not_found'])
-    rc5.metric('Unresolved',regsum['unresolved'])
-    st.caption('V1.8.14 registry tetap menjadi fondasi V1.8.15: mapping ticker → provider symbol secara persisten. Resolver hanya menerima kandidat .JK yang cocok dengan ticker atau cukup mirip dengan nama perusahaan, sehingga tidak sembarang menganggap ticker lain sebagai saham yang sama.')
-    registry=read_universe_registry(250)
-    if not registry.empty:
-        show_cols=['ticker','company','provider_symbol','status','confidence','source','last_checked','note']
-        show_cols=[c for c in show_cols if c in registry.columns]
-        st.dataframe(registry[show_cols].round(3) if 'confidence' in show_cols else registry[show_cols],width='stretch',hide_index=True)
+    with tab_ai:
+        st.subheader('🧠 AI Intelligence Detail')
+        detail=intelligence_detail(res)
+        if detail.empty:
+            st.info('Detail AI belum tersedia.')
+        else:
+            top_detail=detail.head(25).copy(); render_clickable_dataframe(top_detail,top_detail.columns.tolist(),3)
 
-    if recovery_text:
-        try:
-            recovery=json.loads(recovery_text)
-        except Exception:
-            recovery=[]
-        if recovery:
-            st.subheader('🔧 Collection Recovery Diagnostics')
-            st.caption('V1.8.14 registry persisten tetap dipakai oleh V1.8.15 dan resolver berbasis nama perusahaan di atas mekanisme direct, resolved, cache fallback, provider 404, dan error lain.')
-            rdf=pd.DataFrame(recovery)
-            if not rdf.empty:
-                st.dataframe(rdf,width='stretch',hide_index=True)
-    errors_text=state_get('last_collection_error_details')
-    if errors_text:
-        try:
-            errs=json.loads(errors_text)
-        except Exception:
-            errs=[]
-        if errs:
-            st.subheader('⚠️ Unresolved Collection Errors')
-            st.caption('Hanya error yang belum punya data valid atau cache memadai yang masuk daftar ini.')
-            edf=pd.DataFrame([{'ticker':e.split(':',1)[0], 'error':e.split(':',1)[1].strip() if ':' in e else e} for e in errs])
-            if not edf.empty:
-                edf['classification']=edf['error'].map(lambda x: 'PROVIDER_NOT_FOUND' if '404 Not Found' in str(x) else 'PROVIDER_ERROR')
-            st.dataframe(edf,width='stretch',hide_index=True)
+        st.subheader('🧪 Model Validation • Out-of-Sample')
+        vsummary,vdetail=read_model_validation()
+        if wf:
+            w1,w2,w3=st.columns(3)
+            w1.metric('Walk-forward','SELESAI'); w2.metric('WF accuracy',f'{float(wf)*100:.1f}%'); w3.metric('Last validation',wf_at or '—')
+            st.success('Walk-forward validation sudah selesai. Nilai di atas berasal dari evaluasi out-of-sample yang tersimpan oleh engine.')
+        else:
+            st.warning('Walk-forward belum memiliki hasil tersimpan.')
+        if not vsummary.empty:
+            primary=int(CFGD.get('primary_target_horizon',3)); primary_df=vsummary[vsummary.horizon_days==primary] if 'horizon_days' in vsummary.columns else vsummary; best=primary_df.iloc[0] if not primary_df.empty else vsummary.iloc[0]
+            vc1,vc2,vc3=st.columns(3); vc1.metric('Primary horizon',f'{primary}D'); vc2.metric('Best model',str(best['model'])); vc3.metric('Balanced accuracy',f"{best['balanced_accuracy_mean']*100:.1f}%")
+            show=vsummary.copy()
+            for c in ['accuracy_mean','accuracy_std','balanced_accuracy_mean','macro_f1_mean','up_precision_mean','up_recall_mean','up_f1_mean']:
+                if c in show: show[c]=(show[c]*100).round(1)
+            st.dataframe(show,width='stretch',hide_index=True)
+            with st.expander('Detail fold model validation'):
+                st.dataframe(vdetail.round(4),width='stretch',hide_index=True)
+        elif wf:
+            st.info('Walk-forward sudah selesai, tetapi laporan perbandingan model yang lebih rinci (model_validation.json) belum tersedia. Ini berbeda dari status walk-forward di atas.')
+        else:
+            st.info('Laporan validasi model rinci belum tersedia.')
 
-    st.subheader('🧪 Model Validation • Out-of-Sample')
-    st.caption('Feature engineering + target diagnostics + class-weighted model comparison. Model aktif dipromosikan hanya dari hasil out-of-sample kronologis, lalu di-fit ulang pada data historis yang tersedia. Hasil historis bukan jaminan performa masa depan.')
-    vsummary,vdetail=read_model_validation()
-    if not vsummary.empty:
-        vc1,vc2,vc3=st.columns(3)
-        primary=int(CFGD.get('primary_target_horizon',3)); primary_df=vsummary[vsummary.horizon_days==primary] if 'horizon_days' in vsummary.columns else vsummary; best=primary_df.iloc[0] if not primary_df.empty else vsummary.iloc[0]
-        vc1.metric('Primary horizon',f"{primary}D")
-        vc2.metric('Best model',str(best['model']))
-        vc3.metric('Balanced accuracy',f"{best['balanced_accuracy_mean']*100:.1f}%")
-        show=vsummary.copy()
-        for c in ['accuracy_mean','accuracy_std','balanced_accuracy_mean','macro_f1_mean','up_precision_mean','up_recall_mean','up_f1_mean']:
-            if c in show: show[c]=(show[c]*100).round(1)
-        st.dataframe(show,width='stretch',hide_index=True)
-        try:
-            with open(os.path.join(DB_DIR,'model_validation.json'),'r',encoding='utf-8') as f: vj=json.load(f)
-            dist=pd.DataFrame(vj.get('target_distribution',[]))
-            if not dist.empty:
-                st.markdown('#### Target distribution')
-                dd=dist.copy()
-                for c in ['down_pct','sideways_pct','up_pct']:
-                    if c in dd: dd[c]=(dd[c]*100).round(1)
-                st.dataframe(dd,width='stretch',hide_index=True)
-                st.caption('Distribusi target dihitung dari data historis yang tersedia. Class weighting hanya dipertimbangkan jika distribusinya memang timpang.')
-            cm=pd.DataFrame(vj.get('confusion_matrices',[]))
-            if not cm.empty:
-                st.markdown('#### Confusion matrix aggregate')
-                opts=cm['horizon_days'].drop_duplicates().tolist()
-                hh=st.selectbox('Horizon confusion matrix',opts,index=0,key='cm_horizon')
-                mm=cm[cm.horizon_days==hh].copy()
-                for model in mm.model.tolist():
-                    r=mm[mm.model==model].iloc[0]
-                    mat=pd.DataFrame([[r.cm_00,r.cm_01,r.cm_02],[r.cm_10,r.cm_11,r.cm_12],[r.cm_20,r.cm_21,r.cm_22]],index=['Actual DOWN','Actual SIDEWAYS','Actual UP'],columns=['Pred DOWN','Pred SIDEWAYS','Pred UP'])
-                    st.markdown(f'**{model}**')
-                    st.dataframe(mat,width='stretch')
-        except Exception:
-            pass
-        try:
-            with open(os.path.join(DB_DIR,'model_validation.json'),'r',encoding='utf-8') as f: vj=json.load(f)
-            dist=pd.DataFrame(vj.get('target_distribution',[]))
-            if not dist.empty:
-                st.markdown('#### Target distribution')
-                dd=dist.copy()
-                for c in ['down_pct','sideways_pct','up_pct']:
-                    if c in dd: dd[c]=(dd[c]*100).round(1)
-                st.dataframe(dd,width='stretch',hide_index=True)
-                st.caption('Distribusi target ditampilkan untuk mendeteksi class imbalance sebelum model diberi class weighting. Kita ukur masalahnya dulu, baru mengobatinya.')
-        except Exception:
-            pass
-        with st.expander('Detail fold walk-forward'):
-            st.dataframe(vdetail.round(4),width='stretch',hide_index=True)
-    else:
-        st.info('Validasi model belum selesai. Engine akan menjalankannya di siklus background berikutnya.')
+        with st.expander('🧪 Data Quality Audit'):
+            audit=data_quality_audit(universe,res); collected=int(state_get('last_collection_ok') or 0); collection_errors=int(state_get('last_collection_errors') or 0); coverage=float(state_get('last_collection_coverage_pct') or (100*collected/len(universe) if len(universe) else 0))
+            a1,a2,a3,a4=st.columns(4); a1.metric('Collected',f'{collected}/{len(universe)}'); a2.metric('Errors',collection_errors); a3.metric('Analyzed',len(res)); a4.metric('Coverage',f'{coverage:.1f}%')
+            if not audit.empty: render_smart_dataframe(audit.head(100),round_digits=3)
+            else: st.success('Semua saham dalam snapshot memiliki data yang cukup.')
 
-    st.subheader('⚙️ Background Engine')
-    st.caption(f"Dynamic Opportunity Engine: {state_get('dynamic_opportunity_at') or 'belum berjalan'} • phase={state_get('dynamic_opportunity_phase') or '—'} • candidates={state_get('dynamic_opportunity_count') or 0}")
-    s1,s2,s3=st.columns(3)
-    s1.metric('Last engine cycle',engine_last or 'Belum ada')
-    s2.metric('Last JST training',trained or 'Background / belum ada')
-    s3.metric('Last walk-forward',state_get('walk_forward_at') or 'Scheduled / belum ada')
-    st.info('Engine memakai intelligent scheduler: snapshot awal cepat, full refresh terutama setelah market close, scan ringan di antaranya, retraining dan walk-forward terjadwal. Tidak ada tombol manual yang wajib ditekan.')
+        with st.expander('🛡️ Risk Engine Audit'):
+            ra=risk_engine_audit(res)
+            if ra:
+                r1,r2,r3,r4=st.columns(4); r1.metric('Risk levels',f"{ra['risk_levels']}/{ra['analyzed']}"); r2.metric('Entry levels',f"{ra['entry_levels']}/{ra['analyzed']}"); r3.metric('Stop loss',f"{ra['stop_loss']}/{ra['analyzed']}"); r4.metric('R/R qualified',f"{ra['rr_qualified']}/{ra['analyzed']}")
 
-    with st.expander('Log proses AI'):
-        logdf=read_engine_log(40)
-        if logdf.empty: st.write('Belum ada log.')
-        else: st.dataframe(logdf,width='stretch',hide_index=True)
+    with tab_engine:
+        st.subheader('⚙️ Background Engine')
+        e1,e2,e3,e4=st.columns(4)
+        e1.metric('Engine','READY' if ready else 'PREPARING'); e2.metric('Last cycle',engine_last or 'Belum ada'); e3.metric('Last JST training',trained or 'Belum ada'); e4.metric('Last walk-forward',wf_at or 'Belum ada')
+        st.caption(f"Dynamic Opportunity: {state_get('dynamic_opportunity_at') or 'belum berjalan'} • phase={state_get('dynamic_opportunity_phase') or '—'} • candidates={state_get('dynamic_opportunity_count') or 0}")
+        st.info('Engine memakai scheduler otomatis: snapshot awal cepat, full refresh, retraining, walk-forward, lalu pembaruan opportunity. Tidak ada tombol manual yang wajib ditekan.')
 
-    st.subheader('Semua Ranking AI')
-    if not res.empty:
-        st.dataframe(res.round(3),width='stretch',hide_index=True)
+        with st.expander('📋 Log proses AI',expanded=True):
+            logdf=read_engine_log(40)
+            if logdf.empty: st.write('Belum ada log.')
+            else: st.dataframe(logdf,width='stretch',hide_index=True)
+
+        with st.expander('🧭 Universe & Ticker Intelligence'):
+            regsum=registry_summary(); rc1,rc2,rc3,rc4=st.columns(4); rc1.metric('Registry',regsum['total']); rc2.metric('Direct',regsum['direct']); rc3.metric('Resolved',regsum['resolved']); rc4.metric('Unresolved',regsum['unresolved'])
+            registry=read_universe_registry(250)
+            if not registry.empty:
+                show_cols=[c for c in ['ticker','company','provider_symbol','status','confidence','source','last_checked','note'] if c in registry.columns]
+                render_smart_dataframe(registry[show_cols],round_digits=3)
+
+        with st.expander('📊 Semua Ranking AI'):
+            if res.empty: st.info('Belum ada ranking tersimpan.')
+            else: render_smart_dataframe(res,round_digits=3)
 
 if __name__ == '__main__':
     render_app()
