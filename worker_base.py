@@ -1216,6 +1216,14 @@ def cycle():
     )
 
     # Produce READY quickly, even before model training.
+    # V1.8.42 diagnostic: expose a small sample of real provider failures.
+    if errors:
+        log(
+            "BOOTSTRAP",
+            "ERROR_SAMPLE",
+            " | ".join(str(err)[:350] for err in errors[:5]),
+        )
+
     bootstrap_res = analyze_and_publish(
         bootstrap,
         "technical-bootstrap",
@@ -1281,6 +1289,14 @@ def cycle():
             f"errors={len(errors)}"
         ),
     )
+
+    # V1.8.42 diagnostic: expose a small sample of real provider failures.
+    if errors:
+        log(
+            "FULL_COLLECT",
+            "ERROR_SAMPLE",
+            " | ".join(str(err)[:350] for err in errors[:5]),
+        )
 
     # ========================================================
     # PHASE 4
