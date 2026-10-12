@@ -13,6 +13,7 @@ import pandas as pd
 import app
 import dynamic_engine
 import recommendation_history
+import top5_timeline
 
 
 BASE = app.BASE
@@ -944,6 +945,22 @@ def analyze_and_publish(
             "ERROR",
             str(exc),
         )
+
+    # V1.8.42: record real full-universe Top-5 transitions and dispatch APK FCM.
+    # Bootstrap snapshots must not produce false Top-5 changes.
+    if str(source).lower() == "full-universe" and dynamic is not None and not dynamic.empty:
+        try:
+            event_result = top5_timeline.record_top5(app.DB, dynamic, source_phase=source)
+            log("TOP5_TIMELINE", event_result.get("status", "UNKNOWN"),
+                f"events={event_result.get('events', 0)}")
+        except Exception:
+            log("TOP5_TIMELINE", "ERROR", traceback.format_exc()[-1800:])
+        try:
+            delivery_result = top5_timeline.dispatch_fcm(app.DB, CFG)
+            log("TOP5_FCM", delivery_result.get("status", "UNKNOWN"),
+                f"sent={delivery_result.get('sent', 0)} failed={delivery_result.get('failed', 0)}")
+        except Exception:
+            log("TOP5_FCM", "ERROR", traceback.format_exc()[-1800:])
 
     # V1.8.40 foundation: immutable recommendation history + paper portfolio.
     # Only the final full-universe snapshot is locked for evaluation. Bootstrap
