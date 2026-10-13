@@ -1968,7 +1968,7 @@ def render_premarket_panel():
         render_clickable_dataframe(show,[c for c in ['ticker','Decision','Outcome','Verdict','Return %','Close'] if c in show.columns],2)
 
 def render_app():
-    st.set_page_config(page_title='AI Stock Intelligence V1.8.46', page_icon='📈', layout='wide')
+    st.set_page_config(page_title='AI Stock Intelligence V1.8.47', page_icon='📈', layout='wide')
     st.markdown("""
     <style>
       .block-container{padding-top:1.15rem;padding-bottom:2rem;max-width:1500px}
@@ -2011,7 +2011,7 @@ def render_app():
         if any(k in x for k in ['WATCH','WAIT','NEAR','DEVELOP','SIDEWAYS','WARNING','MEDIUM','PREPAR']): return 'yellow'
         return 'gray'
 
-    st.title('📈 AI Stock Intelligence V1.8.46')
+    st.title('📈 AI Stock Intelligence V1.8.47')
     st.caption('Continuous Intelligence • Rank → Opportunity → Alert → Deep Analysis → Risk → Hold → Overnight')
     st.markdown('<div class="asi-row">'+_pill('READY' if ready else 'PREPARING', 'green' if ready else 'yellow')+_pill(f'Model {active_name}', 'green' if model else 'gray')+_pill(f'Snapshot {snap_at or "belum ada"}', 'green' if snap_at else 'gray')+'</div>', unsafe_allow_html=True)
 

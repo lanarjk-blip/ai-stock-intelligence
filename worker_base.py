@@ -18,6 +18,7 @@ import premarket_intelligence
 import premarket_evaluation
 import premarket_explain
 import closing_overnight
+import market_session
 
 
 BASE = app.BASE
@@ -1068,12 +1069,9 @@ def ensure_premarket_tables():
         con.close()
 
 def premarket_market_date():
-    d = _wib_now().date()
-    if d.weekday() == 5:
-        d += timedelta(days=2)
-    elif d.weekday() == 6:
-        d += timedelta(days=1)
-    return d.isoformat()
+    # Session-aware: after the final IDX close a new snapshot belongs to the
+    # next valid trading date, never to the session that already ended.
+    return market_session.next_trading_date(CFG, now=_wib_now(), after_close=True)
 
 def lock_premarket_picks(res, source_phase="full-universe"):
     ensure_premarket_tables()
@@ -1171,7 +1169,16 @@ def evaluate_locked_premarket():
     con=dbcon()
     try:
         dates=[r[0] for r in con.execute(
-            "SELECT market_date FROM premarket_runs WHERE status='LOCKED' AND market_date < ? ORDER BY market_date",
+            """SELECT r.market_date FROM premarket_runs r
+               WHERE r.status='LOCKED' AND r.market_date < ?
+                 AND EXISTS (SELECT 1 FROM premarket_picks p WHERE p.market_date=r.market_date)
+                 AND NOT EXISTS (
+                     SELECT 1 FROM premarket_picks p2
+                     LEFT JOIN premarket_evaluations e
+                       ON e.market_date=p2.market_date AND e.ticker=p2.ticker
+                     WHERE p2.market_date=r.market_date AND e.ticker IS NULL
+                 ) = 0
+               ORDER BY r.market_date""",
             (today,)).fetchall()]
     finally:
         con.close()
@@ -1201,7 +1208,7 @@ def evaluate_locked_premarket():
         if rows:
             con=dbcon()
             try:
-                con.executemany("""INSERT OR REPLACE INTO premarket_evaluations
+                con.executemany("""INSERT OR IGNORE INTO premarket_evaluations
                     (market_date,evaluated_at,ticker,decision,entry_touched,stop_hit,target_1_hit,target_2_hit,outcome,verdict,return_pct,session_open,session_high,session_low,session_close)
                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",rows)
                 con.commit(); total+=len(rows)
