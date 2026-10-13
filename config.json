@@ -53,7 +53,7 @@
   "entry_zone_atr_high": 0.1,
   "risk_engine_version": "1.8.10",
   "data_recovery_version": "1.8.11",
-  "engine_version": "1.8.44",
+  "engine_version": "1.8.45",
   "collector_resolver_enabled": true,
   "collector_cache_fallback_min_rows": 60,
   "provider_not_found_cooldown_hours": 6,
@@ -127,5 +127,7 @@
   "overnight_min_p_up": 0.64,
   "overnight_min_risk_reward": 1.5,
   "overnight_max_risk": "MEDIUM",
-  "overnight_block_bearish_ihsg": true
+  "overnight_block_bearish_ihsg": true,
+  "ai_stock_ask_version": "1.8.45",
+  "ai_stock_ask_enabled": true
 }
