@@ -16,6 +16,7 @@ import recommendation_history
 import top5_timeline
 import premarket_intelligence
 import premarket_evaluation
+import premarket_explain
 
 
 BASE = app.BASE
@@ -1096,7 +1097,7 @@ def lock_premarket_picks(res, source_phase="full-universe"):
             hi=_pm_num(row.get("entry_high"))
             if lo is None and close is not None: lo=close*0.985
             if hi is None and close is not None: hi=close*1.015
-            reason=f"{str(row.get('decision','WATCH'))} • AI {_pm_num(row.get('ai_score'),0):.1f}"
+            reason=premarket_explain.explain_pick(row.to_dict())
             rows.append((market_date,generated_at,i+1,str(row.get("ticker","")),
                 str(row.get("company","")),str(row.get("decision","WATCH")),
                 conf,_pm_num(row.get("ai_score")),str(row.get("risk","")),
