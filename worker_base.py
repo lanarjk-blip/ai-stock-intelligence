@@ -1144,12 +1144,85 @@ def lock_premarket_picks(res, source_phase="full-universe"):
     return {"status":"LOCKED","pick_count":len(rows)}
 
 
+
+# ============================================================
+# V1.8.46 POST-CLOSE PRE-MARKET EVALUATION
+# ============================================================
+
+def ensure_premarket_evaluation_table():
+    con=dbcon()
+    try:
+        con.execute("""CREATE TABLE IF NOT EXISTS premarket_evaluations (
+            market_date TEXT NOT NULL, evaluated_at TEXT NOT NULL,
+            ticker TEXT NOT NULL, decision TEXT, entry_touched INTEGER,
+            stop_hit INTEGER, target_1_hit INTEGER, target_2_hit INTEGER,
+            outcome TEXT, verdict TEXT, return_pct REAL,
+            session_open REAL, session_high REAL, session_low REAL, session_close REAL,
+            PRIMARY KEY(market_date,ticker))""")
+        con.commit()
+    finally:
+        con.close()
+
+
+def evaluate_locked_premarket():
+    """Evaluate completed locked sessions from stored daily OHLC without hindsight edits."""
+    ensure_premarket_tables(); ensure_premarket_evaluation_table()
+    today=_wib_now().date().isoformat()
+    con=dbcon()
+    try:
+        dates=[r[0] for r in con.execute(
+            "SELECT market_date FROM premarket_runs WHERE status='LOCKED' AND market_date < ? ORDER BY market_date",
+            (today,)).fetchall()]
+    finally:
+        con.close()
+    total=0
+    for market_date in dates:
+        con=dbcon()
+        try:
+            picks=pd.read_sql_query("SELECT * FROM premarket_picks WHERE market_date=? ORDER BY rank",con,params=(market_date,))
+        finally:
+            con.close()
+        if picks.empty: continue
+        rows=[]
+        for _,pick in picks.iterrows():
+            ticker=str(pick.get('ticker','')).upper().replace('.JK','').strip()
+            con=dbcon()
+            try:
+                market=pd.read_sql_query(
+                    "SELECT open,high,low,close FROM prices WHERE ticker=? AND date(date)=date(?) ORDER BY date DESC LIMIT 1",
+                    con,params=(ticker,market_date))
+            except Exception:
+                market=pd.DataFrame()
+            finally:
+                con.close()
+            if market.empty: continue
+            ev=premarket_evaluation.evaluate_pick(pick.to_dict(),market.iloc[0].to_dict())
+            rows.append((market_date,datetime.now(timezone.utc).isoformat(),ticker,ev.get('decision'),int(ev.get('entry_touched',False)),int(ev.get('stop_hit',False)),int(ev.get('target_1_hit',False)),int(ev.get('target_2_hit',False)),ev.get('outcome'),ev.get('verdict'),ev.get('return_pct_vs_entry_low'),ev.get('session_open'),ev.get('session_high'),ev.get('session_low'),ev.get('session_close')))
+        if rows:
+            con=dbcon()
+            try:
+                con.executemany("""INSERT OR REPLACE INTO premarket_evaluations
+                    (market_date,evaluated_at,ticker,decision,entry_touched,stop_hit,target_1_hit,target_2_hit,outcome,verdict,return_pct,session_open,session_high,session_low,session_close)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",rows)
+                con.commit(); total+=len(rows)
+            finally:
+                con.close()
+    if total:
+        app.state_set('premarket_evaluation_at',datetime.now(timezone.utc).isoformat())
+        log('PREMARKET_EVAL','UPDATED',f'rows={total}')
+    return total
+
+
 # ============================================================
 # ENGINE CYCLE
 # ============================================================
 
 def cycle():
     ensure_tables()
+    try:
+        evaluate_locked_premarket()
+    except Exception:
+        log("PREMARKET_EVAL","ERROR",traceback.format_exc()[-1800:])
 
     universe, source = app.load_universe()
 

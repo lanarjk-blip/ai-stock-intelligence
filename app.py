@@ -1868,6 +1868,18 @@ def read_premarket_picks(market_date=None, limit=5):
         return pd.DataFrame()
 
 
+
+def read_premarket_evaluations(limit=100):
+    try:
+        con=dbcon()
+        d=pd.read_sql_query("""SELECT market_date,evaluated_at,ticker,decision,outcome,verdict,return_pct,
+            session_open,session_high,session_low,session_close FROM premarket_evaluations
+            ORDER BY market_date DESC,ticker LIMIT ?""",con,params=(int(limit),))
+        con.close(); return d
+    except Exception:
+        return pd.DataFrame()
+
+
 def render_premarket_panel():
     run=read_premarket_run()
     st.subheader('🌅 Pre-Market Top Picks')
@@ -1940,8 +1952,23 @@ def render_premarket_panel():
         'untuk menentukan BUY, WAIT / DON’T CHASE, atau CANCEL.'
     )
 
+    evaluation=read_premarket_evaluations(100)
+    if not evaluation.empty:
+        st.markdown('### 📊 Evaluasi Pre-Market Setelah Market Tutup')
+        latest_date=str(evaluation.iloc[0]['market_date'])
+        ev=evaluation[evaluation['market_date'].astype(str)==latest_date].copy()
+        verdict=ev['verdict'].astype(str).str.upper()
+        sesuai=int((verdict=='SESUAI').sum()); tidak=int((verdict=='TIDAK_SESUAI').sum()); review=int((verdict=='REVIEW').sum())
+        decided=sesuai+tidak
+        hit=(sesuai/decided*100) if decided else None
+        e1,e2,e3,e4=st.columns(4)
+        e1.metric('Evaluasi Sesi',latest_date); e2.metric('SESUAI',sesuai); e3.metric('TIDAK SESUAI',tidak); e4.metric('Hit Rate',f'{hit:.1f}%' if hit is not None else '—')
+        st.caption(f'REVIEW {review} • hasil asli Pre-Market tetap immutable; evaluasi hanya mencatat apa yang benar-benar terjadi.')
+        show=ev.rename(columns={'ticker':'ticker','decision':'Decision','outcome':'Outcome','verdict':'Verdict','return_pct':'Return %','session_close':'Close'})
+        render_clickable_dataframe(show,[c for c in ['ticker','Decision','Outcome','Verdict','Return %','Close'] if c in show.columns],2)
+
 def render_app():
-    st.set_page_config(page_title='AI Stock Intelligence V1.8.45', page_icon='📈', layout='wide')
+    st.set_page_config(page_title='AI Stock Intelligence V1.8.46', page_icon='📈', layout='wide')
     st.markdown("""
     <style>
       .block-container{padding-top:1.15rem;padding-bottom:2rem;max-width:1500px}
@@ -1984,7 +2011,7 @@ def render_app():
         if any(k in x for k in ['WATCH','WAIT','NEAR','DEVELOP','SIDEWAYS','WARNING','MEDIUM','PREPAR']): return 'yellow'
         return 'gray'
 
-    st.title('📈 AI Stock Intelligence V1.8.45')
+    st.title('📈 AI Stock Intelligence V1.8.46')
     st.caption('Continuous Intelligence • Rank → Opportunity → Alert → Deep Analysis → Risk → Hold → Overnight')
     st.markdown('<div class="asi-row">'+_pill('READY' if ready else 'PREPARING', 'green' if ready else 'yellow')+_pill(f'Model {active_name}', 'green' if model else 'gray')+_pill(f'Snapshot {snap_at or "belum ada"}', 'green' if snap_at else 'gray')+'</div>', unsafe_allow_html=True)
 
