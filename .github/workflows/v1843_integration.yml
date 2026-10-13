@@ -1,4 +1,4 @@
-name: V1.8.44 Closing Overnight Integration
+name: V1.8.45 AI Stock Ask Integration
 
 on:
   push:
@@ -17,38 +17,38 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install focused dependencies
-        run: python -m pip install -q pytest pandas
-      - name: Wire closing overnight intelligence
+        run: python -m pip install -q pytest pandas numpy requests streamlit
+      - name: Wire AI Stock Ask UI
         shell: python
         run: |
           from pathlib import Path
+          app=Path('app.py')
+          text=app.read_text(encoding='utf-8')
+          if 'import ai_stock_ask\n' not in text:
+              text=text.replace('import recommendation_history\n','import recommendation_history\nimport ai_stock_ask\n',1)
+          text=text.replace("AI Stock Intelligence V1.8.43", "AI Stock Intelligence V1.8.45")
+          anchor="""    st.markdown('### 🚨 Smart Monitoring & Alert Engine')\n"""
+          block="""    st.markdown('### 💬 AI Stock Ask')\n    ask_horizon=st.radio('Horizon AI Stock Ask',['TODAY','TOMORROW'],horizontal=True,key=f'ai_ask_horizon_{selected_ticker}')\n    ask_snapshot={} if ur is None else ur.to_dict()\n    if dr is not None:\n        for k,v in dr.to_dict().items():\n            if k not in ask_snapshot or pd.isna(ask_snapshot.get(k)):\n                ask_snapshot[k]=v\n    ask_snapshot['ticker']=selected_ticker\n    ask=ai_stock_ask.answer_stock(ask_snapshot,ask_horizon)\n    ask_action=str(ask.get('action','WAIT')).upper()\n    if ask_action=='BUY': st.success(f\"🟢 **{ask.get('headline')}**\")\n    elif ask_action=='AVOID': st.error(f\"🔴 **{ask.get('headline')}**\")\n    else: st.warning(f\"🟡 **{ask.get('headline')}**\")\n    st.write(ask.get('reason',''))\n    levels=ask.get('levels',{}) or {}\n    al1,al2,al3,al4,al5=st.columns(5)\n    def _ask_price(k):\n        v=levels.get(k)\n        return f'Rp {float(v):,.0f}' if v is not None and pd.notna(v) else '—'\n    entry_text='—'\n    if levels.get('entry_low') is not None and levels.get('entry_high') is not None:\n        entry_text=f\"Rp {float(levels['entry_low']):,.0f} - {float(levels['entry_high']):,.0f}\"\n    al1.metric('Harga',_ask_price('close')); al2.metric('Entry',entry_text); al3.metric('Stop Loss',_ask_price('stop_loss')); al4.metric('Target 1',_ask_price('target_1')); al5.metric('Target 2',_ask_price('target_2'))\n    st.caption(ask.get('guardrail',''))\n\n    st.markdown('### 🚨 Smart Monitoring & Alert Engine')\n"""
+          if '### 💬 AI Stock Ask' not in text:
+              if anchor not in text: raise SystemExit('AI Ask UI anchor missing')
+              text=text.replace(anchor,block,1)
+          app.write_text(text,encoding='utf-8')
 
-          worker = Path('worker_base.py')
-          text = worker.read_text(encoding='utf-8')
-          if 'import closing_overnight\n' not in text:
-              anchor = 'import premarket_explain\n'
-              if anchor not in text:
-                  raise SystemExit('worker import anchor missing')
-              text = text.replace(anchor, anchor + 'import closing_overnight\n', 1)
-
-          anchor = '''    top = res.iloc[0]\n\n    log(\n'''
-          block = '''    # V1.8.44: strict next-session Closing / Overnight Intelligence.\n    if str(source).lower() == "full-universe":\n        try:\n            overnight = closing_overnight.select_overnight(res, CFG)\n            app.state_set("overnight_status", overnight.get("status", ""))\n            app.state_set("overnight_pick_count", len(overnight.get("picks", [])))\n            app.state_set("overnight_reason", overnight.get("reason", ""))\n            picks = overnight.get("picks")\n            if picks is not None and not picks.empty:\n                payload = picks.to_dict(orient="records")\n                app.state_set("overnight_picks_json", json.dumps(payload, ensure_ascii=False, default=str))\n            else:\n                app.state_set("overnight_picks_json", "[]")\n            log("OVERNIGHT", overnight.get("status", "UNKNOWN"), f"picks={len(overnight.get('picks', []))}")\n        except Exception:\n            log("OVERNIGHT", "ERROR", traceback.format_exc()[-1800:])\n\n    top = res.iloc[0]\n\n    log(\n'''
-          if 'closing_overnight.select_overnight(res, CFG)' not in text:
-              if anchor not in text:
-                  raise SystemExit('analyze_and_publish anchor missing')
-              text = text.replace(anchor, block, 1)
-          worker.write_text(text, encoding='utf-8')
-
-          Path('test_closing_overnight.py').write_text('''import pandas as pd\nfrom closing_overnight import select_overnight\n\n\ndef cfg():\n    return {"overnight_max_picks":5,"overnight_min_ai_score":75,"overnight_min_p_up":0.64,"overnight_min_risk_reward":1.5,"overnight_max_risk":"MEDIUM","overnight_block_bearish_ihsg":True}\n\ndef test_no_trade_when_no_buy():\n    r=select_overnight(pd.DataFrame([{"decision":"WATCH","ai_score":90,"jst_p_up":.9}]),cfg())\n    assert r["status"]=="NO_OVERNIGHT_TRADE"\n    assert r["picks"].empty\n\ndef test_strict_filters_and_no_padding():\n    df=pd.DataFrame([\n      {"ticker":"GOOD","decision":"BUY","ai_score":82,"jst_p_up":.70,"risk_reward_2":2.0,"risk":"MEDIUM","market_regime":"BULLISH"},\n      {"ticker":"RISKY","decision":"BUY","ai_score":90,"jst_p_up":.80,"risk_reward_2":3.0,"risk":"HIGH","market_regime":"BULLISH"},\n      {"ticker":"BEAR","decision":"BUY","ai_score":90,"jst_p_up":.80,"risk_reward_2":3.0,"risk":"LOW","market_regime":"BEARISH"},\n    ])\n    r=select_overnight(df,cfg())\n    assert r["status"]=="OVERNIGHT_READY"\n    assert list(r["picks"]["ticker"])==["GOOD"]\n    assert len(r["picks"])==1\n\ndef test_percent_probability_is_supported():\n    df=pd.DataFrame([{"ticker":"PCT","decision":"STRONG_BUY","ai_score":80,"jst_p_up":70,"risk_reward_2":1.8,"risk":"LOW","market_regime":"NEUTRAL"}])\n    assert select_overnight(df,cfg())["status"]=="OVERNIGHT_READY"\n''',encoding='utf-8')
+          Path('test_ai_stock_ask.py').write_text('''from ai_stock_ask import answer_stock\n\n\ndef test_buy_when_strong_and_entry_active():\n    r=answer_stock({"ticker":"TEST","decision":"BUY","ai_score":80,"jst_p_up":.70,"entry_status":"ACTIVE","risk":"MEDIUM","market_regime":"BULLISH","entry_low":100,"entry_high":102,"stop_loss":95,"target_1":110},"TODAY")\n    assert r["action"]=="BUY"\n    assert r["levels"]["entry_low"]==100\n\ndef test_wait_when_entry_not_confirmed():\n    r=answer_stock({"ticker":"TEST","decision":"BUY","ai_score":80,"jst_p_up":.70,"entry_status":"WAIT","risk":"LOW"},"TODAY")\n    assert r["action"]=="WAIT"\n\ndef test_avoid_high_risk_or_bearish_tomorrow():\n    assert answer_stock({"ticker":"A","decision":"BUY","ai_score":90,"jst_p_up":.8,"risk":"HIGH"},"TODAY")["action"]=="AVOID"\n    assert answer_stock({"ticker":"B","decision":"BUY","ai_score":90,"jst_p_up":.8,"risk":"LOW","market_regime":"BEARISH"},"TOMORROW")["action"]=="AVOID"\n\ndef test_missing_ticker_never_invents_answer():\n    assert answer_stock({},"TODAY")["status"]=="NO_DATA"\n''',encoding='utf-8')
       - name: Compile Python
-        run: python -m py_compile worker_base.py closing_overnight.py premarket_intelligence.py premarket_evaluation.py premarket_explain.py app.py
-      - name: Run focused tests
-        run: python -m pytest -q test_closing_overnight.py test_premarket_intelligence.py test_premarket_explain.py test_batch1_live_engine.py
-      - name: Commit integration
+        run: python -m py_compile app.py ai_stock_ask.py closing_overnight.py worker_base.py premarket_intelligence.py premarket_evaluation.py premarket_explain.py
+      - name: Run all roadmap focused tests
+        run: python -m pytest -q test_ai_stock_ask.py test_closing_overnight.py test_premarket_intelligence.py test_premarket_explain.py test_batch1_live_engine.py
+      - name: Verify UI wiring
+        run: |
+          grep -q 'import ai_stock_ask' app.py
+          grep -q '### 💬 AI Stock Ask' app.py
+          grep -q 'AI Stock Intelligence V1.8.45' app.py
+      - name: Commit Batch 4 integration
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add worker_base.py test_closing_overnight.py
+          git add app.py test_ai_stock_ask.py
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'V1.8.44 wire strict closing overnight intelligence'
+          git commit -m 'V1.8.45 wire grounded AI Stock Ask into deep analysis'
           git push
