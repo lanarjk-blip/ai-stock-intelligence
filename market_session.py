@@ -5,7 +5,7 @@ Mon-Thu 09:00-12:00 and 13:30-15:50; Fri 09:00-11:30 and 14:00-15:50.
 Optional config keys can override times and provide market_holidays (YYYY-MM-DD list).
 """
 from __future__ import annotations
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timezone, timedelta
 from zoneinfo import ZoneInfo
 
 WIB = ZoneInfo("Asia/Jakarta")
@@ -20,13 +20,48 @@ def _parse_hhmm(value, fallback):
         return time(int(hh), int(mm))
 
 
-def session_status(config=None, now=None):
-    cfg = config or {}
+def _local(now=None):
     local = now or datetime.now(timezone.utc).astimezone(WIB)
     if local.tzinfo is None:
-        local = local.replace(tzinfo=WIB)
+        return local.replace(tzinfo=WIB)
+    return local.astimezone(WIB)
+
+
+def _is_trading_date(day, config=None):
+    cfg = config or {}
+    holidays = {str(x) for x in (cfg.get("market_holidays") or [])}
+    return day.weekday() < 5 and day.isoformat() not in holidays
+
+
+def next_trading_date(config=None, now=None, after_close=True):
+    """Return the market date a new pre-market snapshot should target.
+
+    Before/during today's regular session the target remains today. After the
+    final close, on weekends, and on configured holidays it advances to the
+    next valid trading day. This prevents a late worker cycle from locking a
+    fresh recommendation to a session that has already ended.
+    """
+    cfg = config or {}
+    local = _local(now)
+    day = local.date()
+    if _is_trading_date(day, cfg):
+        if day.weekday() == 4:
+            final_close = _parse_hhmm(cfg.get("idx_fri_session2_close"), "15:50")
+        else:
+            final_close = _parse_hhmm(cfg.get("idx_session2_close"), "15:50")
+        if not after_close or local.time().replace(tzinfo=None) < final_close:
+            return day.isoformat()
+        day += timedelta(days=1)
     else:
-        local = local.astimezone(WIB)
+        day += timedelta(days=1)
+    while not _is_trading_date(day, cfg):
+        day += timedelta(days=1)
+    return day.isoformat()
+
+
+def session_status(config=None, now=None):
+    cfg = config or {}
+    local = _local(now)
 
     day = local.date().isoformat()
     weekday = local.weekday()
