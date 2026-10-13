@@ -1915,7 +1915,7 @@ def render_premarket_panel():
     )
 
 def render_app():
-    st.set_page_config(page_title='AI Stock Intelligence V1.8.41', page_icon='📈', layout='wide')
+    st.set_page_config(page_title='AI Stock Intelligence V1.8.43', page_icon='📈', layout='wide')
     st.markdown("""
     <style>
       .block-container{padding-top:1.15rem;padding-bottom:2rem;max-width:1500px}
@@ -2024,16 +2024,7 @@ def render_app():
         if dyn.empty:
             st.info('Belum ada kandidat yang memenuhi filter relatif + AI + risiko.')
         else:
-            dshow=dyn.copy()
-            for c in ['opportunity_score','ai_score']:
-                if c in dshow: dshow[c]=pd.to_numeric(dshow[c],errors='coerce').round(1)
-            for c in ['p_up','p_down','confidence','relative_percentile','time_edge','time_confidence']:
-                if c in dshow: dshow[c]=(pd.to_numeric(dshow[c],errors='coerce')*100).round(1)
-            dshow=dshow.rename(columns={'opportunity_score':'Opportunity Score','state':'State','entry_status':'Entry Window','close':'Price','entry_low':'Entry Low','entry_high':'Entry High','stop_loss':'Stop Loss','target_1':'Target 1','target_2':'Target 2','risk':'Risk','ai_score':'AI Score','p_up':'P(UP) %','p_down':'P(DOWN) %','confidence':'AI Conf. %','market_regime':'IHSG Regime'})
-            cols=[c for c in ['rank','ticker','company','Opportunity Score','State','Entry Window','Price','Entry Low','Entry High','Stop Loss','Target 1','Target 2','Risk','AI Score','P(UP) %','P(DOWN) %','AI Conf. %','IHSG Regime'] if c in dshow.columns]
-            render_clickable_dataframe(dshow.head(5), cols)
-            top=dyn.iloc[0]
-            st.markdown('<div class="asi-card"><b>#1 '+str(top.ticker)+'</b><br><div class="asi-row">'+_pill(getattr(top,'state','—'),_kind(getattr(top,'state','—')))+_pill('Entry '+str(getattr(top,'entry_status','—')),_kind(getattr(top,'entry_status','—')))+_pill('Risk '+str(getattr(top,'risk','—')),_kind(getattr(top,'risk','—')))+'</div></div>',unsafe_allow_html=True)
+            render_actionable_dynamic(dyn, render_clickable_dataframe, table_limit=5)
 
         st.subheader('🧭 Next-Session Intelligence')
         if outlook:
@@ -2050,18 +2041,7 @@ def render_app():
     with tab_opp:
         st.subheader('🚀 Dynamic Opportunity Engine')
         dyn=read_dynamic_opportunities(int(CFGD.get('dynamic_opportunity_count',5)))
-        if dyn.empty:
-            st.info('Belum ada kandidat Dynamic Opportunity.')
-        else:
-            dshow=dyn.copy()
-            for c in ['opportunity_score','ai_score']:
-                if c in dshow: dshow[c]=pd.to_numeric(dshow[c],errors='coerce').round(1)
-            for c in ['p_up','p_down','confidence','relative_percentile','time_edge','time_confidence']:
-                if c in dshow: dshow[c]=(pd.to_numeric(dshow[c],errors='coerce')*100).round(1)
-            dshow=dshow.rename(columns={'opportunity_score':'Opportunity Score','market_regime':'IHSG Regime','state':'State','entry_status':'Entry Window','horizon':'Horizon','close':'Price','entry_low':'Entry Low','entry_high':'Entry High','stop_loss':'Stop Loss','target_1':'Target 1','target_2':'Target 2','risk_reward':'R/R','risk':'Risk','ai_score':'AI Score','p_up':'P(UP) %','p_down':'P(DOWN) %','confidence':'AI Conf. %','relative_percentile':'Relative %','time_edge':'Time Edge %','time_confidence':'Time Conf. %'})
-            cols=[c for c in ['rank','ticker','company','Opportunity Score','State','Entry Window','Horizon','IHSG Regime','Price','Entry Low','Entry High','Stop Loss','Target 1','Target 2','R/R','Risk','AI Score','P(UP) %','P(DOWN) %','AI Conf. %','Relative %','Time Edge %','Time Conf. %'] if c in dshow.columns]
-            render_clickable_dataframe(dshow,cols)
-            st.caption('Top-5 bersifat dinamis. Kandidat dapat masuk atau keluar ketika kondisi berubah. Output probabilistik, bukan jaminan hasil.')
+        render_actionable_dynamic(dyn, render_clickable_dataframe)
 
         st.subheader('🔥 Adaptive AI Opportunities')
         if res.empty:
