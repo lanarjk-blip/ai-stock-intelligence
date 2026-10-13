@@ -17,6 +17,7 @@ import top5_timeline
 import premarket_intelligence
 import premarket_evaluation
 import premarket_explain
+import closing_overnight
 
 
 BASE = app.BASE
@@ -996,6 +997,23 @@ def analyze_and_publish(
             app.state_set("premarket_status", pre.get("status", ""))
         except Exception:
             log("PREMARKET", "ERROR", traceback.format_exc()[-1800:])
+
+    # V1.8.44: strict next-session Closing / Overnight Intelligence.
+    if str(source).lower() == "full-universe":
+        try:
+            overnight = closing_overnight.select_overnight(res, CFG)
+            app.state_set("overnight_status", overnight.get("status", ""))
+            app.state_set("overnight_pick_count", len(overnight.get("picks", [])))
+            app.state_set("overnight_reason", overnight.get("reason", ""))
+            picks = overnight.get("picks")
+            if picks is not None and not picks.empty:
+                payload = picks.to_dict(orient="records")
+                app.state_set("overnight_picks_json", json.dumps(payload, ensure_ascii=False, default=str))
+            else:
+                app.state_set("overnight_picks_json", "[]")
+            log("OVERNIGHT", overnight.get("status", "UNKNOWN"), f"picks={len(overnight.get('picks', []))}")
+        except Exception:
+            log("OVERNIGHT", "ERROR", traceback.format_exc()[-1800:])
 
     top = res.iloc[0]
 
