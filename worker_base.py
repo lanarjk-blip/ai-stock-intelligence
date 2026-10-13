@@ -14,6 +14,8 @@ import app
 import dynamic_engine
 import recommendation_history
 import top5_timeline
+import premarket_intelligence
+import premarket_evaluation
 
 
 BASE = app.BASE
@@ -950,7 +952,7 @@ def analyze_and_publish(
     # Bootstrap snapshots must not produce false Top-5 changes.
     if str(source).lower() == "full-universe" and dynamic is not None and not dynamic.empty:
         try:
-            event_result = top5_timeline.record_top5(app.DB, dynamic, source_phase=source)
+            event_result = top5_timeline.record_top5(app.DB, dynamic, source_phase=source, config=CFG)
             log("TOP5_TIMELINE", event_result.get("status", "UNKNOWN"),
                 f"events={event_result.get('events', 0)}")
         except Exception:
@@ -1069,31 +1071,8 @@ def lock_premarket_picks(res, source_phase="full-universe"):
     finally:
         con.close()
 
-    c = pd.DataFrame() if res is None else res.copy()
-    if not c.empty:
-        if "decision" in c.columns:
-            d = c["decision"].astype(str).str.upper()
-            c = c[~d.isin(["SELL","EXIT","AVOID"])].copy()
-            d = c["decision"].astype(str).str.upper()
-            buy = c[d.isin(["BUY","STRONG_BUY"])].copy()
-            if not buy.empty:
-                c = buy
-        if "ai_score" in c.columns:
-            s = pd.to_numeric(c["ai_score"], errors="coerce")
-            c = c[s >= float(CFG.get("premarket_min_ai_score",60.0))].copy()
-        if "jst_p_up" in c.columns:
-            p = pd.to_numeric(c["jst_p_up"], errors="coerce")
-            p = p.where(p <= 1.0, p/100.0)
-            c = c[p.isna() | (p >= float(CFG.get("premarket_min_p_up",0.55)))].copy()
-
-        cols=[]; asc=[]
-        for col,a in [("decision_priority",True),("decision_score",False),
-                      ("relative_rank_score",False),("ai_score",False)]:
-            if col in c.columns:
-                cols.append(col); asc.append(a)
-        if cols:
-            c = c.sort_values(cols, ascending=asc)
-        c = c.head(max(0,min(5,int(CFG.get("premarket_max_picks",5))))).reset_index(drop=True)
+    selection = premarket_intelligence.select_high_conviction(res, CFG)
+    c = selection["picks"].copy()
 
     con = dbcon()
     try:
@@ -1102,7 +1081,7 @@ def lock_premarket_picks(res, source_phase="full-universe"):
                 (market_date,generated_at,status,pick_count,note)
                 VALUES(?,?,?,?,?)""",
                 (market_date,generated_at,"NO_TRADE",0,
-                 "No candidate passed pre-market quality gates."))
+                 str(selection.get("reason") or "No candidate passed pre-market quality gates.")))
             con.commit()
             log("PREMARKET","NO_TRADE",f"market_date={market_date}")
             return {"status":"NO_TRADE","pick_count":0}
