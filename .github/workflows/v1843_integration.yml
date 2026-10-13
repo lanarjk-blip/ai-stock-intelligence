@@ -1,4 +1,4 @@
-name: V1.8.47 Production Stabilization
+name: V1.8.48 Mobile Charts and Bottom Navigation
 
 'on':
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  stabilize:
+  mobile-ui:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,61 +17,58 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install focused dependencies
-        run: python -m pip install -q pytest pandas numpy requests streamlit
-      - name: Harden production scheduling and evaluation
+        run: python -m pip install -q pytest pandas numpy requests streamlit altair
+      - name: Apply V1.8.48 mobile UI
         shell: python
         run: |
           from pathlib import Path
-
-          p=Path('worker_base.py')
+          p=Path('app.py')
           s=p.read_text(encoding='utf-8')
-          if 'import market_session\n' not in s:
-              s=s.replace('import closing_overnight\n','import closing_overnight\nimport market_session\n',1)
-          old='''def premarket_market_date():\n    d = _wib_now().date()\n    if d.weekday() == 5:\n        d += timedelta(days=2)\n    elif d.weekday() == 6:\n        d += timedelta(days=1)\n    return d.isoformat()\n'''
-          new='''def premarket_market_date():\n    # Session-aware: after the final IDX close a new snapshot belongs to the\n    # next valid trading date, never to the session that already ended.\n    return market_session.next_trading_date(CFG, now=_wib_now(), after_close=True)\n'''
-          if old in s:
-              s=s.replace(old,new,1)
-          elif 'market_session.next_trading_date' not in s:
-              raise SystemExit('premarket_market_date anchor changed unexpectedly')
+          s=s.replace('AI Stock Intelligence V1.8.47','AI Stock Intelligence V1.8.48')
 
-          oldq='''        dates=[r[0] for r in con.execute(\n            "SELECT market_date FROM premarket_runs WHERE status='LOCKED' AND market_date < ? ORDER BY market_date",\n            (today,)).fetchall()]'''
-          newq='''        dates=[r[0] for r in con.execute(\n            """SELECT r.market_date FROM premarket_runs r\n               WHERE r.status='LOCKED' AND r.market_date < ?\n                 AND EXISTS (SELECT 1 FROM premarket_picks p WHERE p.market_date=r.market_date)\n                 AND NOT EXISTS (\n                     SELECT 1 FROM premarket_picks p2\n                     LEFT JOIN premarket_evaluations e\n                       ON e.market_date=p2.market_date AND e.ticker=p2.ticker\n                     WHERE p2.market_date=r.market_date AND e.ticker IS NULL\n                 ) = 0\n               ORDER BY r.market_date""",\n            (today,)).fetchall()]'''
-          if oldq in s:
-              s=s.replace(oldq,newq,1)
-          elif 'LEFT JOIN premarket_evaluations' not in s:
-              raise SystemExit('evaluation query anchor changed unexpectedly')
+          anchor="    tab_home, tab_premarket, tab_opp, tab_search, tab_history, tab_ai, tab_engine = st.tabs(['🏠 Ringkasan','🌅 Pre-Market','🚀 Opportunity','🔎 Analisis Saham','📚 History & Shadow','🧠 AI & Validasi','⚙️ Engine / Log'])\n"
+          mobile="""    # V1.8.48: mobile bottom navigation. Streamlit keeps tab semantics while\n    # Android WebView gets an app-like fixed navigation bar at the bottom.\n    st.markdown('''<style>\n    @media (max-width: 900px) {\n      .stApp { padding-bottom: 86px; }\n      div[data-baseweb=\"tab-list\"] {\n        position: fixed !important; left: 0; right: 0; bottom: 0; z-index: 9999;\n        display: flex !important; justify-content: space-around; gap: 0 !important;\n        background: rgba(14,17,23,.97); border-top: 1px solid rgba(128,128,128,.28);\n        padding: 6px 4px max(8px, env(safe-area-inset-bottom));\n        box-shadow: 0 -5px 20px rgba(0,0,0,.28); overflow-x: auto;\n      }\n      div[data-baseweb=\"tab-list\"] button {\n        min-width: 78px; min-height: 52px; padding: 5px 8px !important;\n        font-size: .76rem !important; line-height: 1.05 !important; white-space: nowrap;\n      }\n      div[data-baseweb=\"tab-highlight\"] { top: 0 !important; bottom: auto !important; }\n    }\n    </style>''', unsafe_allow_html=True)\n\n"""+anchor
+          if anchor not in s:
+              raise SystemExit('tab anchor not found')
+          s=s.replace(anchor,mobile,1)
 
-          # INSERT OR IGNORE preserves the first completed-session evaluation.
-          s=s.replace('con.executemany("""INSERT OR REPLACE INTO premarket_evaluations',
-                      'con.executemany("""INSERT OR IGNORE INTO premarket_evaluations',1)
+          ih_anchor="            st.caption('IHSG juga sudah menjadi bagian dari konteks model/opportunity melalui fitur market regime, relative strength, market score, dan alignment yang tersedia pada engine.')\n"
+          ih_chart="""            st.markdown('#### 📈 Grafik IHSG')\n            ih_chart_df=fetch_ihsg().copy()\n            if not ih_chart_df.empty:\n                ih_chart_df['date']=pd.to_datetime(ih_chart_df['date'],errors='coerce')\n                ih_chart_df=ih_chart_df.dropna(subset=['date','close']).tail(120)\n                try:\n                    import altair as alt\n                    ih_first=float(ih_chart_df['close'].iloc[0]); ih_last=float(ih_chart_df['close'].iloc[-1])\n                    ih_color='#10b981' if ih_last>=ih_first else '#ef4444'\n                    ih_plot=alt.Chart(ih_chart_df).mark_line(strokeWidth=3,color=ih_color).encode(\n                        x=alt.X('date:T',title=None,axis=alt.Axis(format='%d %b',labelAngle=0,labelOverlap=True)),\n                        y=alt.Y('close:Q',title='IHSG',scale=alt.Scale(zero=False)),\n                        tooltip=[alt.Tooltip('date:T',title='Tanggal',format='%d %b %Y'),alt.Tooltip('close:Q',title='IHSG',format=',.2f')]\n                    ).properties(height=250)\n                    st.altair_chart(ih_plot,use_container_width=True)\n                except Exception:\n                    st.line_chart(ih_chart_df.set_index('date')[['close']],height=250)\n                st.caption('Riwayat IHSG memakai data asli yang tersedia. Titik historis tidak dibuat-buat menjadi data per detik.')\n            else:\n                st.info('Riwayat grafik IHSG belum tersedia.')\n"""+ih_anchor
+          if ih_anchor not in s:
+              raise SystemExit('IHSG anchor not found')
+          s=s.replace(ih_anchor,ih_chart,1)
           p.write_text(s,encoding='utf-8')
 
-          a=Path('app.py')
-          text=a.read_text(encoding='utf-8').replace('AI Stock Intelligence V1.8.46','AI Stock Intelligence V1.8.47')
-          a.write_text(text,encoding='utf-8')
+          c=Path('config.json')
+          import json
+          cfg=json.loads(c.read_text(encoding='utf-8'))
+          cfg['engine_version']='1.8.48'
+          cfg['mobile_ui_version']='1.8.48'
+          cfg['chart_ui_version']='1.8.48'
+          c.write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
 
-          Path('test_market_session_v1847.py').write_text('''from datetime import datetime\nfrom zoneinfo import ZoneInfo\nimport market_session\n\nWIB=ZoneInfo("Asia/Jakarta")\n\ndef dt(y,m,d,h,minute=0): return datetime(y,m,d,h,minute,tzinfo=WIB)\n\ndef test_before_close_targets_same_market_date():\n    assert market_session.next_trading_date({},dt(2026,10,13,8,0))=="2026-10-13"\n\ndef test_after_close_targets_next_trading_date():\n    assert market_session.next_trading_date({},dt(2026,10,13,16,0))=="2026-10-14"\n\ndef test_friday_after_close_skips_weekend():\n    assert market_session.next_trading_date({},dt(2026,10,16,16,0))=="2026-10-19"\n\ndef test_weekend_and_configured_holiday_are_skipped():\n    cfg={"market_holidays":["2026-10-19"]}\n    assert market_session.next_trading_date(cfg,dt(2026,10,17,10,0))=="2026-10-20"\n''',encoding='utf-8')
-      - name: Compile production modules
-        run: python -m py_compile app.py worker_base.py market_session.py top5_timeline.py dynamic_opportunity_ui.py premarket_intelligence.py premarket_evaluation.py premarket_explain.py closing_overnight.py ai_stock_ask.py
-      - name: Run complete regression suite
-        run: python -m pytest -q test_batch1_live_engine.py test_market_session_v1847.py test_premarket_intelligence.py test_premarket_explain.py test_premarket_evaluation.py test_closing_overnight.py test_ai_stock_ask.py
-      - name: Production audit
+          Path('test_mobile_ui_v1848.py').write_text('''from pathlib import Path\n\ndef test_mobile_bottom_nav_and_ihsg_chart_present():\n    s=Path("app.py").read_text(encoding="utf-8")\n    assert "position: fixed !important" in s\n    assert "bottom: 0" in s\n    assert "Grafik IHSG" in s\n    assert "ih_chart_df=fetch_ihsg().copy()" in s\n    assert "AI Stock Intelligence V1.8.48" in s\n\ndef test_historical_data_not_fabricated_per_second():\n    s=Path("app.py").read_text(encoding="utf-8")\n    assert "Titik historis tidak dibuat-buat menjadi data per detik" in s\n''',encoding='utf-8')
+      - name: Compile
+        run: python -m py_compile app.py worker_base.py market_session.py dynamic_opportunity_ui.py ai_stock_ask.py
+      - name: Regression tests
+        run: python -m pytest -q test_batch1_live_engine.py test_market_session_v1847.py test_premarket_intelligence.py test_premarket_explain.py test_premarket_evaluation.py test_closing_overnight.py test_ai_stock_ask.py test_mobile_ui_v1848.py
+      - name: Audit
         run: |
-          grep -q 'market_session.next_trading_date' worker_base.py
-          grep -q 'LEFT JOIN premarket_evaluations' worker_base.py
-          grep -q 'INSERT OR IGNORE INTO premarket_evaluations' worker_base.py
-          grep -q 'AI Stock Intelligence V1.8.47' app.py
+          grep -q 'AI Stock Intelligence V1.8.48' app.py
+          grep -q 'Grafik IHSG' app.py
+          grep -q 'position: fixed !important' app.py
           python - <<'PY'
           import json
           c=json.load(open('config.json',encoding='utf-8'))
-          assert c['engine_version']=='1.8.47'
-          assert c['production_stabilization_version']=='1.8.47'
+          assert c['engine_version']=='1.8.48'
+          assert c['mobile_ui_version']=='1.8.48'
+          assert c['chart_ui_version']=='1.8.48'
           PY
-      - name: Commit stabilization
+      - name: Commit V1.8.48
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add worker_base.py app.py test_market_session_v1847.py
+          git add app.py config.json test_mobile_ui_v1848.py
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'V1.8.47 stabilize market-date scheduling and evaluation persistence'
+          git commit -m 'V1.8.48 add IHSG chart and mobile bottom navigation'
           git push
