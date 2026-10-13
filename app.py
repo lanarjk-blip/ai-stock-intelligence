@@ -1968,7 +1968,7 @@ def render_premarket_panel():
         render_clickable_dataframe(show,[c for c in ['ticker','Decision','Outcome','Verdict','Return %','Close'] if c in show.columns],2)
 
 def render_app():
-    st.set_page_config(page_title='AI Stock Intelligence V1.8.47', page_icon='📈', layout='wide')
+    st.set_page_config(page_title='AI Stock Intelligence V1.8.48', page_icon='📈', layout='wide')
     st.markdown("""
     <style>
       .block-container{padding-top:1.15rem;padding-bottom:2rem;max-width:1500px}
@@ -2011,7 +2011,7 @@ def render_app():
         if any(k in x for k in ['WATCH','WAIT','NEAR','DEVELOP','SIDEWAYS','WARNING','MEDIUM','PREPAR']): return 'yellow'
         return 'gray'
 
-    st.title('📈 AI Stock Intelligence V1.8.47')
+    st.title('📈 AI Stock Intelligence V1.8.48')
     st.caption('Continuous Intelligence • Rank → Opportunity → Alert → Deep Analysis → Risk → Hold → Overnight')
     st.markdown('<div class="asi-row">'+_pill('READY' if ready else 'PREPARING', 'green' if ready else 'yellow')+_pill(f'Model {active_name}', 'green' if model else 'gray')+_pill(f'Snapshot {snap_at or "belum ada"}', 'green' if snap_at else 'gray')+'</div>', unsafe_allow_html=True)
 
@@ -2024,6 +2024,26 @@ def render_app():
         b2.caption(f'Deep Analysis aktif untuk {forced_detail}. Tombol ← Dashboard kembali ke halaman utama.')
         stock_search_panel(universe,res,forced_ticker=forced_detail)
         return
+
+    # V1.8.48: mobile bottom navigation. Streamlit keeps tab semantics while
+    # Android WebView gets an app-like fixed navigation bar at the bottom.
+    st.markdown('''<style>
+    @media (max-width: 900px) {
+      .stApp { padding-bottom: 86px; }
+      div[data-baseweb="tab-list"] {
+        position: fixed !important; left: 0; right: 0; bottom: 0; z-index: 9999;
+        display: flex !important; justify-content: space-around; gap: 0 !important;
+        background: rgba(14,17,23,.97); border-top: 1px solid rgba(128,128,128,.28);
+        padding: 6px 4px max(8px, env(safe-area-inset-bottom));
+        box-shadow: 0 -5px 20px rgba(0,0,0,.28); overflow-x: auto;
+      }
+      div[data-baseweb="tab-list"] button {
+        min-width: 78px; min-height: 52px; padding: 5px 8px !important;
+        font-size: .76rem !important; line-height: 1.05 !important; white-space: nowrap;
+      }
+      div[data-baseweb="tab-highlight"] { top: 0 !important; bottom: auto !important; }
+    }
+    </style>''', unsafe_allow_html=True)
 
     tab_home, tab_premarket, tab_opp, tab_search, tab_history, tab_ai, tab_engine = st.tabs(['🏠 Ringkasan','🌅 Pre-Market','🚀 Opportunity','🔎 Analisis Saham','📚 History & Shadow','🧠 AI & Validasi','⚙️ Engine / Log'])
 
@@ -2051,6 +2071,26 @@ def render_app():
             i4.metric('Jarak vs MA20',f"{gap:+.2f}%" if np.isfinite(gap) else '—')
             i5.metric('Market Regime',trend)
             st.markdown('<div class="asi-card"><div class="asi-row">'+_pill(trend,_kind(trend))+'</div><div style="margin-top:8px">'+market_note+'</div></div>',unsafe_allow_html=True)
+            st.markdown('#### 📈 Grafik IHSG')
+            ih_chart_df=fetch_ihsg().copy()
+            if not ih_chart_df.empty:
+                ih_chart_df['date']=pd.to_datetime(ih_chart_df['date'],errors='coerce')
+                ih_chart_df=ih_chart_df.dropna(subset=['date','close']).tail(120)
+                try:
+                    import altair as alt
+                    ih_first=float(ih_chart_df['close'].iloc[0]); ih_last=float(ih_chart_df['close'].iloc[-1])
+                    ih_color='#10b981' if ih_last>=ih_first else '#ef4444'
+                    ih_plot=alt.Chart(ih_chart_df).mark_line(strokeWidth=3,color=ih_color).encode(
+                        x=alt.X('date:T',title=None,axis=alt.Axis(format='%d %b',labelAngle=0,labelOverlap=True)),
+                        y=alt.Y('close:Q',title='IHSG',scale=alt.Scale(zero=False)),
+                        tooltip=[alt.Tooltip('date:T',title='Tanggal',format='%d %b %Y'),alt.Tooltip('close:Q',title='IHSG',format=',.2f')]
+                    ).properties(height=250)
+                    st.altair_chart(ih_plot,use_container_width=True)
+                except Exception:
+                    st.line_chart(ih_chart_df.set_index('date')[['close']],height=250)
+                st.caption('Riwayat IHSG memakai data asli yang tersedia. Titik historis tidak dibuat-buat menjadi data per detik.')
+            else:
+                st.info('Riwayat grafik IHSG belum tersedia.')
             st.caption('IHSG juga sudah menjadi bagian dari konteks model/opportunity melalui fitur market regime, relative strength, market score, dan alignment yang tersedia pada engine.')
         else:
             st.warning('Data IHSG belum tersedia pada snapshot ini. Ranking saham tetap berjalan, tetapi market context belum dapat ditampilkan.')
