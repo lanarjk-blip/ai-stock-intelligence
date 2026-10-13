@@ -53,7 +53,7 @@
   "entry_zone_atr_high": 0.1,
   "risk_engine_version": "1.8.10",
   "data_recovery_version": "1.8.11",
-  "engine_version": "1.8.43",
+  "engine_version": "1.8.44",
   "collector_resolver_enabled": true,
   "collector_cache_fallback_min_rows": 60,
   "provider_not_found_cooldown_hours": 6,
@@ -120,5 +120,12 @@
   "premarket_max_picks": 5,
   "premarket_min_ai_score": 72.0,
   "premarket_min_p_up": 0.62,
-  "premarket_max_risk": "MEDIUM"
+  "premarket_max_risk": "MEDIUM",
+  "closing_overnight_version": "1.8.44",
+  "overnight_max_picks": 5,
+  "overnight_min_ai_score": 75.0,
+  "overnight_min_p_up": 0.64,
+  "overnight_min_risk_reward": 1.5,
+  "overnight_max_risk": "MEDIUM",
+  "overnight_block_bearish_ihsg": true
 }
