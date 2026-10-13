@@ -16,6 +16,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Install focused test dependencies
+        run: python -m pip install -q pytest pandas
       - name: Wire V1.8.43 backend and UI
         shell: python
         run: |
