@@ -7,6 +7,7 @@ import requests
 import streamlit as st
 from dynamic_opportunity_ui import render_actionable_dynamic
 import recommendation_history
+import ai_stock_ask
 
 BASE=os.path.dirname(os.path.abspath(__file__))
 WORKER_MODE=os.environ.get('AI_ENGINE_WORKER')=='1'
@@ -1498,6 +1499,31 @@ def stock_search_panel(universe, res, forced_ticker=None):
     market_bits.append(f'Risk {risk_state}')
     st.caption(f'Universal state: **{selected_ticker}** → AI → Relative Rank → Opportunity → Entry Window → Risk → Hold → Overnight → Next Session. ' + ' • '.join(market_bits))
 
+    st.markdown('### 💬 AI Stock Ask')
+    ask_horizon=st.radio('Horizon AI Stock Ask',['TODAY','TOMORROW'],horizontal=True,key=f'ai_ask_horizon_{selected_ticker}')
+    ask_snapshot={} if ur is None else ur.to_dict()
+    if dr is not None:
+        for k,v in dr.to_dict().items():
+            if k not in ask_snapshot or pd.isna(ask_snapshot.get(k)):
+                ask_snapshot[k]=v
+    ask_snapshot['ticker']=selected_ticker
+    ask=ai_stock_ask.answer_stock(ask_snapshot,ask_horizon)
+    ask_action=str(ask.get('action','WAIT')).upper()
+    if ask_action=='BUY': st.success(f"🟢 **{ask.get('headline')}**")
+    elif ask_action=='AVOID': st.error(f"🔴 **{ask.get('headline')}**")
+    else: st.warning(f"🟡 **{ask.get('headline')}**")
+    st.write(ask.get('reason',''))
+    levels=ask.get('levels',{}) or {}
+    al1,al2,al3,al4,al5=st.columns(5)
+    def _ask_price(k):
+        v=levels.get(k)
+        return f'Rp {float(v):,.0f}' if v is not None and pd.notna(v) else '—'
+    entry_text='—'
+    if levels.get('entry_low') is not None and levels.get('entry_high') is not None:
+        entry_text=f"Rp {float(levels['entry_low']):,.0f} - {float(levels['entry_high']):,.0f}"
+    al1.metric('Harga',_ask_price('close')); al2.metric('Entry',entry_text); al3.metric('Stop Loss',_ask_price('stop_loss')); al4.metric('Target 1',_ask_price('target_1')); al5.metric('Target 2',_ask_price('target_2'))
+    st.caption(ask.get('guardrail',''))
+
     st.markdown('### 🚨 Smart Monitoring & Alert Engine')
     alerts=read_change_alerts(30)
     if alerts.empty:
@@ -1915,7 +1941,7 @@ def render_premarket_panel():
     )
 
 def render_app():
-    st.set_page_config(page_title='AI Stock Intelligence V1.8.43', page_icon='📈', layout='wide')
+    st.set_page_config(page_title='AI Stock Intelligence V1.8.45', page_icon='📈', layout='wide')
     st.markdown("""
     <style>
       .block-container{padding-top:1.15rem;padding-bottom:2rem;max-width:1500px}
@@ -1958,7 +1984,7 @@ def render_app():
         if any(k in x for k in ['WATCH','WAIT','NEAR','DEVELOP','SIDEWAYS','WARNING','MEDIUM','PREPAR']): return 'yellow'
         return 'gray'
 
-    st.title('📈 AI Stock Intelligence V1.8.43')
+    st.title('📈 AI Stock Intelligence V1.8.45')
     st.caption('Continuous Intelligence • Rank → Opportunity → Alert → Deep Analysis → Risk → Hold → Overnight')
     st.markdown('<div class="asi-row">'+_pill('READY' if ready else 'PREPARING', 'green' if ready else 'yellow')+_pill(f'Model {active_name}', 'green' if model else 'gray')+_pill(f'Snapshot {snap_at or "belum ada"}', 'green' if snap_at else 'gray')+'</div>', unsafe_allow_html=True)
 
