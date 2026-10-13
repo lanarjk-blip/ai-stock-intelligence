@@ -1,4 +1,4 @@
-name: V1.8.43 Integration
+name: V1.8.43 UI Integration
 
 on:
   push:
@@ -18,53 +18,55 @@ jobs:
           python-version: '3.11'
       - name: Install focused test dependencies
         run: python -m pip install -q pytest pandas
-      - name: Wire V1.8.43 backend and UI
+      - name: Wire actionable Dynamic Opportunity UI
         shell: python
         run: |
           from pathlib import Path
-
-          worker = Path('worker_base.py')
-          text = worker.read_text(encoding='utf-8')
-          text = text.replace(
-              'import recommendation_history\nimport top5_timeline\n',
-              'import recommendation_history\nimport top5_timeline\nimport premarket_intelligence\nimport premarket_evaluation\n',
-              1,
-          )
-          text = text.replace(
-              'event_result = top5_timeline.record_top5(app.DB, dynamic, source_phase=source)',
-              'event_result = top5_timeline.record_top5(app.DB, dynamic, source_phase=source, config=CFG)',
-              1,
-          )
-          old = '''    c = pd.DataFrame() if res is None else res.copy()\n    if not c.empty:\n        if "decision" in c.columns:\n            d = c["decision"].astype(str).str.upper()\n            c = c[~d.isin(["SELL","EXIT","AVOID"])].copy()\n            d = c["decision"].astype(str).str.upper()\n            buy = c[d.isin(["BUY","STRONG_BUY"])].copy()\n            if not buy.empty:\n                c = buy\n        if "ai_score" in c.columns:\n            s = pd.to_numeric(c["ai_score"], errors="coerce")\n            c = c[s >= float(CFG.get("premarket_min_ai_score",60.0))].copy()\n        if "jst_p_up" in c.columns:\n            p = pd.to_numeric(c["jst_p_up"], errors="coerce")\n            p = p.where(p <= 1.0, p/100.0)\n            c = c[p.isna() | (p >= float(CFG.get("premarket_min_p_up",0.55)))].copy()\n\n        cols=[]; asc=[]\n        for col,a in [("decision_priority",True),("decision_score",False),\n                      ("relative_rank_score",False),("ai_score",False)]:\n            if col in c.columns:\n                cols.append(col); asc.append(a)\n        if cols:\n            c = c.sort_values(cols, ascending=asc)\n        c = c.head(max(0,min(5,int(CFG.get("premarket_max_picks",5))))).reset_index(drop=True)\n'''
-          new = '''    selection = premarket_intelligence.select_high_conviction(res, CFG)\n    c = selection["picks"].copy()\n'''
-          if old not in text:
-              raise SystemExit('worker premarket selection block not found')
-          text = text.replace(old, new, 1)
-          text = text.replace(
-              '(market_date,generated_at,"NO_TRADE",0,\n                 "No candidate passed pre-market quality gates."))',
-              '(market_date,generated_at,"NO_TRADE",0,\n                 str(selection.get("reason") or "No candidate passed pre-market quality gates.")))',
-              1,
-          )
-          worker.write_text(text, encoding='utf-8')
+          import re
 
           app = Path('app.py')
           ui = app.read_text(encoding='utf-8')
-          if 'from dynamic_opportunity_ui import render_actionable_dynamic' not in ui:
-              anchor = 'import streamlit as st\n'
-              if anchor not in ui:
-                  raise SystemExit('app import anchor not found')
-              ui = ui.replace(anchor, anchor + 'from dynamic_opportunity_ui import render_actionable_dynamic\n', 1)
-          ui = ui.replace("st.title('📈 AI Stock Intelligence V1.8.42')", "st.title('📈 AI Stock Intelligence V1.8.43')", 1)
+          ui = ui.replace("st.set_page_config(page_title='AI Stock Intelligence V1.8.41'", "st.set_page_config(page_title='AI Stock Intelligence V1.8.43'", 1)
+
+          home_pattern = re.compile(
+              r"(        dyn = read_dynamic_opportunities\(int\(CFGD\.get\('dynamic_opportunity_count',5\)\)\)\n"
+              r"        st\.subheader\('🚀 Live Opportunity Saat Ini'\)\n"
+              r"        if dyn\.empty:\n"
+              r"            st\.info\('Belum ada kandidat yang memenuhi filter relatif \+ AI \+ risiko\.'\)\n)"
+              r"        else:\n.*?"
+              r"(?=\n        st\.subheader\('🧭 Next-Session Intelligence'\))",
+              re.S,
+          )
+          ui, n_home = home_pattern.subn(r"\1        else:\n            render_actionable_dynamic(dyn, render_clickable_dataframe, table_limit=5)\n", ui, count=1)
+          if n_home != 1:
+              raise SystemExit(f'home Dynamic block replacements={n_home}')
+
+          tab_pattern = re.compile(
+              r"(    with tab_opp:\n"
+              r"        st\.subheader\('🚀 Dynamic Opportunity Engine'\)\n"
+              r"        dyn=read_dynamic_opportunities\(int\(CFGD\.get\('dynamic_opportunity_count',5\)\)\)\n)"
+              r".*?"
+              r"(?=\n        st\.subheader\('🔥 Adaptive AI Opportunities'\))",
+              re.S,
+          )
+          ui, n_tab = tab_pattern.subn(r"\1        render_actionable_dynamic(dyn, render_clickable_dataframe)\n", ui, count=1)
+          if n_tab != 1:
+              raise SystemExit(f'Opportunity tab replacements={n_tab}')
+
+          if ui.count('render_actionable_dynamic(') != 2:
+              raise SystemExit(f'expected 2 renderer calls, found {ui.count("render_actionable_dynamic(")}')
+          if ui.count('from dynamic_opportunity_ui import render_actionable_dynamic') != 1:
+              raise SystemExit('renderer import must appear exactly once')
           app.write_text(ui, encoding='utf-8')
-      - name: Compile changed Python
+      - name: Compile V1.8.43 Python
         run: python -m py_compile worker_base.py premarket_intelligence.py premarket_evaluation.py dynamic_opportunity_ui.py app.py
       - name: Run focused tests
         run: python -m pytest -q test_premarket_intelligence.py test_batch1_live_engine.py
-      - name: Commit integration
+      - name: Commit UI integration
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add worker_base.py app.py
+          git add app.py
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'V1.8.43 wire premarket selector and market session config'
+          git commit -m 'V1.8.43 wire actionable Dynamic Opportunity UI'
           git push
