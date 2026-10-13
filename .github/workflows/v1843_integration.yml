@@ -1,4 +1,4 @@
-name: V1.8.45 AI Stock Ask Integration
+name: V1.8.46 Final Roadmap Integration
 
 on:
   push:
@@ -18,37 +18,139 @@ jobs:
           python-version: '3.11'
       - name: Install focused dependencies
         run: python -m pip install -q pytest pandas numpy requests streamlit
-      - name: Wire AI Stock Ask UI
+      - name: Wire post-close Pre-Market evaluation
         shell: python
         run: |
           from pathlib import Path
-          app=Path('app.py')
-          text=app.read_text(encoding='utf-8')
-          if 'import ai_stock_ask\n' not in text:
-              text=text.replace('import recommendation_history\n','import recommendation_history\nimport ai_stock_ask\n',1)
-          text=text.replace("AI Stock Intelligence V1.8.43", "AI Stock Intelligence V1.8.45")
-          anchor="""    st.markdown('### 🚨 Smart Monitoring & Alert Engine')\n"""
-          block="""    st.markdown('### 💬 AI Stock Ask')\n    ask_horizon=st.radio('Horizon AI Stock Ask',['TODAY','TOMORROW'],horizontal=True,key=f'ai_ask_horizon_{selected_ticker}')\n    ask_snapshot={} if ur is None else ur.to_dict()\n    if dr is not None:\n        for k,v in dr.to_dict().items():\n            if k not in ask_snapshot or pd.isna(ask_snapshot.get(k)):\n                ask_snapshot[k]=v\n    ask_snapshot['ticker']=selected_ticker\n    ask=ai_stock_ask.answer_stock(ask_snapshot,ask_horizon)\n    ask_action=str(ask.get('action','WAIT')).upper()\n    if ask_action=='BUY': st.success(f\"🟢 **{ask.get('headline')}**\")\n    elif ask_action=='AVOID': st.error(f\"🔴 **{ask.get('headline')}**\")\n    else: st.warning(f\"🟡 **{ask.get('headline')}**\")\n    st.write(ask.get('reason',''))\n    levels=ask.get('levels',{}) or {}\n    al1,al2,al3,al4,al5=st.columns(5)\n    def _ask_price(k):\n        v=levels.get(k)\n        return f'Rp {float(v):,.0f}' if v is not None and pd.notna(v) else '—'\n    entry_text='—'\n    if levels.get('entry_low') is not None and levels.get('entry_high') is not None:\n        entry_text=f\"Rp {float(levels['entry_low']):,.0f} - {float(levels['entry_high']):,.0f}\"\n    al1.metric('Harga',_ask_price('close')); al2.metric('Entry',entry_text); al3.metric('Stop Loss',_ask_price('stop_loss')); al4.metric('Target 1',_ask_price('target_1')); al5.metric('Target 2',_ask_price('target_2'))\n    st.caption(ask.get('guardrail',''))\n\n    st.markdown('### 🚨 Smart Monitoring & Alert Engine')\n"""
-          if '### 💬 AI Stock Ask' not in text:
-              if anchor not in text: raise SystemExit('AI Ask UI anchor missing')
-              text=text.replace(anchor,block,1)
-          app.write_text(text,encoding='utf-8')
 
-          Path('test_ai_stock_ask.py').write_text('''from ai_stock_ask import answer_stock\n\n\ndef test_buy_when_strong_and_entry_active():\n    r=answer_stock({"ticker":"TEST","decision":"BUY","ai_score":80,"jst_p_up":.70,"entry_status":"ACTIVE","risk":"MEDIUM","market_regime":"BULLISH","entry_low":100,"entry_high":102,"stop_loss":95,"target_1":110},"TODAY")\n    assert r["action"]=="BUY"\n    assert r["levels"]["entry_low"]==100\n\ndef test_wait_when_entry_not_confirmed():\n    r=answer_stock({"ticker":"TEST","decision":"BUY","ai_score":80,"jst_p_up":.70,"entry_status":"WAIT","risk":"LOW"},"TODAY")\n    assert r["action"]=="WAIT"\n\ndef test_avoid_high_risk_or_bearish_tomorrow():\n    assert answer_stock({"ticker":"A","decision":"BUY","ai_score":90,"jst_p_up":.8,"risk":"HIGH"},"TODAY")["action"]=="AVOID"\n    assert answer_stock({"ticker":"B","decision":"BUY","ai_score":90,"jst_p_up":.8,"risk":"LOW","market_regime":"BEARISH"},"TOMORROW")["action"]=="AVOID"\n\ndef test_missing_ticker_never_invents_answer():\n    assert answer_stock({},"TODAY")["status"]=="NO_DATA"\n''',encoding='utf-8')
-      - name: Compile Python
-        run: python -m py_compile app.py ai_stock_ask.py closing_overnight.py worker_base.py premarket_intelligence.py premarket_evaluation.py premarket_explain.py
-      - name: Run all roadmap focused tests
-        run: python -m pytest -q test_ai_stock_ask.py test_closing_overnight.py test_premarket_intelligence.py test_premarket_explain.py test_batch1_live_engine.py
-      - name: Verify UI wiring
+          worker=Path('worker_base.py')
+          text=worker.read_text(encoding='utf-8')
+          anchor='''\n# ============================================================\n# ENGINE CYCLE\n# ============================================================\n'''
+          block=r'''
+# ============================================================
+# V1.8.46 POST-CLOSE PRE-MARKET EVALUATION
+# ============================================================
+
+def ensure_premarket_evaluation_table():
+    con=dbcon()
+    try:
+        con.execute("""CREATE TABLE IF NOT EXISTS premarket_evaluations (
+            market_date TEXT NOT NULL, evaluated_at TEXT NOT NULL,
+            ticker TEXT NOT NULL, decision TEXT, entry_touched INTEGER,
+            stop_hit INTEGER, target_1_hit INTEGER, target_2_hit INTEGER,
+            outcome TEXT, verdict TEXT, return_pct REAL,
+            session_open REAL, session_high REAL, session_low REAL, session_close REAL,
+            PRIMARY KEY(market_date,ticker))""")
+        con.commit()
+    finally:
+        con.close()
+
+
+def evaluate_locked_premarket():
+    """Evaluate completed locked sessions from stored daily OHLC without hindsight edits."""
+    ensure_premarket_tables(); ensure_premarket_evaluation_table()
+    today=_wib_now().date().isoformat()
+    con=dbcon()
+    try:
+        dates=[r[0] for r in con.execute(
+            "SELECT market_date FROM premarket_runs WHERE status='LOCKED' AND market_date < ? ORDER BY market_date",
+            (today,)).fetchall()]
+    finally:
+        con.close()
+    total=0
+    for market_date in dates:
+        con=dbcon()
+        try:
+            picks=pd.read_sql_query("SELECT * FROM premarket_picks WHERE market_date=? ORDER BY rank",con,params=(market_date,))
+        finally:
+            con.close()
+        if picks.empty: continue
+        rows=[]
+        for _,pick in picks.iterrows():
+            ticker=str(pick.get('ticker','')).upper().replace('.JK','').strip()
+            con=dbcon()
+            try:
+                market=pd.read_sql_query(
+                    "SELECT open,high,low,close FROM prices WHERE ticker=? AND date(date)=date(?) ORDER BY date DESC LIMIT 1",
+                    con,params=(ticker,market_date))
+            except Exception:
+                market=pd.DataFrame()
+            finally:
+                con.close()
+            if market.empty: continue
+            ev=premarket_evaluation.evaluate_pick(pick.to_dict(),market.iloc[0].to_dict())
+            rows.append((market_date,datetime.now(timezone.utc).isoformat(),ticker,ev.get('decision'),int(ev.get('entry_touched',False)),int(ev.get('stop_hit',False)),int(ev.get('target_1_hit',False)),int(ev.get('target_2_hit',False)),ev.get('outcome'),ev.get('verdict'),ev.get('return_pct_vs_entry_low'),ev.get('session_open'),ev.get('session_high'),ev.get('session_low'),ev.get('session_close')))
+        if rows:
+            con=dbcon()
+            try:
+                con.executemany("""INSERT OR REPLACE INTO premarket_evaluations
+                    (market_date,evaluated_at,ticker,decision,entry_touched,stop_hit,target_1_hit,target_2_hit,outcome,verdict,return_pct,session_open,session_high,session_low,session_close)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",rows)
+                con.commit(); total+=len(rows)
+            finally:
+                con.close()
+    if total:
+        app.state_set('premarket_evaluation_at',datetime.now(timezone.utc).isoformat())
+        log('PREMARKET_EVAL','UPDATED',f'rows={total}')
+    return total
+
+'''
+          if 'def evaluate_locked_premarket():' not in text:
+              if anchor not in text: raise SystemExit('engine cycle anchor missing')
+              text=text.replace(anchor,'\n'+block+anchor,1)
+          call_anchor='''    ensure_tables()\n\n    universe, source = app.load_universe()\n'''
+          call='''    ensure_tables()\n    try:\n        evaluate_locked_premarket()\n    except Exception:\n        log("PREMARKET_EVAL","ERROR",traceback.format_exc()[-1800:])\n\n    universe, source = app.load_universe()\n'''
+          if 'log("PREMARKET_EVAL","ERROR"' not in text:
+              if call_anchor not in text: raise SystemExit('cycle call anchor missing')
+              text=text.replace(call_anchor,call,1)
+          worker.write_text(text,encoding='utf-8')
+
+          app=Path('app.py')
+          a=app.read_text(encoding='utf-8')
+          a=a.replace('AI Stock Intelligence V1.8.45','AI Stock Intelligence V1.8.46')
+          fn_anchor='''\ndef render_premarket_panel():\n'''
+          reader=r'''
+def read_premarket_evaluations(limit=100):
+    try:
+        con=dbcon()
+        d=pd.read_sql_query("""SELECT market_date,evaluated_at,ticker,decision,outcome,verdict,return_pct,
+            session_open,session_high,session_low,session_close FROM premarket_evaluations
+            ORDER BY market_date DESC,ticker LIMIT ?""",con,params=(int(limit),))
+        con.close(); return d
+    except Exception:
+        return pd.DataFrame()
+
+'''
+          if 'def read_premarket_evaluations(' not in a:
+              if fn_anchor not in a: raise SystemExit('premarket panel anchor missing')
+              a=a.replace(fn_anchor,'\n'+reader+fn_anchor,1)
+          panel_anchor="""    st.caption(\n        'Opening Confirmation pada tahap berikutnya akan memeriksa harga pembukaan terhadap Entry Low/High '\n        'untuk menentukan BUY, WAIT / DON’T CHASE, atau CANCEL.'\n    )\n"""
+          panel_block=panel_anchor+"""\n    evaluation=read_premarket_evaluations(100)\n    if not evaluation.empty:\n        st.markdown('### 📊 Evaluasi Pre-Market Setelah Market Tutup')\n        latest_date=str(evaluation.iloc[0]['market_date'])\n        ev=evaluation[evaluation['market_date'].astype(str)==latest_date].copy()\n        verdict=ev['verdict'].astype(str).str.upper()\n        sesuai=int((verdict=='SESUAI').sum()); tidak=int((verdict=='TIDAK_SESUAI').sum()); review=int((verdict=='REVIEW').sum())\n        decided=sesuai+tidak\n        hit=(sesuai/decided*100) if decided else None\n        e1,e2,e3,e4=st.columns(4)\n        e1.metric('Evaluasi Sesi',latest_date); e2.metric('SESUAI',sesuai); e3.metric('TIDAK SESUAI',tidak); e4.metric('Hit Rate',f'{hit:.1f}%' if hit is not None else '—')\n        st.caption(f'REVIEW {review} • hasil asli Pre-Market tetap immutable; evaluasi hanya mencatat apa yang benar-benar terjadi.')\n        show=ev.rename(columns={'ticker':'ticker','decision':'Decision','outcome':'Outcome','verdict':'Verdict','return_pct':'Return %','session_close':'Close'})\n        render_clickable_dataframe(show,[c for c in ['ticker','Decision','Outcome','Verdict','Return %','Close'] if c in show.columns],2)\n"""
+          if '### 📊 Evaluasi Pre-Market Setelah Market Tutup' not in a:
+              if panel_anchor not in a: raise SystemExit('premarket evaluation UI anchor missing')
+              a=a.replace(panel_anchor,panel_block,1)
+          app.write_text(a,encoding='utf-8')
+
+          Path('test_premarket_evaluation.py').write_text('''import pandas as pd\nfrom premarket_evaluation import evaluate_pick,summarize\n\ndef test_target_and_stop_outcomes():\n    p={"ticker":"A","entry_low":100,"entry_high":102,"stop_loss":95,"target_1":110,"target_2":120}\n    assert evaluate_pick(p,{"open":101,"high":112,"low":99,"close":108})["outcome"]=="TARGET_1"\n    assert evaluate_pick(p,{"open":101,"high":104,"low":94,"close":96})["outcome"]=="STOP_LOSS"\n\ndef test_ambiguous_daily_bar_is_review():\n    p={"ticker":"A","entry_low":100,"entry_high":102,"stop_loss":95,"target_1":110}\n    r=evaluate_pick(p,{"open":101,"high":112,"low":94,"close":100})\n    assert r["outcome"]=="AMBIGUOUS" and r["verdict"]=="REVIEW"\n\ndef test_summary_excludes_review_from_hit_rate():\n    s=summarize(pd.DataFrame([{"verdict":"SESUAI"},{"verdict":"TIDAK_SESUAI"},{"verdict":"REVIEW"}]))\n    assert s["hit_rate"]==0.5 and s["review"]==1\n''',encoding='utf-8')
+      - name: Compile complete roadmap
+        run: python -m py_compile app.py worker_base.py market_session.py top5_timeline.py dynamic_opportunity_ui.py premarket_intelligence.py premarket_evaluation.py premarket_explain.py closing_overnight.py ai_stock_ask.py
+      - name: Run complete roadmap tests
+        run: python -m pytest -q test_batch1_live_engine.py test_premarket_intelligence.py test_premarket_explain.py test_premarket_evaluation.py test_closing_overnight.py test_ai_stock_ask.py
+      - name: Final roadmap audit
         run: |
-          grep -q 'import ai_stock_ask' app.py
+          grep -q 'record_top5(app.DB, dynamic, source_phase=source, config=CFG)' worker_base.py
+          grep -q 'premarket_intelligence.select_high_conviction(res, CFG)' worker_base.py
+          grep -q 'evaluate_locked_premarket()' worker_base.py
+          grep -q 'closing_overnight.select_overnight(res, CFG)' worker_base.py
+          grep -q 'render_actionable_dynamic' app.py
           grep -q '### 💬 AI Stock Ask' app.py
-          grep -q 'AI Stock Intelligence V1.8.45' app.py
-      - name: Commit Batch 4 integration
+          grep -q '### 📊 Evaluasi Pre-Market Setelah Market Tutup' app.py
+          grep -q 'AI Stock Intelligence V1.8.46' app.py
+      - name: Commit final roadmap integration
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add app.py test_ai_stock_ask.py
+          git add app.py worker_base.py test_premarket_evaluation.py
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'V1.8.45 wire grounded AI Stock Ask into deep analysis'
+          git commit -m 'V1.8.46 complete roadmap with post-close premarket evaluation'
           git push
