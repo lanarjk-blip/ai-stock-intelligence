@@ -1,4 +1,4 @@
-name: V1.8.43 PreMarket Explain Integration
+name: V1.8.44 Closing Overnight Integration
 
 on:
   push:
@@ -16,35 +16,39 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install focused test dependencies
+      - name: Install focused dependencies
         run: python -m pip install -q pytest pandas
-      - name: Wire auditable premarket explanation
+      - name: Wire closing overnight intelligence
         shell: python
         run: |
           from pathlib import Path
 
           worker = Path('worker_base.py')
           text = worker.read_text(encoding='utf-8')
-          if 'import premarket_explain\n' not in text:
-              text = text.replace('import premarket_evaluation\n', 'import premarket_evaluation\nimport premarket_explain\n', 1)
-          old = '''            reason=f"{str(row.get('decision','WATCH'))} • AI {_pm_num(row.get('ai_score'),0):.1f}"\n'''
-          new = '''            reason=premarket_explain.explain_pick(row.to_dict())\n'''
-          if old not in text:
-              raise SystemExit('premarket reason anchor not found')
-          text = text.replace(old, new, 1)
+          if 'import closing_overnight\n' not in text:
+              anchor = 'import premarket_explain\n'
+              if anchor not in text:
+                  raise SystemExit('worker import anchor missing')
+              text = text.replace(anchor, anchor + 'import closing_overnight\n', 1)
+
+          anchor = '''    top = res.iloc[0]\n\n    log(\n'''
+          block = '''    # V1.8.44: strict next-session Closing / Overnight Intelligence.\n    if str(source).lower() == "full-universe":\n        try:\n            overnight = closing_overnight.select_overnight(res, CFG)\n            app.state_set("overnight_status", overnight.get("status", ""))\n            app.state_set("overnight_pick_count", len(overnight.get("picks", [])))\n            app.state_set("overnight_reason", overnight.get("reason", ""))\n            picks = overnight.get("picks")\n            if picks is not None and not picks.empty:\n                payload = picks.to_dict(orient="records")\n                app.state_set("overnight_picks_json", json.dumps(payload, ensure_ascii=False, default=str))\n            else:\n                app.state_set("overnight_picks_json", "[]")\n            log("OVERNIGHT", overnight.get("status", "UNKNOWN"), f"picks={len(overnight.get('picks', []))}")\n        except Exception:\n            log("OVERNIGHT", "ERROR", traceback.format_exc()[-1800:])\n\n    top = res.iloc[0]\n\n    log(\n'''
+          if 'closing_overnight.select_overnight(res, CFG)' not in text:
+              if anchor not in text:
+                  raise SystemExit('analyze_and_publish anchor missing')
+              text = text.replace(anchor, block, 1)
           worker.write_text(text, encoding='utf-8')
 
-          test = Path('test_premarket_explain.py')
-          test.write_text('''from premarket_explain import explain_pick\n\n\ndef test_explanation_uses_actual_factors_and_opening_gate():\n    text = explain_pick({\n        "decision": "BUY", "ai_score": 81, "jst_p_up": 0.71,\n        "relative_percentile": 0.94, "risk_reward_2": 2.1,\n        "risk": "MEDIUM", "market_regime": "BULLISH",\n    })\n    assert "SEBAB:" in text\n    assert "AI Score 81.0" in text\n    assert "P(UP) 71.0%" in text\n    assert "relative strength 94.0%" in text\n    assert "R/R 2.10" in text\n    assert "risk MEDIUM" in text\n    assert "IHSG BULLISH" in text\n    assert "AKIBAT: kandidat BUY Pre-Market" in text\n    assert "Opening Confirmation" in text\n\n\ndef test_explanation_does_not_invent_missing_factors():\n    text = explain_pick({"decision": "STRONG_BUY", "ai_score": 75})\n    assert "AI Score 75.0" in text\n    assert "P(UP)" not in text\n    assert "R/R" not in text\n    assert "IHSG" not in text\n''', encoding='utf-8')
-      - name: Compile V1.8.43 Python
-        run: python -m py_compile worker_base.py premarket_intelligence.py premarket_evaluation.py premarket_explain.py dynamic_opportunity_ui.py app.py
+          Path('test_closing_overnight.py').write_text('''import pandas as pd\nfrom closing_overnight import select_overnight\n\n\ndef cfg():\n    return {"overnight_max_picks":5,"overnight_min_ai_score":75,"overnight_min_p_up":0.64,"overnight_min_risk_reward":1.5,"overnight_max_risk":"MEDIUM","overnight_block_bearish_ihsg":True}\n\ndef test_no_trade_when_no_buy():\n    r=select_overnight(pd.DataFrame([{"decision":"WATCH","ai_score":90,"jst_p_up":.9}]),cfg())\n    assert r["status"]=="NO_OVERNIGHT_TRADE"\n    assert r["picks"].empty\n\ndef test_strict_filters_and_no_padding():\n    df=pd.DataFrame([\n      {"ticker":"GOOD","decision":"BUY","ai_score":82,"jst_p_up":.70,"risk_reward_2":2.0,"risk":"MEDIUM","market_regime":"BULLISH"},\n      {"ticker":"RISKY","decision":"BUY","ai_score":90,"jst_p_up":.80,"risk_reward_2":3.0,"risk":"HIGH","market_regime":"BULLISH"},\n      {"ticker":"BEAR","decision":"BUY","ai_score":90,"jst_p_up":.80,"risk_reward_2":3.0,"risk":"LOW","market_regime":"BEARISH"},\n    ])\n    r=select_overnight(df,cfg())\n    assert r["status"]=="OVERNIGHT_READY"\n    assert list(r["picks"]["ticker"])==["GOOD"]\n    assert len(r["picks"])==1\n\ndef test_percent_probability_is_supported():\n    df=pd.DataFrame([{"ticker":"PCT","decision":"STRONG_BUY","ai_score":80,"jst_p_up":70,"risk_reward_2":1.8,"risk":"LOW","market_regime":"NEUTRAL"}])\n    assert select_overnight(df,cfg())["status"]=="OVERNIGHT_READY"\n''',encoding='utf-8')
+      - name: Compile Python
+        run: python -m py_compile worker_base.py closing_overnight.py premarket_intelligence.py premarket_evaluation.py premarket_explain.py app.py
       - name: Run focused tests
-        run: python -m pytest -q test_premarket_intelligence.py test_premarket_explain.py test_batch1_live_engine.py
-      - name: Commit explanation integration
+        run: python -m pytest -q test_closing_overnight.py test_premarket_intelligence.py test_premarket_explain.py test_batch1_live_engine.py
+      - name: Commit integration
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add worker_base.py test_premarket_explain.py
+          git add worker_base.py test_closing_overnight.py
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'V1.8.43 integrate auditable premarket explanations'
+          git commit -m 'V1.8.44 wire strict closing overnight intelligence'
           git push
