@@ -1,8 +1,9 @@
-"""Runtime consistency and narrow provider recovery for V1.8.52.
+"""Runtime consistency, H-10 Pre-Market deadline, and provider recovery.
 
-The detached worker self-reloads when runtime-critical source changes. IHSG
-also gets the same Yahoo query1 -> query2 failover already used by equity
-collection so missing market context cannot silently collapse JST training.
+The detached worker self-reloads when runtime-critical source changes. A
+separate Pre-Market deadline daemon keeps the 08:50 WIB finalization independent
+from the ordinary 30-minute engine loop. IHSG also gets Yahoo query1 -> query2
+failover so missing market context cannot silently collapse JST training.
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ _WATCH = (
     "app.py",
     "dynamic_engine.py",
     "dynamic_opportunity_ui.py",
+    "premarket_scheduler.py",
     "sitecustomize.py",
 )
 
@@ -49,8 +51,25 @@ def _watch_worker():
                 os.execv(sys.executable, [sys.executable, os.path.join(_BASE, "worker_base.py")])
 
 
+def _run_premarket_scheduler():
+    """Start deadline-first Pre-Market after worker imports have settled."""
+    try:
+        time.sleep(3)
+        import premarket_scheduler
+        premarket_scheduler.run_forever()
+    except Exception as exc:
+        # The ordinary worker must remain alive even if this auxiliary daemon
+        # ever fails during startup. Its own loop handles runtime exceptions.
+        print(f"[PREMARKET_H10] startup error: {exc!r}", flush=True)
+
+
 if os.environ.get("AI_ENGINE_WORKER") == "1":
     threading.Thread(target=_watch_worker, name="asi-runtime-watchdog", daemon=True).start()
+    threading.Thread(
+        target=_run_premarket_scheduler,
+        name="asi-premarket-h10",
+        daemon=True,
+    ).start()
 
 
 # Targeted IHSG failover. Do not alter ordinary stock/API requests.
