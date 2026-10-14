@@ -48,6 +48,13 @@ jobs:
           PY
       - name: Compile
         run: python -m py_compile app.py worker_base.py accuracy_guardrails.py dynamic_opportunity_ui.py sitecustomize.py
+      - name: Live Streamlit health
+        run: |
+          set -e
+          URL='https://ai-stock-intelligence-zijcl2pi2kjweeappbkjiy.streamlit.app/_stcore/health'
+          body=$(curl -fsSL --retry 6 --retry-delay 10 --retry-all-errors --max-time 20 "$URL")
+          echo "Streamlit health=$body"
+          test "$body" = "ok"
       - name: Live IHSG provider smoke test
         env:
           AI_ENGINE_WORKER: '1'
