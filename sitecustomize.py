@@ -1,11 +1,4 @@
-"""Runtime consistency, H-10 Pre-Market deadline, and provider recovery.
-
-The detached worker self-reloads when runtime-critical source changes. Separate
-Pre-Market daemons keep preliminary next-session candidates visible and enforce
-the 08:50 WIB finalization independently from the ordinary 30-minute engine
-loop. IHSG also gets Yahoo query1 -> query2 failover so missing market context
-cannot silently collapse JST training.
-"""
+"""Runtime consistency, H-10 Pre-Market deadline, persistence, and provider recovery."""
 from __future__ import annotations
 
 import hashlib
@@ -15,17 +8,32 @@ import threading
 import time
 
 _BASE = os.path.dirname(os.path.abspath(__file__))
+_RUNTIME_IDENTITY = None
 
-# Claim the worker singleton as early as Python allows.  This executes before
+# Claim the worker singleton as early as Python allows. This executes before
 # worker_base.py imports app.py, so an orphan/duplicate generation cannot write
 # contradictory state first and get noticed later.
 if os.environ.get("AI_ENGINE_WORKER") == "1":
     try:
-        import runtime_supervisor  # noqa: F401
+        import runtime_supervisor
+        _RUNTIME_IDENTITY = dict(runtime_supervisor.CLAIM or {})
     except SystemExit:
         raise
     except Exception as exc:
         print(f"[RUNTIME_SUPERVISOR] startup error: {exc!r}", flush=True)
+
+# Restore critical state before app.py initializes.  This turns a fresh
+# Streamlit/Render filesystem into a cache of the persistent Neon control plane
+# instead of treating local SQLite as the source of truth.
+try:
+    import persistent_bridge
+    if persistent_bridge.enabled():
+        restored = persistent_bridge.restore_local_from_remote()
+        print(f"[PERSIST_BRIDGE] pre-app restore {restored}", flush=True)
+        if os.environ.get("AI_ENGINE_WORKER") == "1":
+            persistent_bridge.start_worker_bridge(_RUNTIME_IDENTITY)
+except Exception as exc:
+    print(f"[PERSIST_BRIDGE] startup degraded: {exc!r}", flush=True)
 
 _WATCH = (
     "worker_base.py",
@@ -37,6 +45,7 @@ _WATCH = (
     "premarket_scheduler.py",
     "premarket_preliminary.py",
     "premarket_ui_patch.py",
+    "persistent_bridge.py",
     "runtime_supervisor.py",
     "sitecustomize.py",
 )
@@ -100,9 +109,6 @@ if os.environ.get("AI_ENGINE_WORKER") == "1":
         daemon=True,
     ).start()
 else:
-    # The legacy app copy calls every non-NO_TRADE state "locked". Install a
-    # narrow wording patch so PRELIMINARY remains visibly preliminary and make
-    # the Pre-Market panel self-heal from the newest snapshot on page open.
     try:
         import premarket_ui_patch
         premarket_ui_patch.install()
@@ -133,7 +139,6 @@ try:
             return False
 
     def _get_with_ihsg_failover(url, *args, **kwargs):
-        """Retry IHSG on Yahoo query2 even when query1 raises outright."""
         text_url = str(url)
         is_query1_ihsg = (
             "query1.finance.yahoo.com" in text_url
@@ -171,5 +176,4 @@ try:
 
     requests.get = _get_with_ihsg_failover
 except Exception:
-    # Network recovery must never prevent interpreter startup.
     pass
