@@ -102,6 +102,8 @@ def pull_ui_once():
 
 
 def _worker_loop():
+    # app.py/worker_base.py still need to initialize and populate their tables.
+    time.sleep(12)
     while True:
         try:
             print(f"[UI_REPLICA] worker sync {sync_worker_once()}", flush=True)
@@ -111,6 +113,8 @@ def _worker_loop():
 
 
 def _ui_loop():
+    # sitecustomize performs one synchronous pull before starting this loop.
+    time.sleep(UI_PULL_SECONDS)
     while True:
         try:
             result = pull_ui_once()
