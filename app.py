@@ -1880,9 +1880,25 @@ def read_premarket_evaluations(limit=100):
         return pd.DataFrame()
 
 
+def _ensure_premarket_on_open():
+    """Recover preliminary candidates synchronously when the UI opens."""
+    try:
+        import premarket_preliminary
+        result=premarket_preliminary.publish_preliminary() or {}
+        state_set('premarket_on_open_status',str(result.get('status','UNKNOWN')))
+        state_set('premarket_on_open_at',datetime.now(timezone.utc).isoformat())
+        return result
+    except Exception as exc:
+        state_set('premarket_on_open_status','ERROR')
+        state_set('premarket_on_open_error',str(exc)[:500])
+        return {'status':'ERROR','error':str(exc)}
+
+
 def render_premarket_panel():
+    recovery=_ensure_premarket_on_open()
     run=read_premarket_run()
     st.subheader('🌅 Pre-Market Top Picks')
+    st.caption('Runtime recovery R22 • on-open preliminary aktif • H-10 final 08:50 WIB')
     st.caption(
         'Daftar ini adalah pilihan yang dikunci untuk sesi berikutnya. '
         'Setelah LOCKED, daftar tidak boleh diganti hanya karena hasil pasar berubah. '
@@ -1890,7 +1906,8 @@ def render_premarket_panel():
     )
 
     if not run:
-        st.info('Pre-Market belum memiliki locked run. Worker akan membuatnya setelah full-universe cycle.')
+        recovery_status=str((recovery or {}).get('status','UNKNOWN')).upper()
+        st.warning(f'Pre-Market belum punya kandidat tersimpan. On-open recovery: {recovery_status}. Sistem tidak menampilkan BUY palsu jika snapshot Opportunity belum siap.')
         return
 
     status=str(run.get('status','')).upper()
