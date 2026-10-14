@@ -1,0 +1,55 @@
+name: Pre-Market Runtime Health Gate
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/v1852_premarket_health_gate.yml'
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Patch app recovery gate
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('app.py')
+          s=p.read_text(encoding='utf-8')
+          old='''def _ensure_premarket_on_open():\n    """Recover preliminary candidates synchronously when the UI opens."""\n    try:\n        import premarket_preliminary\n        result=premarket_preliminary.ensure_on_open() or {}\n'''
+          new='''def _ensure_premarket_on_open():\n    """Recover preliminary candidates only when the active runtime is healthy."""\n    try:\n        import runtime_health\n        health=runtime_health.remote_runtime_health() or {}\n        if health.get("required") and not health.get("ready"):\n            result={\n                "status":str(health.get("status") or "RUNTIME_STALE"),\n                "detail":str(health.get("reason") or "runtime unavailable"),\n                "runtime_health":health,\n            }\n            state_set('premarket_on_open_status',result['status'])\n            state_set('premarket_on_open_at',datetime.now(timezone.utc).isoformat())\n            return result\n        import premarket_preliminary\n        result=premarket_preliminary.ensure_on_open() or {}\n'''
+          if old not in s:
+              if 'import runtime_health' not in s[s.find('def _ensure_premarket_on_open'):s.find('def render_premarket_panel')]:
+                  raise SystemExit('on-open function anchor missing')
+          else:
+              s=s.replace(old,new,1)
+          s=s.replace('Runtime recovery R22.1 • on-open lightweight preliminary aktif • H-10 final 08:50 WIB','Runtime recovery R22.2 • health-gated on-open preliminary • H-10 final 08:50 WIB')
+          p.write_text(s,encoding='utf-8')
+          PY
+      - name: Validate source contract
+        run: |
+          python -m py_compile app.py runtime_health.py local_runtime_health.py premarket_preliminary.py
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('app.py').read_text(encoding='utf-8')
+          block=s[s.index('def _ensure_premarket_on_open'):s.index('def render_premarket_panel')]
+          assert block.index('runtime_health.remote_runtime_health()') < block.index('premarket_preliminary.ensure_on_open()')
+          assert 'RUNTIME_STALE' in block
+          assert 'Runtime recovery R22.2' in s
+          print('PREMARKET HEALTH GATE SOURCE PASSED')
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app.py
+          git diff --cached --check
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Gate Pre-Market on-open recovery on runtime health'
+          git push origin HEAD:main
