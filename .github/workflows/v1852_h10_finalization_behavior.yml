@@ -1,0 +1,99 @@
+name: H-10 Finalization Behavior
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/v1852_h10_finalization_behavior.yml'
+permissions:
+  contents: write
+jobs:
+  h10:
+    runs-on: ubuntu-latest
+    env:
+      AI_ENGINE_WORKER: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install
+        run: python -m pip install -q -r requirements.txt pytest
+      - name: Make H-10 timing deterministic
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('premarket_scheduler.py')
+          s=p.read_text(encoding='utf-8')
+          s=s.replace('    final_time = _now_wib()\n','    final_time = local\n',1)
+          p.write_text(s,encoding='utf-8')
+          PY
+      - name: Execute preliminary to H-10 immutable path
+        run: |
+          python - <<'PY'
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+          import pandas as pd
+          import app
+          import worker_base
+          import premarket_scheduler as h10
+          import premarket_preliminary
+
+          tickers=['BBCA','BBRI','BMRI','TLKM','ASII','ANTM','INDF','ICBP','ADRO','UNTR','PGAS','KLBF']
+          universe=pd.DataFrame({'ticker':tickers,'company':tickers})
+          ih=app.fetch_ihsg(); assert ih is not None and not ih.empty; app.save_ihsg(ih)
+          ok=0
+          for ticker in tickers:
+              d=app.fetch_chart(ticker,220,'1d')
+              if d is not None and not d.empty:
+                  app.save_daily(d,ticker); ok+=1
+          assert ok >= 10
+          result=app.analyze_all(universe,None); assert result is not None and not result.empty
+          worker_base.save_opportunities(result,'h10-behavior')
+          h10._ensure_tables()
+          con=app.dbcon(); con.execute('DELETE FROM premarket_picks'); con.execute('DELETE FROM premarket_runs'); con.commit(); con.close()
+          app.state_set('premarket_preliminary_at','')
+
+          early=datetime(2026,10,15,5,30,tzinfo=ZoneInfo('Asia/Jakarta'))
+          pre=premarket_preliminary.ensure_on_open(early)
+          assert pre.get('status')=='PRELIMINARY', pre
+
+          lock=datetime(2026,10,15,8,50,tzinfo=ZoneInfo('Asia/Jakarta'))
+          final=h10.finalize_h10(lock)
+          print('final=',final)
+          assert final.get('status') in ('LOCKED','NO_TRADE'), final
+          assert final.get('timing')=='ON_TIME', final
+
+          con=app.dbcon()
+          run1=con.execute('SELECT market_date,generated_at,status,pick_count,note FROM premarket_runs ORDER BY market_date DESC LIMIT 1').fetchone()
+          picks1=con.execute('SELECT rank,ticker,decision,source_phase FROM premarket_picks ORDER BY rank').fetchall()
+          con.close()
+          print('run1=',run1); print('picks1=',picks1)
+          assert run1 and str(run1[4]).startswith('H10_FINAL')
+          assert run1[2] in ('LOCKED','NO_TRADE')
+          assert all(str(r[3]).startswith('premarket-h10:') for r in picks1)
+
+          later=datetime(2026,10,15,8,55,tzinfo=ZoneInfo('Asia/Jakarta'))
+          again_pre=premarket_preliminary.publish_preliminary(later)
+          again_final=h10.finalize_h10(later)
+          assert again_pre.get('status')=='FINAL_EXISTS', again_pre
+          assert again_final.get('status')=='ALREADY_FINAL', again_final
+
+          con=app.dbcon()
+          run2=con.execute('SELECT market_date,generated_at,status,pick_count,note FROM premarket_runs ORDER BY market_date DESC LIMIT 1').fetchone()
+          picks2=con.execute('SELECT rank,ticker,decision,source_phase FROM premarket_picks ORDER BY rank').fetchall()
+          con.close()
+          assert run2==run1
+          assert picks2==picks1
+          print('H10 IMMUTABILITY PASSED')
+          PY
+      - name: Compile and commit timing fix
+        run: |
+          python -m py_compile premarket_scheduler.py premarket_preliminary.py
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add premarket_scheduler.py
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Make H-10 timing deterministic and testable'
+          git push origin HEAD:main
