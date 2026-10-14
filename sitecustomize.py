@@ -28,6 +28,21 @@ if _IS_REAL_WORKER:
     except Exception as exc:
         print(f"[RUNTIME_SUPERVISOR] startup error: {exc!r}", flush=True)
 
+# Publish the first local heartbeat synchronously before any persistence restore
+# or heavy worker imports. This removes the first-open race where the UI can
+# render before the background heartbeat thread gets CPU time.
+if _IS_REAL_WORKER:
+    try:
+        import local_runtime_health
+        _identity = dict(_RUNTIME_IDENTITY or {})
+        local_runtime_health.write_worker_heartbeat(
+            pid=os.getpid(),
+            generation=_identity.get("generation", ""),
+            build=_identity.get("build", ""),
+        )
+    except Exception as exc:
+        print(f"[LOCAL_RUNTIME_HEALTH] first heartbeat error: {exc!r}", flush=True)
+
 # Production persistence startup order:
 # 1) cold Render worker restores full SQLite/model checkpoint;
 # 2) newest control-plane rows overlay the checkpoint;
