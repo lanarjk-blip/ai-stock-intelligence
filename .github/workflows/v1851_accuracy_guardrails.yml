@@ -14,6 +14,7 @@ on:
       - 'premarket_ui_patch.py'
       - 'runtime_supervisor.py'
       - 'persistent_bridge.py'
+      - 'external_runtime_guard.py'
       - 'runtime_api.py'
       - 'render.yaml'
       - 'config.json'
@@ -34,6 +35,7 @@ on:
       - 'premarket_ui_patch.py'
       - 'runtime_supervisor.py'
       - 'persistent_bridge.py'
+      - 'external_runtime_guard.py'
       - 'runtime_api.py'
       - 'render.yaml'
       - 'config.json'
@@ -69,11 +71,14 @@ jobs:
           watchdog=Path('sitecustomize.py').read_text(encoding='utf-8')
           assert '_IS_REAL_WORKER' in watchdog
           assert 'runtime_supervisor' in watchdog and 'persistent_bridge' in watchdog
+          assert 'external_runtime_guard.install()' in watchdog
           assert 'query2.finance.yahoo.com' in watchdog and 'primary_error' in watchdog
           supervisor=Path('runtime_supervisor.py').read_text(encoding='utf-8')
           assert 'DUPLICATE_EXIT' in supervisor and 'SIGTERM' in supervisor
           bridge=Path('persistent_bridge.py').read_text(encoding='utf-8')
           assert 'DATABASE_URL' in bridge and 'restore_local_from_api' in bridge
+          external=Path('external_runtime_guard.py').read_text(encoding='utf-8')
+          assert 'worker_base.py' in external and 'subprocess.Popen = guarded_popen' in external
           api=Path('runtime_api.py').read_text(encoding='utf-8')
           assert '/health' in api and '/bootstrap' in api
           preliminary=Path('premarket_preliminary.py').read_text(encoding='utf-8')
@@ -87,7 +92,7 @@ jobs:
           python -m py_compile app.py worker_base.py accuracy_guardrails.py
           dynamic_engine.py dynamic_opportunity_ui.py sitecustomize.py
           premarket_scheduler.py premarket_preliminary.py premarket_ui_patch.py
-          runtime_supervisor.py persistent_bridge.py runtime_api.py
+          runtime_supervisor.py persistent_bridge.py external_runtime_guard.py runtime_api.py
       - name: Diagnose current production Streamlit endpoint
         run: |
           set +e
