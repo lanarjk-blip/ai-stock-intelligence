@@ -1,3 +1,4 @@
+# trigger: 2026-10-15 R22
 name: Production On-Open Pre-Market Hotfix
 on:
   push:
