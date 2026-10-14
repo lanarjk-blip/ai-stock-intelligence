@@ -8,10 +8,14 @@ on:
       - 'accuracy_guardrails.py'
       - 'dynamic_engine.py'
       - 'dynamic_opportunity_ui.py'
+      - 'market_session.py'
+      - 'data/idx_holidays.json'
       - 'sitecustomize.py'
       - 'premarket_scheduler.py'
       - 'premarket_preliminary.py'
       - 'premarket_ui_patch.py'
+      - 'runtime_health.py'
+      - 'runtime_health_ui_patch.py'
       - 'runtime_supervisor.py'
       - 'persistent_bridge.py'
       - 'ui_replica.py'
@@ -31,10 +35,14 @@ on:
       - 'accuracy_guardrails.py'
       - 'dynamic_engine.py'
       - 'dynamic_opportunity_ui.py'
+      - 'market_session.py'
+      - 'data/idx_holidays.json'
       - 'sitecustomize.py'
       - 'premarket_scheduler.py'
       - 'premarket_preliminary.py'
       - 'premarket_ui_patch.py'
+      - 'runtime_health.py'
+      - 'runtime_health_ui_patch.py'
       - 'runtime_supervisor.py'
       - 'persistent_bridge.py'
       - 'ui_replica.py'
@@ -68,6 +76,10 @@ jobs:
           assert cfg['engine_version']=='1.8.52', cfg['engine_version']
           assert cfg['mobile_ui_version']=='1.8.52', cfg['mobile_ui_version']
           assert cfg['data_quality_gate_enabled'] is True
+          assert cfg['runtime_heartbeat_max_age_seconds']==180
+          calendar=json.loads(Path('data/idx_holidays.json').read_text(encoding='utf-8'))
+          assert set(calendar['holidays']['2026']) == set(cfg['market_holidays'])
+          assert calendar['verified_years'] == [2026]
           worker=Path('worker_base.py').read_text(encoding='utf-8')
           assert 'DATA_QUALITY' in worker and 'accuracy_guardrails' in worker
           guard=Path('accuracy_guardrails.py').read_text(encoding='utf-8')
@@ -78,7 +90,15 @@ jobs:
           assert 'replica_runtime.start_worker_replica()' in watchdog
           assert 'replica_runtime.start_ui_pull()' in watchdog
           assert 'external_runtime_guard.install()' in watchdog
+          assert 'runtime_health_ui_patch.install()' in watchdog
           assert 'query2.finance.yahoo.com' in watchdog and 'primary_error' in watchdog
+          health=Path('runtime_health.py').read_text(encoding='utf-8')
+          assert 'RUNTIME_STALE' in health and 'remote_worker_heartbeat_at' in health
+          health_ui=Path('runtime_health_ui_patch.py').read_text(encoding='utf-8')
+          assert 'dynamic_opportunity_ui._quality_gate_state = quality_gate_state' in health_ui
+          assert 'premarket_ui_patch._ensure_premarket_on_open = ensure_premarket_on_open' in health_ui
+          session=Path('market_session.py').read_text(encoding='utf-8')
+          assert 'idx_holidays.json' in session and 'market_holidays' in session
           supervisor=Path('runtime_supervisor.py').read_text(encoding='utf-8')
           assert 'DUPLICATE_EXIT' in supervisor and 'SIGTERM' in supervisor
           bridge=Path('persistent_bridge.py').read_text(encoding='utf-8')
@@ -97,14 +117,15 @@ jobs:
           blueprint=Path('render.yaml').read_text(encoding='utf-8')
           assert 'type: worker' in blueprint and 'type: web' in blueprint
           assert 'ASI_CHECKPOINT_SECONDS' in blueprint
-          print('production stabilization + checkpoint + UI replica contract OK')
+          print('production stabilization + runtime safety contract OK')
           PY
       - name: Compile
         run: >-
           python -m py_compile app.py worker_base.py accuracy_guardrails.py
-          dynamic_engine.py dynamic_opportunity_ui.py sitecustomize.py
+          dynamic_engine.py dynamic_opportunity_ui.py market_session.py sitecustomize.py
           premarket_scheduler.py premarket_preliminary.py premarket_ui_patch.py
-          runtime_supervisor.py persistent_bridge.py ui_replica.py replica_runtime.py
+          runtime_health.py runtime_health_ui_patch.py runtime_supervisor.py
+          persistent_bridge.py ui_replica.py replica_runtime.py
           external_runtime_guard.py runtime_api.py
       - name: Diagnose current production Streamlit endpoint
         run: |
@@ -185,3 +206,4 @@ jobs:
           tests/test_ihsg_failover_v1852.py
           tests/test_runtime_stabilization_v1853.py
           tests/test_ui_replica_v1853.py
+          tests/test_market_safety_v1853.py

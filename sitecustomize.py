@@ -34,7 +34,6 @@ if _IS_REAL_WORKER:
 # 3) worker starts private checkpoint/control sync and sanitized UI replication;
 # 4) Streamlit pulls the sanitized API replica before app.py renders, then keeps
 #    refreshing that local read cache in one background thread.
-# The FastAPI process never imports Streamlit UI patches or restores local DB.
 try:
     import persistent_bridge
     if _IS_REAL_WORKER and persistent_bridge.postgres_enabled():
@@ -70,9 +69,13 @@ _WATCH = (
     "app.py",
     "dynamic_engine.py",
     "dynamic_opportunity_ui.py",
+    "market_session.py",
+    "data/idx_holidays.json",
     "premarket_scheduler.py",
     "premarket_preliminary.py",
     "premarket_ui_patch.py",
+    "runtime_health.py",
+    "runtime_health_ui_patch.py",
     "persistent_bridge.py",
     "ui_replica.py",
     "replica_runtime.py",
@@ -135,6 +138,8 @@ elif not _IS_RUNTIME_API and os.environ.get("AI_ENGINE_WORKER") != "1":
     try:
         import premarket_ui_patch
         premarket_ui_patch.install()
+        import runtime_health_ui_patch
+        runtime_health_ui_patch.install()
     except Exception:
         pass
 
