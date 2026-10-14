@@ -1,0 +1,53 @@
+name: Full Production Integrity Sweep
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/v1852_full_integrity.yml'
+permissions:
+  contents: read
+jobs:
+  integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install -q -r requirements.txt pytest
+      - name: Compile production Python
+        run: |
+          python -m py_compile \
+            app.py worker_base.py sitecustomize.py accuracy_guardrails.py \
+            dynamic_engine.py dynamic_opportunity_ui.py market_session.py \
+            premarket_scheduler.py premarket_preliminary.py premarket_ui_patch.py \
+            runtime_supervisor.py runtime_health.py runtime_health_ui_patch.py \
+            local_runtime_health.py persistent_bridge.py runtime_api.py \
+            ui_replica.py replica_runtime.py external_runtime_guard.py
+      - name: Assert final runtime contracts
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          app=Path('app.py').read_text(encoding='utf-8')
+          sched=Path('premarket_scheduler.py').read_text(encoding='utf-8')
+          site=Path('sitecustomize.py').read_text(encoding='utf-8')
+          health=Path('runtime_health.py').read_text(encoding='utf-8')
+          local=Path('local_runtime_health.py').read_text(encoding='utf-8')
+          bridge=Path('persistent_bridge.py').read_text(encoding='utf-8')
+          assert 'Runtime recovery R22.2' in app
+          block=app[app.index('def _ensure_premarket_on_open'):app.index('def render_premarket_panel')]
+          assert block.index('runtime_health.remote_runtime_health()') < block.index('premarket_preliminary.ensure_on_open()')
+          assert 'final_time = local' in sched
+          assert 'H10_FINAL' in sched
+          assert 'asi-local-heartbeat' in site
+          assert site.index('local_runtime_health.write_worker_heartbeat(') < site.index('# Production persistence startup order:')
+          assert 'LOCAL_BUILD_MISMATCH' in local and 'LOCAL_RUNTIME_STALE' in local
+          assert 'import local_runtime_health' in health
+          assert 'asi_worker_checkpoint' in bridge and 'asi_runtime_heartbeat' in bridge
+          print('FINAL RUNTIME CONTRACTS PASSED')
+          PY
+      - name: Run complete pytest suite
+        run: python -m pytest -q
