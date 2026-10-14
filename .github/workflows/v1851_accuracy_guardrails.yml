@@ -76,5 +76,47 @@ jobs:
           assert float(d['close'].dropna().iloc[-1]) > 0
           print('IHSG latest=', d.iloc[-1].to_dict())
           PY
+      - name: Live JST end-to-end training smoke test
+        env:
+          AI_ENGINE_WORKER: '1'
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          import app
+
+          tickers=['BBCA','BBRI','BMRI','TLKM','ASII','ANTM','INDF','ICBP','ADRO','UNTR','PGAS','KLBF']
+          universe=pd.DataFrame({'ticker':tickers,'company':tickers})
+
+          ih=app.fetch_ihsg()
+          assert ih is not None and not ih.empty, 'IHSG unavailable for JST training smoke test'
+          saved_ihsg=app.save_ihsg(ih)
+          print('saved IHSG rows=', saved_ihsg)
+
+          ok=0
+          saved_rows=0
+          for ticker in tickers:
+              try:
+                  d=app.fetch_chart(ticker,220,'1d')
+                  if d is not None and not d.empty:
+                      saved_rows += int(app.save_daily(d,ticker) or 0)
+                      ok += 1
+                  print(ticker, 'rows=', 0 if d is None else len(d))
+              except Exception as exc:
+                  print(ticker, 'ERROR', repr(exc))
+
+          print('stocks fetched=', ok, 'saved_rows=', saved_rows)
+          assert ok >= 10, f'only {ok} stock histories fetched'
+
+          con=app.dbcon()
+          tr=app.build_training_rows(con,tickers,horizon=int(app.CFGD.get('primary_target_horizon',3)))
+          con.close()
+          print('training rows=', len(tr))
+          assert len(tr) >= 500, f'JST training rows too low: {len(tr)}'
+
+          model, rows, accuracy = app.train_jst(universe)
+          print('JST model=', type(model).__name__ if model is not None else None, 'rows=', rows, 'accuracy=', accuracy)
+          assert model is not None, 'train_jst returned no model'
+          assert rows >= 500
+          PY
       - name: Regression tests
         run: python -m pytest -q test_batch1_live_engine.py test_mobile_ui_v1848.py tests/test_accuracy_guardrails_v1852.py tests/test_runtime_consistency_v1852.py tests/test_ihsg_failover_v1852.py
