@@ -145,8 +145,14 @@ def install():
                 st.session_state["_asi_premarket_on_open"] = result
             except Exception:
                 pass
-            rendered = original_subheader(body, *args, **kwargs)
             status = str((result or {}).get("status") or "")
+            if status == "PRELIMINARY":
+                # render_premarket_panel() queried the run just before drawing
+                # this subheader. One automatic rerun makes that local variable
+                # reload the newly materialized PRELIMINARY row. _due() then
+                # returns FRESH, so this does not loop.
+                st.rerun()
+            rendered = original_subheader(body, *args, **kwargs)
             if status == "NO_SNAPSHOT":
                 original_info(
                     "⏳ **Pre-Market sedang memulihkan snapshot.** Worker belum memiliki snapshot "
