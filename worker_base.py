@@ -144,11 +144,14 @@ def fetch_one(ticker):
         # It can resolve provider symbol changes and reuse valid cached data.
         recover = getattr(app, "fetch_chart_recover", None)
         if callable(recover):
-            df = recover(
+            recovered = recover(
                 ticker,
                 CFG["daily_period_days"],
                 CFG["daily_interval"],
             )
+            # fetch_chart_recover returns (dataframe, status, symbol, error).
+            # Keep compatibility if a future implementation returns only a dataframe.
+            df = recovered[0] if isinstance(recovered, tuple) else recovered
         else:
             df = app.fetch_chart(
                 ticker,
