@@ -1,4 +1,4 @@
-"""Runtime consistency, H-10 Pre-Market deadline, persistence, and provider recovery."""
+"""Runtime consistency, H-10 scheduling, persistence, and provider recovery."""
 from __future__ import annotations
 
 import hashlib
@@ -9,9 +9,14 @@ import time
 
 _BASE = os.path.dirname(os.path.abspath(__file__))
 _RUNTIME_IDENTITY = None
+_ARGV_TEXT = " ".join(str(x) for x in sys.argv).lower()
 _IS_REAL_WORKER = (
     os.environ.get("AI_ENGINE_WORKER") == "1"
     and os.path.basename(str(sys.argv[0] or "")) == "worker_base.py"
+)
+_IS_RUNTIME_API = (
+    "uvicorn" in os.path.basename(str(sys.argv[0] or "")).lower()
+    or "runtime_api:app" in _ARGV_TEXT
 )
 
 if _IS_REAL_WORKER:
@@ -23,17 +28,28 @@ if _IS_REAL_WORKER:
     except Exception as exc:
         print(f"[RUNTIME_SUPERVISOR] startup error: {exc!r}", flush=True)
 
-# Restore the persistent control plane before app.py initializes.  If the UI is
-# configured to read from the Render runtime API, suppress app.py's legacy
-# local worker spawn so Render remains the only production engine.
+# Persistence startup order matters:
+# 1) cold Render worker restores a consistent full SQLite/model checkpoint;
+# 2) latest control-plane rows overlay that checkpoint;
+# 3) recurring bridge starts only after the synchronous restore.
+# Streamlit receives only the read-only API control plane. The FastAPI process
+# never needs a local SQLite restore at all.
 try:
     import persistent_bridge
-    if persistent_bridge.enabled():
+    if _IS_REAL_WORKER and persistent_bridge.postgres_enabled():
+        checkpoint = persistent_bridge.restore_worker_checkpoint_if_needed()
+        print(f"[PERSIST_BRIDGE] checkpoint restore {checkpoint}", flush=True)
+        restored = persistent_bridge.restore_local_from_postgres()
+        print(f"[PERSIST_BRIDGE] control restore {restored}", flush=True)
+        persistent_bridge.start_worker_bridge(_RUNTIME_IDENTITY)
+    elif (
+        not _IS_RUNTIME_API
+        and os.environ.get("AI_ENGINE_WORKER") != "1"
+        and persistent_bridge.enabled()
+    ):
         restored = persistent_bridge.restore_local_from_remote()
-        print(f"[PERSIST_BRIDGE] pre-app restore {restored}", flush=True)
-        if _IS_REAL_WORKER:
-            persistent_bridge.start_worker_bridge(_RUNTIME_IDENTITY)
-        elif os.environ.get("AI_ENGINE_WORKER") != "1" and persistent_bridge.api_enabled():
+        print(f"[PERSIST_BRIDGE] UI restore {restored}", flush=True)
+        if persistent_bridge.api_enabled():
             import external_runtime_guard
             external_runtime_guard.install()
 except Exception as exc:
@@ -105,7 +121,7 @@ if _IS_REAL_WORKER:
     threading.Thread(target=_watch_worker, name="asi-runtime-watchdog", daemon=True).start()
     threading.Thread(target=_run_premarket_scheduler, name="asi-premarket-h10", daemon=True).start()
     threading.Thread(target=_run_premarket_preliminary, name="asi-premarket-preliminary", daemon=True).start()
-elif os.environ.get("AI_ENGINE_WORKER") != "1":
+elif not _IS_RUNTIME_API and os.environ.get("AI_ENGINE_WORKER") != "1":
     try:
         import premarket_ui_patch
         premarket_ui_patch.install()
@@ -113,6 +129,7 @@ elif os.environ.get("AI_ENGINE_WORKER") != "1":
         pass
 
 
+# Targeted IHSG Yahoo query1 -> query2 failover.
 try:
     import requests
 
@@ -150,7 +167,9 @@ try:
                 return primary_response
         except Exception as exc:
             primary_error = exc
-        fallback_url = text_url.replace("query1.finance.yahoo.com", "query2.finance.yahoo.com", 1)
+        fallback_url = text_url.replace(
+            "query1.finance.yahoo.com", "query2.finance.yahoo.com", 1
+        )
         try:
             fallback = _ORIGINAL_GET(fallback_url, *args, **kwargs)
             if _usable_chart_response(fallback):
