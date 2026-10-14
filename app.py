@@ -1884,7 +1884,7 @@ def _ensure_premarket_on_open():
     """Recover preliminary candidates synchronously when the UI opens."""
     try:
         import premarket_preliminary
-        result=premarket_preliminary.publish_preliminary() or {}
+        result=premarket_preliminary.ensure_on_open() or {}
         state_set('premarket_on_open_status',str(result.get('status','UNKNOWN')))
         state_set('premarket_on_open_at',datetime.now(timezone.utc).isoformat())
         return result
@@ -1898,7 +1898,7 @@ def render_premarket_panel():
     recovery=_ensure_premarket_on_open()
     run=read_premarket_run()
     st.subheader('🌅 Pre-Market Top Picks')
-    st.caption('Runtime recovery R22 • on-open preliminary aktif • H-10 final 08:50 WIB')
+    st.caption('Runtime recovery R22.1 • on-open lightweight preliminary aktif • H-10 final 08:50 WIB')
     st.caption(
         'Daftar ini adalah pilihan yang dikunci untuk sesi berikutnya. '
         'Setelah LOCKED, daftar tidak boleh diganti hanya karena hasil pasar berubah. '
