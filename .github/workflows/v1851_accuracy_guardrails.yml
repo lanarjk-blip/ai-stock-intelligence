@@ -118,5 +118,39 @@ jobs:
           assert model is not None, 'train_jst returned no model'
           assert rows >= 500
           PY
+      - name: Model analysis and opportunity snapshot smoke test
+        env:
+          AI_ENGINE_WORKER: '1'
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          import app
+          import dynamic_engine
+          import worker_base
+
+          tickers=['BBCA','BBRI','BMRI','TLKM','ASII','ANTM','INDF','ICBP','ADRO','UNTR','PGAS','KLBF']
+          universe=pd.DataFrame({'ticker':tickers,'company':tickers})
+          model=app.load_jst()
+          assert model is not None, 'persisted JST model missing after training smoke test'
+
+          result=app.analyze_all(universe, model)
+          print('analysis rows=', 0 if result is None else len(result))
+          assert result is not None and not result.empty, 'model analysis returned no rows'
+          assert 'jst_p_up' in result.columns and result['jst_p_up'].notna().any(), 'model probabilities missing'
+
+          saved=worker_base.save_opportunities(result, 'ci-smoke')
+          print('snapshot saved=', saved)
+          assert saved == len(result) and saved > 0
+
+          con=app.dbcon()
+          count=con.execute('SELECT COUNT(*) FROM opportunities').fetchone()[0]
+          con.close()
+          print('opportunities table rows=', count)
+          assert int(count) == int(saved)
+
+          dynamic=dynamic_engine.update(result, phase='CI_SMOKE')
+          print('dynamic rows=', 0 if dynamic is None else len(dynamic))
+          assert dynamic is not None
+          PY
       - name: Regression tests
         run: python -m pytest -q test_batch1_live_engine.py test_mobile_ui_v1848.py tests/test_accuracy_guardrails_v1852.py tests/test_runtime_consistency_v1852.py tests/test_ihsg_failover_v1852.py
