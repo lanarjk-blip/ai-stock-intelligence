@@ -51,6 +51,8 @@ def test_premarket_has_lightweight_on_open_self_heal():
     assert "PRELIMINARY_ON_OPEN" in preliminary
     assert "premarket_preliminary.ensure_on_open()" in ui
     assert 'str(body).strip() == "🌅 Pre-Market Top Picks"' in ui
+    assert 'status == "PRELIMINARY"' in ui
+    assert "st.rerun()" in ui
     assert "worker.singleton.lock" in ui
     assert "remote_worker_runtime_build" in ui
 
