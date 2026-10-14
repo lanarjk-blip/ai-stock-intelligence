@@ -28,12 +28,13 @@ if _IS_REAL_WORKER:
     except Exception as exc:
         print(f"[RUNTIME_SUPERVISOR] startup error: {exc!r}", flush=True)
 
-# Persistence startup order matters:
-# 1) cold Render worker restores a consistent full SQLite/model checkpoint;
-# 2) latest control-plane rows overlay that checkpoint;
-# 3) recurring bridge starts only after the synchronous restore.
-# Streamlit receives only the read-only API control plane. The FastAPI process
-# never needs a local SQLite restore at all.
+# Production persistence startup order:
+# 1) cold Render worker restores full SQLite/model checkpoint;
+# 2) newest control-plane rows overlay the checkpoint;
+# 3) worker starts private checkpoint/control sync and sanitized UI replication;
+# 4) Streamlit pulls the sanitized API replica before app.py renders, then keeps
+#    refreshing that local read cache in one background thread.
+# The FastAPI process never imports Streamlit UI patches or restores local DB.
 try:
     import persistent_bridge
     if _IS_REAL_WORKER and persistent_bridge.postgres_enabled():
@@ -42,16 +43,23 @@ try:
         restored = persistent_bridge.restore_local_from_postgres()
         print(f"[PERSIST_BRIDGE] control restore {restored}", flush=True)
         persistent_bridge.start_worker_bridge(_RUNTIME_IDENTITY)
+        import replica_runtime
+        replica_runtime.start_worker_replica()
     elif (
         not _IS_RUNTIME_API
         and os.environ.get("AI_ENGINE_WORKER") != "1"
         and persistent_bridge.enabled()
     ):
-        restored = persistent_bridge.restore_local_from_remote()
-        print(f"[PERSIST_BRIDGE] UI restore {restored}", flush=True)
         if persistent_bridge.api_enabled():
             import external_runtime_guard
             external_runtime_guard.install()
+            import replica_runtime
+            pulled = replica_runtime.pull_ui_once()
+            print(f"[UI_REPLICA] initial UI pull {pulled}", flush=True)
+            replica_runtime.start_ui_pull()
+        else:
+            restored = persistent_bridge.restore_local_from_remote()
+            print(f"[PERSIST_BRIDGE] UI direct restore {restored}", flush=True)
 except Exception as exc:
     print(f"[PERSIST_BRIDGE] startup degraded: {exc!r}", flush=True)
 
@@ -66,6 +74,8 @@ _WATCH = (
     "premarket_preliminary.py",
     "premarket_ui_patch.py",
     "persistent_bridge.py",
+    "ui_replica.py",
+    "replica_runtime.py",
     "external_runtime_guard.py",
     "runtime_supervisor.py",
     "runtime_api.py",
