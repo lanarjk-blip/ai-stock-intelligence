@@ -1,0 +1,47 @@
+name: Production On-Open Pre-Market Hotfix
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/app_onopen_premarket_hotfix.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Patch app on-open recovery
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('app.py')
+          s=p.read_text(encoding='utf-8')
+          if 'def _ensure_premarket_on_open():' not in s:
+              old="""def render_premarket_panel():\n    run=read_premarket_run()\n    st.subheader('🌅 Pre-Market Top Picks')"""
+              new="""def _ensure_premarket_on_open():\n    \"\"\"Recover preliminary candidates synchronously when the UI opens.\"\"\"\n    try:\n        import premarket_preliminary\n        result=premarket_preliminary.publish_preliminary() or {}\n        state_set('premarket_on_open_status',str(result.get('status','UNKNOWN')))\n        state_set('premarket_on_open_at',datetime.now(timezone.utc).isoformat())\n        return result\n    except Exception as exc:\n        state_set('premarket_on_open_status','ERROR')\n        state_set('premarket_on_open_error',str(exc)[:500])\n        return {'status':'ERROR','error':str(exc)}\n\n\ndef render_premarket_panel():\n    recovery=_ensure_premarket_on_open()\n    run=read_premarket_run()\n    st.subheader('🌅 Pre-Market Top Picks')\n    st.caption('Runtime recovery R22 • on-open preliminary aktif • H-10 final 08:50 WIB')"""
+              if old not in s: raise SystemExit('render anchor not found')
+              s=s.replace(old,new,1)
+          old_empty="""    if not run:\n        st.info('Pre-Market belum memiliki locked run. Worker akan membuatnya setelah full-universe cycle.')\n        return"""
+          new_empty="""    if not run:\n        recovery_status=str((recovery or {}).get('status','UNKNOWN')).upper()\n        st.warning(f'Pre-Market belum punya kandidat tersimpan. On-open recovery: {recovery_status}. Sistem tidak menampilkan BUY palsu jika snapshot Opportunity belum siap.')\n        return"""
+          if old_empty in s: s=s.replace(old_empty,new_empty,1)
+          p.write_text(s,encoding='utf-8')
+          PY
+      - name: Validate
+        run: |
+          python -m py_compile app.py premarket_preliminary.py premarket_scheduler.py
+          grep -q 'Runtime recovery R22' app.py
+          grep -q '_ensure_premarket_on_open' app.py
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app.py
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Guarantee Pre-Market recovery when app opens'
+          git push origin HEAD:main
