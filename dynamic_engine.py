@@ -338,14 +338,25 @@ def update(res, phase='CLOSED'):
     prev=read_current()
     prev_map={str(r.ticker):r for _,r in prev.iterrows()} if not prev.empty else {}
 
-    # Candidate pool: deliberately wider than BUY. The engine must be able to
-    # discover a future opportunity before the strict decision gate becomes BUY.
-    c=res.copy()
-    c=c[~c.decision.isin(['SELL/AVOID'])].copy()
+    # Primary candidate pool stays deliberately selective. BUY/NEAR ENTRY logic
+    # remains untouched. If nothing clears these discovery gates, expose the
+    # strongest non-SELL names as MONITOR/WATCH candidates instead of rendering
+    # an empty Opportunity screen. The fallback never upgrades a decision or
+    # changes any model score/probability.
+    base=res.copy()
+    non_sell=base[~base.decision.isin(['SELL/AVOID'])].copy()
+    c=non_sell.copy()
     c=c[pd.to_numeric(c.ai_score,errors='coerce').fillna(0)>=45]
     c=c[pd.to_numeric(c.relative_percentile,errors='coerce').fillna(0)>=0.70]
+    candidate_mode='STRICT'
     if c.empty:
-        return pd.DataFrame()
+        candidate_mode='MONITOR_FALLBACK'
+        c=non_sell.copy()
+        c=c[pd.to_numeric(c.close,errors='coerce').notna()]
+        if c.empty:
+            app.state_set('dynamic_candidate_mode','NO_TRADE')
+            app.state_set('dynamic_opportunity_count',0)
+            return pd.DataFrame()
     c=c.sort_values(['relative_rank_score','ai_score'],ascending=False).head(30).reset_index(drop=True)
 
     rows=[]
@@ -372,7 +383,7 @@ def update(res, phase='CLOSED'):
             'relative_rank_score':float(r.relative_rank_score) if pd.notna(r.relative_rank_score) else np.nan,
             'decision':str(r.decision),'decision_reason':str(r.decision_reason),
             'market_regime':market_regime,'market_score':market_score,'ihsg_alignment':ihsg_alignment,'regime_adjustment':regime_adjustment,
-            'prev_rank':prev_rank,'prev_score':prev_score,'stable':stable
+            'prev_rank':prev_rank,'prev_score':prev_score,'stable':stable,'candidate_mode':candidate_mode
         })
 
     cand=pd.DataFrame(rows).sort_values('score',ascending=False).reset_index(drop=True)
@@ -421,18 +432,20 @@ def update(res, phase='CLOSED'):
     for i,rr in selected.iterrows():
         rank=i+1; ts=rr.time
         state=_state(rr,ts,float(rr.score))
-        reason=f"score {rr.score:.1f}; IHSG {rr.market_regime} {rr.market_score:.1f}; alignment {rr.ihsg_alignment:.1f}; regime adj {rr.regime_adjustment:+.1f}; relative {rr.relative_percentile*100:.1f}%; time edge {ts.get('edge',0)*100:+.1f}%; {rr.decision}"
+        mode_note='monitor fallback; no signal upgraded; ' if str(rr.candidate_mode)=='MONITOR_FALLBACK' else ''
+        reason=f"{mode_note}score {rr.score:.1f}; IHSG {rr.market_regime} {rr.market_score:.1f}; alignment {rr.ihsg_alignment:.1f}; regime adj {rr.regime_adjustment:+.1f}; relative {rr.relative_percentile*100:.1f}%; time edge {ts.get('edge',0)*100:+.1f}%; {rr.decision}"
         prev_rank=rr.prev_rank
         prev_rank_missing = prev_rank is None or pd.isna(prev_rank)
         replacement='NEW' if prev_rank_missing else ('RETAINED' if int(prev_rank)==rank else f'RANK_CHANGED {int(prev_rank)}→{rank}')
         vals=(rr.ticker,rr.company,now,rank,float(rr.score),state,str(ts.get('entry_status','NEUTRAL')),str(ts.get('horizon','EOD')),rr.close,rr.entry_low,rr.entry_high,rr.stop_loss,rr.target_1,rr.target_2,rr.risk_reward,rr.risk,rr.ai_score,rr.p_up,rr.p_down,rr.confidence,rr.relative_percentile,rr.relative_rank_score,float(ts.get('edge',0.0)),float(ts.get('confidence',0.0)),reason,replacement,int(rr.stable),(None if prev_rank_missing else int(prev_rank)),rr.prev_score,rr.market_regime,rr.market_score,rr.ihsg_alignment,rr.regime_adjustment)
         con.execute('''INSERT OR REPLACE INTO dynamic_opportunities (ticker,company,generated_at,rank,opportunity_score,state,entry_status,horizon,close,entry_low,entry_high,stop_loss,target_1,target_2,risk_reward,risk,ai_score,p_up,p_down,confidence,relative_percentile,relative_rank_score,time_edge,time_confidence,reason,replacement_reason,stable_cycles,previous_rank,previous_score,market_regime,market_score,ihsg_alignment,regime_adjustment) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',vals)
         con.execute('INSERT INTO dynamic_opportunity_history(generated_at,ticker,rank,opportunity_score,state,entry_status,close,entry_low,entry_high,stop_loss,target_1,risk_reward,risk,decision,relative_percentile,time_edge) VALUES('+','.join(['?']*16)+')',(now,rr.ticker,rank,float(rr.score),state,str(ts.get('entry_status','NEUTRAL')),rr.close,rr.entry_low,rr.entry_high,rr.stop_loss,rr.target_1,rr.risk_reward,rr.risk,rr.decision,rr.relative_percentile,float(ts.get('edge',0.0))))
-        out.append({'rank':rank,'ticker':rr.ticker,'company':rr.company,'opportunity_score':rr.score,'state':state,'entry_status':str(ts.get('entry_status','NEUTRAL')),'horizon':str(ts.get('horizon','EOD')),'close':rr.close,'entry_low':rr.entry_low,'entry_high':rr.entry_high,'stop_loss':rr.stop_loss,'target_1':rr.target_1,'target_2':rr.target_2,'risk_reward':rr.risk_reward,'risk':rr.risk,'ai_score':rr.ai_score,'p_up':rr.p_up,'p_down':rr.p_down,'confidence':rr.confidence,'relative_percentile':rr.relative_percentile,'time_edge':float(ts.get('edge',0.0)),'time_confidence':float(ts.get('confidence',0.0)),'reason':reason,'replacement_reason':replacement,'stable_cycles':int(rr.stable),'market_regime':rr.market_regime,'market_score':rr.market_score,'ihsg_alignment':rr.ihsg_alignment,'regime_adjustment':rr.regime_adjustment})
+        out.append({'rank':rank,'ticker':rr.ticker,'company':rr.company,'opportunity_score':rr.score,'state':state,'entry_status':str(ts.get('entry_status','NEUTRAL')),'horizon':str(ts.get('horizon','EOD')),'close':rr.close,'entry_low':rr.entry_low,'entry_high':rr.entry_high,'stop_loss':rr.stop_loss,'target_1':rr.target_1,'target_2':rr.target_2,'risk_reward':rr.risk_reward,'risk':rr.risk,'ai_score':rr.ai_score,'p_up':rr.p_up,'p_down':rr.p_down,'confidence':rr.confidence,'relative_percentile':rr.relative_percentile,'time_edge':float(ts.get('edge',0.0)),'time_confidence':float(ts.get('confidence',0.0)),'reason':reason,'replacement_reason':replacement,'stable_cycles':int(rr.stable),'market_regime':rr.market_regime,'market_score':rr.market_score,'ihsg_alignment':rr.ihsg_alignment,'regime_adjustment':rr.regime_adjustment,'candidate_mode':rr.candidate_mode})
     con.commit(); con.close()
     app.state_set('dynamic_opportunity_at',datetime.now().isoformat())
     app.state_set('dynamic_opportunity_phase',phase)
     app.state_set('dynamic_opportunity_count',len(out))
+    app.state_set('dynamic_candidate_mode',candidate_mode)
 
     # Stage 3: only evaluates today's immutable Pre-Market list.
     # It never mutates the locked picks themselves.
