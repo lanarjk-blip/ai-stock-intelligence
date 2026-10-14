@@ -7,7 +7,10 @@ on:
       - 'worker_base.py'
       - 'accuracy_guardrails.py'
       - 'dynamic_opportunity_ui.py'
+      - 'sitecustomize.py'
       - 'config.json'
+      - 'requirements.txt'
+      - 'tests/**'
       - '.github/workflows/v1851_accuracy_guardrails.yml'
   workflow_dispatch:
 permissions:
@@ -36,10 +39,12 @@ jobs:
           worker=Path('worker_base.py').read_text(encoding='utf-8')
           assert 'DATA_QUALITY' in worker and 'accuracy_guardrails' in worker
           ui=Path('dynamic_opportunity_ui.py').read_text(encoding='utf-8')
-          assert 'DATA NOT READY' in ui
+          assert 'DATA NOT READY' in ui and 'mobile_ui_version' in ui
+          watchdog=Path('sitecustomize.py').read_text(encoding='utf-8')
+          assert 'os.execv' in watchdog and 'AI_ENGINE_WORKER' in watchdog
           print('main production contract OK: V1.8.52')
           PY
       - name: Compile
-        run: python -m py_compile app.py worker_base.py accuracy_guardrails.py dynamic_opportunity_ui.py
+        run: python -m py_compile app.py worker_base.py accuracy_guardrails.py dynamic_opportunity_ui.py sitecustomize.py
       - name: Regression tests
-        run: python -m pytest -q test_batch1_live_engine.py test_mobile_ui_v1848.py
+        run: python -m pytest -q test_batch1_live_engine.py test_mobile_ui_v1848.py tests/test_accuracy_guardrails_v1852.py tests/test_runtime_consistency_v1852.py
