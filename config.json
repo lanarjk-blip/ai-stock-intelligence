@@ -57,7 +57,7 @@
   "entry_zone_atr_high": 0.1,
   "risk_engine_version": "1.8.10",
   "data_recovery_version": "1.8.11",
-  "engine_version": "1.8.49",
+  "engine_version": "1.8.50",
   "collector_resolver_enabled": true,
   "collector_cache_fallback_min_rows": 60,
   "provider_not_found_cooldown_hours": 6,
@@ -134,7 +134,7 @@
   "overnight_block_bearish_ihsg": true,
   "ai_stock_ask_version": "1.8.45",
   "ai_stock_ask_enabled": true,
-  "production_stabilization_version": "1.8.49",
+  "production_stabilization_version": "1.8.50",
   "mobile_ui_version": "1.8.48",
   "chart_ui_version": "1.8.48"
 }
