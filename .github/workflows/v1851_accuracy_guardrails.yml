@@ -6,6 +6,7 @@ on:
       - 'app.py'
       - 'worker_base.py'
       - 'accuracy_guardrails.py'
+      - 'dynamic_engine.py'
       - 'dynamic_opportunity_ui.py'
       - 'sitecustomize.py'
       - 'config.json'
@@ -40,14 +41,17 @@ jobs:
           assert 'DATA_QUALITY' in worker and 'accuracy_guardrails' in worker
           ui=Path('dynamic_opportunity_ui.py').read_text(encoding='utf-8')
           assert 'DATA NOT READY' in ui and 'mobile_ui_version' in ui
+          dynamic=Path('dynamic_engine.py').read_text(encoding='utf-8')
+          assert 'MONITOR_FALLBACK' in dynamic and 'no signal upgraded' in dynamic
           watchdog=Path('sitecustomize.py').read_text(encoding='utf-8')
           assert 'os.execv' in watchdog and 'AI_ENGINE_WORKER' in watchdog
+          assert 'dynamic_engine.py' in watchdog
           assert 'query2.finance.yahoo.com' in watchdog
           assert 'primary_error' in watchdog
           print('main production contract OK: V1.8.52')
           PY
       - name: Compile
-        run: python -m py_compile app.py worker_base.py accuracy_guardrails.py dynamic_opportunity_ui.py sitecustomize.py
+        run: python -m py_compile app.py worker_base.py accuracy_guardrails.py dynamic_engine.py dynamic_opportunity_ui.py sitecustomize.py
       - name: Diagnose live Streamlit endpoint
         run: |
           set +e
@@ -150,7 +154,11 @@ jobs:
 
           dynamic=dynamic_engine.update(result, phase='CI_SMOKE')
           print('dynamic rows=', 0 if dynamic is None else len(dynamic))
-          assert dynamic is not None
+          print('dynamic mode=', app.state_get('dynamic_candidate_mode'))
+          if dynamic is not None and not dynamic.empty:
+              print(dynamic[['rank','ticker','state','candidate_mode']].to_string(index=False))
+          assert dynamic is not None and not dynamic.empty, 'Opportunity output is empty despite model analysis rows'
+          assert len(dynamic) <= int(app.CFGD.get('dynamic_opportunity_count',5))
           PY
       - name: Regression tests
         run: python -m pytest -q test_batch1_live_engine.py test_mobile_ui_v1848.py tests/test_accuracy_guardrails_v1852.py tests/test_runtime_consistency_v1852.py tests/test_ihsg_failover_v1852.py
