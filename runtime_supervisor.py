@@ -14,7 +14,13 @@ import time
 import uuid
 from datetime import datetime, timezone
 
-RUNTIME_BUILD = "V1.8.52-20261015-R21-SINGLETON"
+_BASE_BUILD = "V1.8.52-20261015-R21-SINGLETON"
+_DEPLOY_SHA = str(
+    os.environ.get("RENDER_GIT_COMMIT")
+    or os.environ.get("GITHUB_SHA")
+    or ""
+).strip()[:12]
+RUNTIME_BUILD = f"{_BASE_BUILD}+{_DEPLOY_SHA}" if _DEPLOY_SHA else _BASE_BUILD
 SUPERVISOR_VERSION = "RUNTIME-SUPERVISOR-R1"
 LOCK_PATH = "/tmp/ai_stock_intelligence_worker.singleton.lock"
 LOCK_HANDLE = None
@@ -116,6 +122,7 @@ def claim_singleton_or_exit():
         "pid": os.getpid(),
         "retired": retired,
         "build": RUNTIME_BUILD,
+        "deploy_sha": _DEPLOY_SHA,
         "started_at": STARTED_AT,
     }
 
