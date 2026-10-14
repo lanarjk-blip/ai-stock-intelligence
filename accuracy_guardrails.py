@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 
-GUARDRAIL_REVISION = "usable-v1852-r3-premarket-bootstrap"
+GUARDRAIL_REVISION = "usable-v1852-r2"
 
 
 def _run_h10_daemon():
