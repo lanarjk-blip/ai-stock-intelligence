@@ -1,0 +1,52 @@
+name: Worker First Heartbeat
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/v1852_worker_first_heartbeat.yml'
+permissions:
+  contents: write
+jobs:
+  first-heartbeat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Patch synchronous first heartbeat
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('sitecustomize.py')
+          s=p.read_text(encoding='utf-8')
+          anchor='''# Production persistence startup order:\n'''
+          block='''# Publish the first local heartbeat synchronously before any persistence restore\n# or heavy worker imports. This removes the first-open race where the UI can\n# render before the background heartbeat thread gets CPU time.\nif _IS_REAL_WORKER:\n    try:\n        import local_runtime_health\n        _identity = dict(_RUNTIME_IDENTITY or {})\n        local_runtime_health.write_worker_heartbeat(\n            pid=os.getpid(),\n            generation=_identity.get("generation", ""),\n            build=_identity.get("build", ""),\n        )\n    except Exception as exc:\n        print(f"[LOCAL_RUNTIME_HEALTH] first heartbeat error: {exc!r}", flush=True)\n\n'''
+          if 'first heartbeat error' not in s:
+              if anchor not in s: raise SystemExit('startup-order anchor missing')
+              s=s.replace(anchor,block+anchor,1)
+          p.write_text(s,encoding='utf-8')
+          PY
+      - name: Validate ordering
+        run: |
+          python -m py_compile sitecustomize.py local_runtime_health.py
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('sitecustomize.py').read_text(encoding='utf-8')
+          first=s.index('local_runtime_health.write_worker_heartbeat(')
+          persistence=s.index('# Production persistence startup order:')
+          thread=s.index('name="asi-local-heartbeat"')
+          assert first < persistence < thread
+          print('SYNCHRONOUS FIRST HEARTBEAT ORDER PASSED')
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add sitecustomize.py
+          git diff --cached --check
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Write worker heartbeat before first UI runtime check'
+          git push origin HEAD:main
