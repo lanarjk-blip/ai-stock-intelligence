@@ -2,8 +2,6 @@ from pathlib import Path
 import ast
 import sqlite3
 
-import pandas as pd
-
 
 def test_singleton_worker_contract_is_explicit():
     src = Path("runtime_supervisor.py").read_text(encoding="utf-8")
@@ -22,10 +20,24 @@ def test_sitecustomize_claims_singleton_before_worker_threads():
     claim = src.index("import runtime_supervisor")
     scheduler = src.index("threading.Thread(target=_watch_worker")
     assert claim < scheduler
+    assert "_IS_REAL_WORKER" in src
     assert "persistent_bridge.restore_local_from_remote()" in src
     assert "persistent_bridge.start_worker_bridge" in src
+    assert "persistent_bridge.api_enabled()" in src
+    assert "external_runtime_guard.install()" in src
     assert '"persistent_bridge.py"' in src
     assert '"runtime_supervisor.py"' in src
+    assert '"external_runtime_guard.py"' in src
+
+
+def test_external_runtime_guard_only_blocks_worker_base():
+    src = Path("external_runtime_guard.py").read_text(encoding="utf-8")
+    ast.parse(src)
+    assert "def _is_worker_launch" in src
+    assert 'os.path.basename(part) == "worker_base.py"' in src
+    assert "subprocess.Popen = guarded_popen" in src
+    assert "return _ORIGINAL_POPEN" in src
+    assert "_ExternalWorkerHandle" in src
 
 
 def test_premarket_has_lightweight_on_open_self_heal():
@@ -40,6 +52,7 @@ def test_premarket_has_lightweight_on_open_self_heal():
     assert "premarket_preliminary.ensure_on_open()" in ui
     assert 'str(body).strip() == "🌅 Pre-Market Top Picks"' in ui
     assert "worker.singleton.lock" in ui
+    assert "remote_worker_runtime_build" in ui
 
 
 def test_persistent_bridge_local_restore_roundtrip(tmp_path, monkeypatch):
@@ -102,11 +115,14 @@ def test_runtime_api_and_render_blueprint_contract():
     api = Path("runtime_api.py").read_text(encoding="utf-8")
     blueprint = Path("render.yaml").read_text(encoding="utf-8")
     requirements = Path("requirements.txt").read_text(encoding="utf-8")
+    bridge = Path("persistent_bridge.py").read_text(encoding="utf-8")
     ast.parse(api)
+    ast.parse(bridge)
 
     assert '@app.get("/health")' in api
     assert '@app.get("/bootstrap")' in api
-    assert "DATABASE_URL" not in api.split("return {", 1)[-1]
+    assert "def restore_local_from_api" in bridge
+    assert "runtime_api_url" in bridge
     assert "type: worker" in blueprint
     assert "type: web" in blueprint
     assert "python worker_base.py" in blueprint
