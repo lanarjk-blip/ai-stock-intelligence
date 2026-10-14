@@ -12,6 +12,8 @@ def test_singleton_worker_contract_is_explicit():
     assert "SIGTERM" in src
     assert "os._exit(0)" in src
     assert "RUNTIME_BUILD" in src
+    assert "RENDER_GIT_COMMIT" in src
+    assert "deploy_sha" in src
 
 
 def test_sitecustomize_claims_singleton_before_worker_threads():
