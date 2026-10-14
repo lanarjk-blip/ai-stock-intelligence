@@ -15,6 +15,18 @@ import threading
 import time
 
 _BASE = os.path.dirname(os.path.abspath(__file__))
+
+# Claim the worker singleton as early as Python allows.  This executes before
+# worker_base.py imports app.py, so an orphan/duplicate generation cannot write
+# contradictory state first and get noticed later.
+if os.environ.get("AI_ENGINE_WORKER") == "1":
+    try:
+        import runtime_supervisor  # noqa: F401
+    except SystemExit:
+        raise
+    except Exception as exc:
+        print(f"[RUNTIME_SUPERVISOR] startup error: {exc!r}", flush=True)
+
 _WATCH = (
     "worker_base.py",
     "accuracy_guardrails.py",
@@ -25,6 +37,7 @@ _WATCH = (
     "premarket_scheduler.py",
     "premarket_preliminary.py",
     "premarket_ui_patch.py",
+    "runtime_supervisor.py",
     "sitecustomize.py",
 )
 
@@ -88,7 +101,8 @@ if os.environ.get("AI_ENGINE_WORKER") == "1":
     ).start()
 else:
     # The legacy app copy calls every non-NO_TRADE state "locked". Install a
-    # narrow wording patch so PRELIMINARY remains visibly preliminary.
+    # narrow wording patch so PRELIMINARY remains visibly preliminary and make
+    # the Pre-Market panel self-heal from the newest snapshot on page open.
     try:
         import premarket_ui_patch
         premarket_ui_patch.install()
@@ -119,12 +133,7 @@ try:
             return False
 
     def _get_with_ihsg_failover(url, *args, **kwargs):
-        """Retry IHSG on Yahoo query2 even when query1 raises outright.
-
-        The previous wrapper only retried when query1 returned an unusable
-        response. A timeout/DNS/TLS error escaped before failover, which left
-        fetch_ihsg() empty and in turn could produce zero JST training rows.
-        """
+        """Retry IHSG on Yahoo query2 even when query1 raises outright."""
         text_url = str(url)
         is_query1_ihsg = (
             "query1.finance.yahoo.com" in text_url
