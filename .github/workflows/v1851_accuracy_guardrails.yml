@@ -14,6 +14,8 @@ on:
       - 'premarket_ui_patch.py'
       - 'runtime_supervisor.py'
       - 'persistent_bridge.py'
+      - 'ui_replica.py'
+      - 'replica_runtime.py'
       - 'external_runtime_guard.py'
       - 'runtime_api.py'
       - 'render.yaml'
@@ -35,6 +37,8 @@ on:
       - 'premarket_ui_patch.py'
       - 'runtime_supervisor.py'
       - 'persistent_bridge.py'
+      - 'ui_replica.py'
+      - 'replica_runtime.py'
       - 'external_runtime_guard.py'
       - 'runtime_api.py'
       - 'render.yaml'
@@ -69,30 +73,39 @@ jobs:
           guard=Path('accuracy_guardrails.py').read_text(encoding='utf-8')
           assert 'asi-premarket-h10' in guard and 'asi-premarket-preliminary' in guard
           watchdog=Path('sitecustomize.py').read_text(encoding='utf-8')
-          assert '_IS_REAL_WORKER' in watchdog
+          assert '_IS_REAL_WORKER' in watchdog and '_IS_RUNTIME_API' in watchdog
           assert 'runtime_supervisor' in watchdog and 'persistent_bridge' in watchdog
+          assert 'replica_runtime.start_worker_replica()' in watchdog
+          assert 'replica_runtime.start_ui_pull()' in watchdog
           assert 'external_runtime_guard.install()' in watchdog
           assert 'query2.finance.yahoo.com' in watchdog and 'primary_error' in watchdog
           supervisor=Path('runtime_supervisor.py').read_text(encoding='utf-8')
           assert 'DUPLICATE_EXIT' in supervisor and 'SIGTERM' in supervisor
           bridge=Path('persistent_bridge.py').read_text(encoding='utf-8')
           assert 'DATABASE_URL' in bridge and 'restore_local_from_api' in bridge
+          assert 'asi_worker_checkpoint' in bridge and 'PRAGMA quick_check' in bridge
+          replica=Path('ui_replica.py').read_text(encoding='utf-8')
+          assert 'dynamic_opportunities' in replica and 'recommendation_history' in replica
+          assert 'prices' not in replica.split('TABLE_SPECS =',1)[1].split('SAFE_JSON_FILES',1)[0]
+          assert '[REDACTED]' in replica
           external=Path('external_runtime_guard.py').read_text(encoding='utf-8')
           assert 'worker_base.py' in external and 'subprocess.Popen = guarded_popen' in external
           api=Path('runtime_api.py').read_text(encoding='utf-8')
-          assert '/health' in api and '/bootstrap' in api
+          assert '/health' in api and '/bootstrap' in api and 'ui_replica' in api
           preliminary=Path('premarket_preliminary.py').read_text(encoding='utf-8')
           assert 'ensure_on_open' in preliminary and 'PRELIMINARY_ON_OPEN' in preliminary
           blueprint=Path('render.yaml').read_text(encoding='utf-8')
           assert 'type: worker' in blueprint and 'type: web' in blueprint
-          print('production stabilization contract OK')
+          assert 'ASI_CHECKPOINT_SECONDS' in blueprint
+          print('production stabilization + checkpoint + UI replica contract OK')
           PY
       - name: Compile
         run: >-
           python -m py_compile app.py worker_base.py accuracy_guardrails.py
           dynamic_engine.py dynamic_opportunity_ui.py sitecustomize.py
           premarket_scheduler.py premarket_preliminary.py premarket_ui_patch.py
-          runtime_supervisor.py persistent_bridge.py external_runtime_guard.py runtime_api.py
+          runtime_supervisor.py persistent_bridge.py ui_replica.py replica_runtime.py
+          external_runtime_guard.py runtime_api.py
       - name: Diagnose current production Streamlit endpoint
         run: |
           set +e
@@ -171,3 +184,4 @@ jobs:
           tests/test_runtime_consistency_v1852.py
           tests/test_ihsg_failover_v1852.py
           tests/test_runtime_stabilization_v1853.py
+          tests/test_ui_replica_v1853.py
