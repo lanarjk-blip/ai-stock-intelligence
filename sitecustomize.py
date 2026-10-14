@@ -14,9 +14,6 @@ _IS_REAL_WORKER = (
     and os.path.basename(str(sys.argv[0] or "")) == "worker_base.py"
 )
 
-# Claim the worker singleton as early as Python allows. This executes before
-# worker_base.py imports app.py, so an orphan/duplicate generation cannot write
-# contradictory state first and get noticed later.
 if _IS_REAL_WORKER:
     try:
         import runtime_supervisor
@@ -26,8 +23,9 @@ if _IS_REAL_WORKER:
     except Exception as exc:
         print(f"[RUNTIME_SUPERVISOR] startup error: {exc!r}", flush=True)
 
-# Restore critical state before app.py initializes. This turns a fresh
-# Streamlit/Render filesystem into a cache of the persistent control plane.
+# Restore the persistent control plane before app.py initializes.  If the UI is
+# configured to read from the Render runtime API, suppress app.py's legacy
+# local worker spawn so Render remains the only production engine.
 try:
     import persistent_bridge
     if persistent_bridge.enabled():
@@ -35,6 +33,9 @@ try:
         print(f"[PERSIST_BRIDGE] pre-app restore {restored}", flush=True)
         if _IS_REAL_WORKER:
             persistent_bridge.start_worker_bridge(_RUNTIME_IDENTITY)
+        elif os.environ.get("AI_ENGINE_WORKER") != "1" and persistent_bridge.api_enabled():
+            import external_runtime_guard
+            external_runtime_guard.install()
 except Exception as exc:
     print(f"[PERSIST_BRIDGE] startup degraded: {exc!r}", flush=True)
 
@@ -49,6 +50,7 @@ _WATCH = (
     "premarket_preliminary.py",
     "premarket_ui_patch.py",
     "persistent_bridge.py",
+    "external_runtime_guard.py",
     "runtime_supervisor.py",
     "runtime_api.py",
     "render.yaml",
@@ -111,7 +113,6 @@ elif os.environ.get("AI_ENGINE_WORKER") != "1":
         pass
 
 
-# Targeted IHSG failover. Do not alter ordinary stock/API requests.
 try:
     import requests
 
@@ -141,7 +142,6 @@ try:
         )
         if not is_query1_ihsg:
             return _ORIGINAL_GET(url, *args, **kwargs)
-
         primary_response = None
         primary_error = None
         try:
@@ -150,7 +150,6 @@ try:
                 return primary_response
         except Exception as exc:
             primary_error = exc
-
         fallback_url = text_url.replace("query1.finance.yahoo.com", "query2.finance.yahoo.com", 1)
         try:
             fallback = _ORIGINAL_GET(fallback_url, *args, **kwargs)
