@@ -1,9 +1,9 @@
 """Actionable Dynamic Opportunity UI.
 
-V1.8.52 makes the user-facing Top Opportunity surface obey the production
-DATA_QUALITY publication gate. It also normalizes stale hard-coded UI version
-labels to the version declared by config.json while the legacy app shell is
-being retired.
+V1.8.52 keeps the production Top Opportunity surface behind the DATA_QUALITY
+publication gate, normalizes stale shell version labels from config.json, and
+renders a compact mobile decision card without turning MONITOR candidates into
+fake BUY signals.
 """
 from __future__ import annotations
 
@@ -11,12 +11,14 @@ import html
 import json
 import os
 import sqlite3
+from urllib.parse import quote
+
 import pandas as pd
 import streamlit as st
 
 
 def _install_runtime_version_patch():
-    """Replace stale V1.8.48 labels with the configured runtime version."""
+    """Replace stale shell labels with the configured runtime version."""
     try:
         cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
         with open(cfg_path, 'r', encoding='utf-8') as fh:
@@ -43,7 +45,6 @@ def _install_runtime_version_patch():
             set_page_config._asi_v1852_patch = True
             st.set_page_config = set_page_config
     except Exception:
-        # Version normalization must never make the dashboard unavailable.
         pass
 
 
@@ -69,6 +70,22 @@ def _pct(value):
 def _num(value, digits=1):
     try:
         return f'{float(value):.{digits}f}'
+    except Exception:
+        return '—'
+
+
+def _price(value):
+    try:
+        return f'Rp {float(value):,.0f}'
+    except Exception:
+        return '—'
+
+
+def _range_price(low, high):
+    try:
+        lo = float(low)
+        hi = float(high)
+        return f'Rp {lo:,.0f} - {hi:,.0f}'
     except Exception:
         return '—'
 
@@ -104,35 +121,48 @@ def _ratio_label(value):
         return '—'
 
 
-def _status_meta(state, entry_status):
+def _status_meta(state, entry_status, candidate_mode=''):
     state = _text(state, '').upper()
     entry = _text(entry_status, '').upper()
+    mode = _text(candidate_mode, '').upper()
+    if mode == 'MONITOR_FALLBACK':
+        return '⚪', 'MONITOR', 'WAIT', 'watch', 'MONITOR ONLY'
     if state == 'ENTRY READY' and entry == 'ACTIVE':
-        return '🟢', 'ENTRY READY', 'ACTIVE', 'ready'
+        return '🟢', 'ENTRY READY', 'ACTIVE', 'ready', 'BUY WINDOW'
     if state == 'DEVELOPING':
-        return '🟡', 'DEVELOPING', entry or 'WAIT', 'developing'
+        return '🟡', 'DEVELOPING', entry or 'WAIT', 'developing', 'WAIT'
     if state == 'WATCH':
-        return '👀', 'WATCH', entry or 'NEUTRAL', 'watch'
-    return '⚪', state or 'MONITOR', entry or 'NEUTRAL', 'watch'
+        return '👀', 'WATCH', entry or 'NEUTRAL', 'watch', 'WAIT'
+    return '⚪', state or 'MONITOR', entry or 'NEUTRAL', 'watch', 'WAIT'
 
 
 def _css():
     st.markdown('''
 <style>
 .asi-live-note{padding:12px 14px;border:1px solid rgba(128,128,128,.28);border-radius:14px;margin:.25rem 0 .8rem;font-size:.94rem}
-.asi-live-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin:.45rem 0 1rem}
-.asi-live-card{border:1px solid rgba(128,128,128,.25);border-radius:16px;padding:14px 15px;background:rgba(128,128,128,.055)}
+.asi-live-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;margin:.45rem 0 1rem}
+.asi-live-card{border:1px solid rgba(128,128,128,.25);border-radius:17px;padding:14px 15px;background:rgba(128,128,128,.055)}
 .asi-live-card.ready{border-color:rgba(46,204,113,.70);background:rgba(46,204,113,.09)}
 .asi-live-card.developing{border-color:rgba(241,196,15,.68);background:rgba(241,196,15,.08)}
 .asi-live-card.watch{border-color:rgba(128,128,128,.32)}
 .asi-live-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
-.asi-live-ticker{font-size:1.24rem;font-weight:800;letter-spacing:.2px}
-.asi-live-rank{font-size:.82rem;opacity:.65}
-.asi-live-state{font-size:1.02rem;font-weight:800;margin-bottom:8px}
-.asi-live-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
-.asi-live-kpi{font-size:.78rem;opacity:.72}.asi-live-kpi b{display:block;font-size:1rem;opacity:1;margin-top:1px}
-.asi-live-warning{margin-top:9px;font-size:.82rem;font-weight:700}
-@media(max-width:700px){.asi-live-grid{grid-template-columns:1fr}.asi-live-ticker{font-size:1.18rem}.asi-live-kpis{grid-template-columns:repeat(3,1fr)}}
+.asi-live-ticker{font-size:1.25rem;font-weight:850;letter-spacing:.2px;text-decoration:none!important;color:inherit!important;min-height:38px;display:flex;align-items:center}
+.asi-live-rank{font-size:.82rem;opacity:.68}
+.asi-action{display:inline-block;border-radius:999px;padding:6px 10px;font-size:.78rem;font-weight:850;margin-bottom:8px;border:1px solid rgba(128,128,128,.25)}
+.asi-live-card.ready .asi-action{border-color:rgba(46,204,113,.55)}
+.asi-live-state{font-size:.95rem;font-weight:750;margin-bottom:10px;opacity:.9}
+.asi-price{font-size:1.38rem;font-weight:850;margin-bottom:9px}
+.asi-levels{display:grid;grid-template-columns:repeat(2,1fr);gap:7px;margin-bottom:9px}
+.asi-level{border:1px solid rgba(128,128,128,.18);border-radius:10px;padding:7px 8px;font-size:.72rem;opacity:.76}
+.asi-level b{display:block;font-size:.91rem;opacity:1;margin-top:2px}
+.asi-live-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
+.asi-live-kpi{font-size:.70rem;opacity:.72}.asi-live-kpi b{display:block;font-size:.93rem;opacity:1;margin-top:1px}
+.asi-live-meta{margin-top:9px;font-size:.76rem;opacity:.72;line-height:1.35}
+.asi-live-warning{margin-top:9px;font-size:.82rem;font-weight:750}
+@media(max-width:700px){
+  .asi-live-grid{grid-template-columns:1fr;gap:9px}.asi-live-card{padding:13px 13px}.asi-live-ticker{font-size:1.2rem}
+  .asi-price{font-size:1.28rem}.asi-levels{grid-template-columns:repeat(2,1fr)}.asi-live-kpis{grid-template-columns:repeat(4,1fr)}
+}
 </style>
 ''', unsafe_allow_html=True)
 
@@ -162,40 +192,57 @@ def render_actionable_dynamic(dyn, render_table=None, table_limit=None):
         return
 
     st.markdown(
-        '<div class="asi-live-note"><b>Top Opportunity ≠ Top BUY.</b> '
-        'Ranking menunjukkan peluang relatif. Kondisi actionable hanya ketika '
-        '<b>🟢 ENTRY READY</b> dan <b>Entry Window ACTIVE</b>. '
-        'DEVELOPING/WATCH masih menunggu konfirmasi.</div>',
+        '<div class="asi-live-note"><b>Keputusan dulu, angka belakangan.</b> '
+        '<b>BUY WINDOW</b> hanya muncul bila status ENTRY READY dan Entry Window ACTIVE. '
+        '<b>WAIT / MONITOR ONLY</b> bukan perintah beli.</div>',
         unsafe_allow_html=True,
     )
 
     risk_high = dyn.get('risk', pd.Series(dtype=str)).astype(str).str.upper().eq('HIGH').any() if 'risk' in dyn else False
     bearish = dyn.get('market_regime', pd.Series(dtype=str)).astype(str).str.upper().eq('BEARISH').any() if 'market_regime' in dyn else False
     if risk_high and bearish:
-        st.warning('⚠️ Mode konservatif: terdapat Risk HIGH saat IHSG BEARISH. Prioritaskan ENTRY READY / ACTIVE; WATCH dan DEVELOPING bukan sinyal beli.')
+        st.warning('⚠️ Mode konservatif: terdapat Risk HIGH saat IHSG BEARISH. Prioritaskan BUY WINDOW yang benar-benar ACTIVE; kandidat lain tetap WAIT.')
 
     cards = []
     for pos, (_, row) in enumerate(dyn.head(5).iterrows(), start=1):
-        icon, state_label, entry_label, css_kind = _status_meta(row.get('state'), row.get('entry_status'))
-        ticker = html.escape(_text(row.get('ticker'), '?'))
+        icon, state_label, entry_label, css_kind, action_label = _status_meta(
+            row.get('state'), row.get('entry_status'), row.get('candidate_mode')
+        )
+        ticker_raw = _text(row.get('ticker'), '?').upper()
+        ticker = html.escape(ticker_raw)
+        ticker_url = '?ticker=' + quote(ticker_raw)
         rank = row.get('rank', row.get('opportunity_rank', pos))
         p_up = _pct(row.get('p_up'))
+        conf = _pct(row.get('confidence'))
         score = _num(row.get('opportunity_score'))
         rr = _num(row.get('risk_reward'), 2)
         risk = html.escape(_text(row.get('risk')))
         regime = html.escape(_text(row.get('market_regime')))
+        generated = html.escape(_text(row.get('generated_at'), ''))
         warning = ''
         if risk.upper() == 'HIGH' and regime.upper() == 'BEARISH':
             warning = '<div class="asi-live-warning">⚠️ HIGH risk • IHSG BEARISH</div>'
         cards.append(
             f'<div class="asi-live-card {css_kind}">'
-            f'<div class="asi-live-head"><span class="asi-live-ticker">{icon} {ticker}</span><span class="asi-live-rank">#{html.escape(str(rank))}</span></div>'
-            f'<div class="asi-live-state">{html.escape(state_label)} • {html.escape(entry_label)}</div>'
+            f'<div class="asi-live-head"><a class="asi-live-ticker" href="{ticker_url}" target="_self">{icon} {ticker}</a><span class="asi-live-rank">#{html.escape(str(rank))}</span></div>'
+            f'<div class="asi-action">{html.escape(action_label)}</div>'
+            f'<div class="asi-live-state">{html.escape(state_label)} • Entry {html.escape(entry_label)}</div>'
+            f'<div class="asi-price">{html.escape(_price(row.get("close")))}</div>'
+            f'<div class="asi-levels">'
+            f'<div class="asi-level">ENTRY<b>{html.escape(_range_price(row.get("entry_low"), row.get("entry_high")))}</b></div>'
+            f'<div class="asi-level">STOP LOSS<b>{html.escape(_price(row.get("stop_loss")))}</b></div>'
+            f'<div class="asi-level">TARGET 1<b>{html.escape(_price(row.get("target_1")))}</b></div>'
+            f'<div class="asi-level">TARGET 2<b>{html.escape(_price(row.get("target_2")))}</b></div>'
+            f'</div>'
             f'<div class="asi-live-kpis">'
             f'<div class="asi-live-kpi">P(UP)<b>{p_up}</b></div>'
-            f'<div class="asi-live-kpi">Score<b>{score}</b></div>'
+            f'<div class="asi-live-kpi">CONF.<b>{conf}</b></div>'
+            f'<div class="asi-live-kpi">SCORE<b>{score}</b></div>'
             f'<div class="asi-live-kpi">R/R<b>{rr}</b></div>'
-            f'</div>{warning}</div>'
+            f'</div>'
+            f'<div class="asi-live-meta">Risk <b>{risk}</b> • IHSG <b>{regime}</b>'
+            + (f' • snapshot {generated[:19].replace("T", " ")}' if generated else '')
+            + f'</div>{warning}</div>'
         )
     st.markdown('<div class="asi-live-grid">' + ''.join(cards) + '</div>', unsafe_allow_html=True)
 
@@ -213,13 +260,13 @@ def render_actionable_dynamic(dyn, render_table=None, table_limit=None):
             'entry_high':'Entry High','stop_loss':'Stop Loss','target_1':'Target 1','target_2':'Target 2',
             'risk_reward':'R/R','risk':'Risk','ai_score':'AI Score','p_up':'P(UP) %','p_down':'P(DOWN) %',
             'confidence':'AI Conf. %','relative_percentile':'Relative %','time_edge':'Time Edge %',
-            'time_confidence':'Time Conf. %'
+            'time_confidence':'Time Conf. %','candidate_mode':'Candidate Mode'
         })
-        cols = [c for c in ['rank','ticker','company','Opportunity Score','State','Entry Window','Horizon','IHSG Regime',
+        cols = [c for c in ['rank','ticker','company','Opportunity Score','State','Candidate Mode','Entry Window','Horizon','IHSG Regime',
                             'Price','Entry Low','Entry High','Stop Loss','Target 1','Target 2','R/R','Risk','AI Score',
                             'P(UP) %','P(DOWN) %','AI Conf. %','Relative %','Time Edge %','Time Conf. %'] if c in dshow.columns]
         if table_limit:
             dshow = dshow.head(int(table_limit))
         render_table(dshow, cols)
 
-    st.caption('Top-5 bersifat dinamis dan probabilistik. Kandidat dapat masuk/keluar ketika kondisi berubah; status WATCH/DEVELOPING bukan perintah beli.')
+    st.caption('Top-5 bersifat dinamis dan probabilistik. BUY WINDOW memerlukan ENTRY READY + ACTIVE; WAIT/MONITOR tidak boleh dibaca sebagai rekomendasi beli.')
