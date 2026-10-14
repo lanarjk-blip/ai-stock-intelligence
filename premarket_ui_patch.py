@@ -28,6 +28,34 @@ def _latest_status() -> str:
         return ""
 
 
+def _remote_worker_identity():
+    try:
+        con = sqlite3.connect(_DB, timeout=3)
+        rows = con.execute(
+            "SELECT key,value FROM state WHERE key IN "
+            "('remote_worker_runtime_build','remote_worker_generation','remote_worker_pid','remote_worker_heartbeat_at')"
+        ).fetchall()
+        con.close()
+        state = {str(k): str(v or "") for k, v in rows}
+        build = state.get("remote_worker_runtime_build", "")
+        generation = state.get("remote_worker_generation", "")
+        if not build:
+            return None
+        try:
+            pid = int(state.get("remote_worker_pid") or 0)
+        except Exception:
+            pid = 0
+        return {
+            "pid": pid,
+            "generation": generation or "?",
+            "build": build,
+            "remote": True,
+            "heartbeat_at": state.get("remote_worker_heartbeat_at", ""),
+        }
+    except Exception:
+        return None
+
+
 def _live_worker_identity():
     try:
         with open(_WORKER_LOCK, "r", encoding="utf-8") as fh:
@@ -38,22 +66,19 @@ def _live_worker_identity():
                 key, value = token.split("=", 1)
                 fields[key] = value
         pid = int(fields.get("pid") or 0)
-        if pid <= 0 or not os.path.exists(f"/proc/{pid}"):
-            return None
-        try:
+        if pid > 0 and os.path.exists(f"/proc/{pid}"):
             with open(f"/proc/{pid}/cmdline", "rb") as fh:
                 cmd = fh.read().replace(b"\x00", b" ").decode("utf-8", "ignore")
-            if "worker_base.py" not in cmd:
-                return None
-        except Exception:
-            return None
-        return {
-            "pid": pid,
-            "generation": fields.get("generation", "?"),
-            "build": fields.get("build", "?"),
-        }
+            if "worker_base.py" in cmd:
+                return {
+                    "pid": pid,
+                    "generation": fields.get("generation", "?"),
+                    "build": fields.get("build", "?"),
+                    "remote": False,
+                }
     except Exception:
-        return None
+        pass
+    return _remote_worker_identity()
 
 
 def _ensure_premarket_on_open():
@@ -101,14 +126,13 @@ def install():
             )
             text = str(body)
 
-        # Replace the stale hard-coded UI marker with the identity of the worker
-        # that is actually alive on this server. This makes deployment mismatch
-        # visible from the APK instead of inferred from logs.
         if text.startswith("Runtime build "):
             identity = _live_worker_identity()
             if identity:
+                location = "Render" if identity.get("remote") else "Local"
+                pid_text = f" PID {identity['pid']}" if int(identity.get("pid") or 0) > 0 else ""
                 replacement = (
-                    f"Runtime build {identity['build']} • Worker PID {identity['pid']} "
+                    f"Runtime build {identity['build']} • Worker {location}{pid_text} "
                     f"• Gen {identity['generation']}"
                 )
                 body = re.sub(r"^Runtime build [^•]+", replacement, text, count=1)
