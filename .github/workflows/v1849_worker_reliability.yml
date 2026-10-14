@@ -1,0 +1,70 @@
+name: V1.8.49 Worker Reliability Patch
+on:
+  push:
+    paths:
+      - '.github/workflows/v1849_worker_reliability.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-worker-collector-v1849
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: python -m pip install -q -r requirements.txt pytest
+      - name: Apply IHSG cache fallback
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('worker_base.py')
+          s=p.read_text(encoding='utf-8')
+          marker='''# ============================================================\n# IHSG / MARKET DATA\n# ============================================================\n\ndef refresh_market_data():'''
+          helper='''# ============================================================\n# IHSG / MARKET DATA\n# ============================================================\n\ndef cached_ihsg_available():\n    """Return True when a previously persisted IHSG row is available."""\n    try:\n        con = dbcon()\n        row = con.execute(\n            "SELECT COUNT(*) FROM market_index WHERE symbol=?",\n            ("IHSG",),\n        ).fetchone()\n        con.close()\n        return bool(row and int(row[0]) > 0)\n    except Exception:\n        return False\n\ndef refresh_market_data():'''
+          if 'def cached_ihsg_available():' not in s:
+              if marker not in s:
+                  raise SystemExit('IHSG helper anchor not found')
+              s=s.replace(marker,helper,1)
+          old_none='''        if data is None:\n            log(\n                "MARKET_DATA",\n                "SKIP",\n                "fetch_ihsg returned None",\n            )\n            return False'''
+          new_none='''        if data is None:\n            if cached_ihsg_available():\n                log("MARKET_DATA", "CACHE_FALLBACK", "fetch_ihsg returned None; keeping persisted IHSG context")\n                return True\n            log("MARKET_DATA", "SKIP", "fetch_ihsg returned None and no persisted IHSG context exists")\n            return False'''
+          if old_none in s:
+              s=s.replace(old_none,new_none,1)
+          old_empty='''        if hasattr(data, "empty") and data.empty:\n            log(\n                "MARKET_DATA",\n                "SKIP",\n                "IHSG dataframe empty",\n            )\n            return False'''
+          new_empty='''        if hasattr(data, "empty") and data.empty:\n            if cached_ihsg_available():\n                log("MARKET_DATA", "CACHE_FALLBACK", "IHSG provider empty; keeping persisted IHSG context")\n                return True\n            log("MARKET_DATA", "SKIP", "IHSG dataframe empty and no persisted IHSG context exists")\n            return False'''
+          if old_empty in s:
+              s=s.replace(old_empty,new_empty,1)
+          p.write_text(s,encoding='utf-8')
+          PY
+      - name: Compile
+        run: python -m py_compile worker_base.py app.py
+      - name: Focused assertions
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('worker_base.py').read_text(encoding='utf-8')
+          c=Path('config.json').read_text(encoding='utf-8')
+          assert 'recover = getattr(app, "fetch_chart_recover", None)' in s
+          assert '"PRIORITY_SKIP"' in s
+          assert 'def cached_ihsg_available():' in s
+          assert '"CACHE_FALLBACK"' in s
+          assert '"engine_version": "1.8.49"' in c
+          print('V1.8.49 reliability assertions passed')
+          PY
+      - name: Regression tests
+        run: python -m pytest -q test_batch1_live_engine.py test_mobile_ui_v1848.py
+      - name: Commit patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add worker_base.py
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo 'No worker changes to commit'
+          else
+            git commit -m 'V1.8.49 preserve cached IHSG context on provider failure'
+            git push origin HEAD:fix-worker-collector-v1849
+          fi
