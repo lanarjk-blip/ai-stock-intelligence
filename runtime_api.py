@@ -1,8 +1,8 @@
 """Read-only production runtime API.
 
 This service exposes only the market-engine control plane required by the
-Streamlit/APK client.  It never exposes DATABASE_URL, credentials, raw logs, or
-write actions.  Render runs it separately from the background worker; both use
+Streamlit/APK client. It never exposes DATABASE_URL, credentials, raw logs, or
+write actions. Render runs it separately from the background worker; both use
 the same Neon DATABASE_URL.
 """
 from __future__ import annotations
@@ -15,6 +15,16 @@ from fastapi import FastAPI, HTTPException
 import persistent_bridge
 
 app = FastAPI(title="AI Stock Intelligence Runtime API", version="1.0")
+
+_SENSITIVE_STATE_PARTS = (
+    "token", "secret", "password", "credential", "service_account",
+    "private_key", "api_key", "whatsapp", "fcm_device",
+)
+
+
+def _safe_state_key(key) -> bool:
+    text = str(key or "").lower()
+    return bool(text) and not any(part in text for part in _SENSITIVE_STATE_PARTS)
 
 
 def _require_db():
@@ -98,7 +108,11 @@ def bootstrap():
     finally:
         con.close()
 
-    state = {str(k): str(v or "") for k, v in state_rows}
+    state = {
+        str(k): str(v or "")
+        for k, v in state_rows
+        if _safe_state_key(k)
+    }
     snapshot = {
         "generated_at": None,
         "payload": [],
