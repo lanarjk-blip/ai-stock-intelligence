@@ -16,6 +16,8 @@ from urllib.parse import quote
 import pandas as pd
 import streamlit as st
 
+RUNTIME_BUILD_MARKER = 'V1.8.52-20261015-R20'
+
 
 def _install_runtime_version_patch():
     """Replace stale shell labels with the configured runtime version."""
@@ -73,7 +75,6 @@ def _install_compact_tab_patch():
                     *args, **kwargs
                 )
                 home, opportunity, analysis, history, more = compact
-                # Preserve the legacy unpacking contract used by app.py.
                 return [home, home, opportunity, analysis, history, more, more]
             return original_tabs(labels, *args, **kwargs)
 
@@ -207,6 +208,10 @@ def render_actionable_dynamic(dyn, render_table=None, table_limit=None):
     """Render production Top Opportunity only when DATA_QUALITY is READY."""
     _css()
     quality = _quality_gate_state()
+    st.caption(
+        f'Runtime build {RUNTIME_BUILD_MARKER} • Quality {quality["status"]} • '
+        f'Ready coverage {_ratio_label(quality.get("ready_ratio"))}'
+    )
     if quality['known'] and not quality['ready']:
         collection = _ratio_label(quality.get('collection_ratio'))
         ready = _ratio_label(quality.get('ready_ratio'))
