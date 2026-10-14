@@ -1,0 +1,77 @@
+name: Pre-Market Runtime Behavior
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/v1852_premarket_runtime_behavior.yml'
+permissions:
+  contents: read
+jobs:
+  behavior:
+    runs-on: ubuntu-latest
+    env:
+      AI_ENGINE_WORKER: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install
+        run: python -m pip install -q -r requirements.txt pytest
+      - name: Execute real on-open Pre-Market path
+        run: |
+          python - <<'PY'
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+          import pandas as pd
+          import app
+          import worker_base
+          import premarket_scheduler as h10
+          import premarket_preliminary
+
+          tickers=['BBCA','BBRI','BMRI','TLKM','ASII','ANTM','INDF','ICBP','ADRO','UNTR','PGAS','KLBF']
+          universe=pd.DataFrame({'ticker':tickers,'company':tickers})
+
+          ih=app.fetch_ihsg()
+          assert ih is not None and not ih.empty
+          app.save_ihsg(ih)
+          ok=0
+          for ticker in tickers:
+              d=app.fetch_chart(ticker,220,'1d')
+              if d is not None and not d.empty:
+                  app.save_daily(d,ticker); ok+=1
+          assert ok >= 10, ok
+
+          result=app.analyze_all(universe, None)
+          assert result is not None and not result.empty
+          assert worker_base.save_opportunities(result,'on-open-behavior') == len(result)
+
+          h10._ensure_tables()
+          con=app.dbcon()
+          con.execute('DELETE FROM premarket_picks')
+          con.execute('DELETE FROM premarket_runs')
+          con.commit(); con.close()
+          app.state_set('premarket_preliminary_at','')
+
+          now=datetime(2026,10,15,5,30,tzinfo=ZoneInfo('Asia/Jakarta'))
+          out=premarket_preliminary.ensure_on_open(now)
+          print('ensure_on_open=',out)
+          assert out.get('status')=='PRELIMINARY', out
+          assert 1 <= int(out.get('pick_count',0)) <= 5
+
+          con=app.dbcon()
+          run=con.execute('SELECT market_date,status,pick_count,note FROM premarket_runs ORDER BY market_date DESC LIMIT 1').fetchone()
+          picks=con.execute('SELECT rank,ticker,decision,source_phase FROM premarket_picks ORDER BY rank').fetchall()
+          con.close()
+          print('run=',run)
+          print('picks=',picks)
+          assert run and run[1]=='PRELIMINARY'
+          assert int(run[2])==len(picks)==int(out['pick_count'])
+          assert all(str(r[3]).startswith('premarket-preliminary:') for r in picks)
+          assert all(str(r[2]).upper() not in ('SELL','STRONG_SELL','SELL/AVOID','AVOID') for r in picks)
+          if str(out.get('mode')).upper()=='MONITOR_FALLBACK':
+              assert all(str(r[2]).upper() not in ('BUY','STRONG_BUY') for r in picks)
+          print('REAL ON-OPEN PREMARKET BEHAVIOR PASSED')
+          PY
