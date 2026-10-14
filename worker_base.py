@@ -230,6 +230,19 @@ def collect_fast(universe):
 # IHSG / MARKET DATA
 # ============================================================
 
+def cached_ihsg_available():
+    """Return True when a previously persisted IHSG row is available."""
+    try:
+        con = dbcon()
+        row = con.execute(
+            "SELECT COUNT(*) FROM market_index WHERE symbol=?",
+            ("IHSG",),
+        ).fetchone()
+        con.close()
+        return bool(row and int(row[0]) > 0)
+    except Exception:
+        return False
+
 def refresh_market_data():
     """
     Model V1.8 menggunakan market features.
@@ -258,19 +271,17 @@ def refresh_market_data():
         data = app.fetch_ihsg()
 
         if data is None:
-            log(
-                "MARKET_DATA",
-                "SKIP",
-                "fetch_ihsg returned None",
-            )
+            if cached_ihsg_available():
+                log("MARKET_DATA", "CACHE_FALLBACK", "fetch_ihsg returned None; keeping persisted IHSG context")
+                return True
+            log("MARKET_DATA", "SKIP", "fetch_ihsg returned None and no persisted IHSG context exists")
             return False
 
         if hasattr(data, "empty") and data.empty:
-            log(
-                "MARKET_DATA",
-                "SKIP",
-                "IHSG dataframe empty",
-            )
+            if cached_ihsg_available():
+                log("MARKET_DATA", "CACHE_FALLBACK", "IHSG provider empty; keeping persisted IHSG context")
+                return True
+            log("MARKET_DATA", "SKIP", "IHSG dataframe empty and no persisted IHSG context exists")
             return False
 
         if hasattr(app, "save_ihsg"):
