@@ -12,6 +12,8 @@ Rules:
 - Never overwrite an H10_FINAL run.
 - Candidate selection reuses premarket_scheduler.select_candidates(), so failed
   strict BUY rows remain WAIT/MONITOR instead of being fabricated into BUY.
+- The UI may call ensure_on_open() as a self-healing path. That path only uses
+  an already-persisted opportunity snapshot and never launches a heavy scan.
 """
 from __future__ import annotations
 
@@ -24,7 +26,7 @@ import premarket_scheduler as h10
 import market_session
 
 CFG = h10.CFG
-VERSION = "PRELIM-R1"
+VERSION = "PRELIM-R2"
 
 
 def _state_get(key, default=""):
@@ -74,7 +76,7 @@ def _publish_window(local) -> tuple[bool, int]:
     return False, 60
 
 
-def _payload_for(target_date: str, local):
+def _payload_for(target_date: str, local, allow_full_analysis=True):
     # Prefer the H-10 draft when one already exists and targets the same session.
     payload = h10._load_draft(target_date)
     if payload and payload.get("picks"):
@@ -82,6 +84,8 @@ def _payload_for(target_date: str, local):
 
     snapshot = h10._read_latest_snapshot()
     if snapshot is None or snapshot.empty:
+        if not allow_full_analysis:
+            return None
         payload = h10.build_draft(local, lightweight=True)
         return payload if payload and payload.get("picks") else None
 
@@ -90,18 +94,7 @@ def _payload_for(target_date: str, local):
     return payload if payload and payload.get("picks") else None
 
 
-def publish_preliminary(now=None):
-    local = h10._now_wib(now)
-    target_date = h10._target_market_date(local)
-
-    # Final H-10 output is immutable. Preliminary must never touch it.
-    if h10._already_finalized(target_date):
-        return {"status": "FINAL_EXISTS", "market_date": target_date}
-
-    payload = _payload_for(target_date, local)
-    if not payload:
-        return {"status": "NO_CANDIDATE", "market_date": target_date}
-
+def _write_preliminary(payload, target_date):
     picks = list(payload.get("picks") or [])[: h10.MAX_PICKS]
     if not picks:
         return {"status": "NO_CANDIDATE", "market_date": target_date}
@@ -183,6 +176,52 @@ def publish_preliminary(now=None):
         "mode": mode,
         "pick_count": len(picks),
     }
+
+
+def publish_preliminary(now=None):
+    local = h10._now_wib(now)
+    target_date = h10._target_market_date(local)
+
+    # Final H-10 output is immutable. Preliminary must never touch it.
+    if h10._already_finalized(target_date):
+        return {"status": "FINAL_EXISTS", "market_date": target_date}
+
+    payload = _payload_for(target_date, local, allow_full_analysis=True)
+    if not payload:
+        return {"status": "NO_CANDIDATE", "market_date": target_date}
+    return _write_preliminary(payload, target_date)
+
+
+def ensure_on_open(now=None):
+    """Self-heal Pre-Market when the UI opens without waiting for the daemon.
+
+    This is intentionally lightweight: it never fetches the universe or runs a
+    full analysis. If no opportunity snapshot exists yet, the UI returns
+    NO_SNAPSHOT and lets the worker warm the data instead of freezing the app.
+    """
+    local = h10._now_wib(now)
+    allowed, refresh_seconds = _publish_window(local)
+    target_date = h10._target_market_date(local)
+    if not allowed:
+        return {"status": "WINDOW_BLOCKED", "market_date": target_date}
+    if h10._already_finalized(target_date):
+        return {"status": "FINAL_EXISTS", "market_date": target_date}
+    if not _due(refresh_seconds):
+        return {"status": "FRESH", "market_date": target_date}
+
+    snapshot = h10._read_latest_snapshot()
+    if snapshot is None or snapshot.empty:
+        return {"status": "NO_SNAPSHOT", "market_date": target_date}
+
+    payload = _payload_for(target_date, local, allow_full_analysis=False)
+    if not payload:
+        return {"status": "NO_CANDIDATE", "market_date": target_date}
+    result = _write_preliminary(payload, target_date)
+    h10._log(
+        "PRELIMINARY_ON_OPEN",
+        f"market_date={target_date} status={result.get('status')} picks={result.get('pick_count',0)}",
+    )
+    return result
 
 
 def run_forever():

@@ -1,0 +1,31 @@
+services:
+  - type: worker
+    name: ai-stock-intelligence-worker
+    runtime: python
+    region: singapore
+    numInstances: 1
+    buildCommand: pip install -r requirements.txt
+    startCommand: python worker_base.py
+    envVars:
+      - key: AI_ENGINE_WORKER
+        value: "1"
+      - key: PYTHON_VERSION
+        value: "3.11.17"
+      - key: ASI_PERSIST_SYNC_SECONDS
+        value: "30"
+      - key: DATABASE_URL
+        sync: false
+
+  - type: web
+    name: ai-stock-intelligence-runtime-api
+    runtime: python
+    region: singapore
+    numInstances: 1
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn runtime_api:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.17"
+      - key: DATABASE_URL
+        sync: false

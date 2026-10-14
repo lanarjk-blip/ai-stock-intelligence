@@ -1,11 +1,4 @@
-"""Runtime consistency, H-10 Pre-Market deadline, and provider recovery.
-
-The detached worker self-reloads when runtime-critical source changes. Separate
-Pre-Market daemons keep preliminary next-session candidates visible and enforce
-the 08:50 WIB finalization independently from the ordinary 30-minute engine
-loop. IHSG also gets Yahoo query1 -> query2 failover so missing market context
-cannot silently collapse JST training.
-"""
+"""Runtime consistency, H-10 Pre-Market deadline, persistence, and provider recovery."""
 from __future__ import annotations
 
 import hashlib
@@ -15,6 +8,37 @@ import threading
 import time
 
 _BASE = os.path.dirname(os.path.abspath(__file__))
+_RUNTIME_IDENTITY = None
+_IS_REAL_WORKER = (
+    os.environ.get("AI_ENGINE_WORKER") == "1"
+    and os.path.basename(str(sys.argv[0] or "")) == "worker_base.py"
+)
+
+if _IS_REAL_WORKER:
+    try:
+        import runtime_supervisor
+        _RUNTIME_IDENTITY = dict(runtime_supervisor.CLAIM or {})
+    except SystemExit:
+        raise
+    except Exception as exc:
+        print(f"[RUNTIME_SUPERVISOR] startup error: {exc!r}", flush=True)
+
+# Restore the persistent control plane before app.py initializes.  If the UI is
+# configured to read from the Render runtime API, suppress app.py's legacy
+# local worker spawn so Render remains the only production engine.
+try:
+    import persistent_bridge
+    if persistent_bridge.enabled():
+        restored = persistent_bridge.restore_local_from_remote()
+        print(f"[PERSIST_BRIDGE] pre-app restore {restored}", flush=True)
+        if _IS_REAL_WORKER:
+            persistent_bridge.start_worker_bridge(_RUNTIME_IDENTITY)
+        elif os.environ.get("AI_ENGINE_WORKER") != "1" and persistent_bridge.api_enabled():
+            import external_runtime_guard
+            external_runtime_guard.install()
+except Exception as exc:
+    print(f"[PERSIST_BRIDGE] startup degraded: {exc!r}", flush=True)
+
 _WATCH = (
     "worker_base.py",
     "accuracy_guardrails.py",
@@ -25,6 +49,11 @@ _WATCH = (
     "premarket_scheduler.py",
     "premarket_preliminary.py",
     "premarket_ui_patch.py",
+    "persistent_bridge.py",
+    "external_runtime_guard.py",
+    "runtime_supervisor.py",
+    "runtime_api.py",
+    "render.yaml",
     "sitecustomize.py",
 )
 
@@ -55,7 +84,6 @@ def _watch_worker():
 
 
 def _run_premarket_scheduler():
-    """Start deadline-first Pre-Market after worker imports have settled."""
     try:
         time.sleep(3)
         import premarket_scheduler
@@ -65,7 +93,6 @@ def _run_premarket_scheduler():
 
 
 def _run_premarket_preliminary():
-    """Keep next-session candidates visible before the hard H-10 lock."""
     try:
         time.sleep(4)
         import premarket_preliminary
@@ -74,21 +101,11 @@ def _run_premarket_preliminary():
         print(f"[PREMARKET_PRELIMINARY] startup error: {exc!r}", flush=True)
 
 
-if os.environ.get("AI_ENGINE_WORKER") == "1":
+if _IS_REAL_WORKER:
     threading.Thread(target=_watch_worker, name="asi-runtime-watchdog", daemon=True).start()
-    threading.Thread(
-        target=_run_premarket_scheduler,
-        name="asi-premarket-h10",
-        daemon=True,
-    ).start()
-    threading.Thread(
-        target=_run_premarket_preliminary,
-        name="asi-premarket-preliminary",
-        daemon=True,
-    ).start()
-else:
-    # The legacy app copy calls every non-NO_TRADE state "locked". Install a
-    # narrow wording patch so PRELIMINARY remains visibly preliminary.
+    threading.Thread(target=_run_premarket_scheduler, name="asi-premarket-h10", daemon=True).start()
+    threading.Thread(target=_run_premarket_preliminary, name="asi-premarket-preliminary", daemon=True).start()
+elif os.environ.get("AI_ENGINE_WORKER") != "1":
     try:
         import premarket_ui_patch
         premarket_ui_patch.install()
@@ -96,7 +113,6 @@ else:
         pass
 
 
-# Targeted IHSG failover. Do not alter ordinary stock/API requests.
 try:
     import requests
 
@@ -119,21 +135,13 @@ try:
             return False
 
     def _get_with_ihsg_failover(url, *args, **kwargs):
-        """Retry IHSG on Yahoo query2 even when query1 raises outright.
-
-        The previous wrapper only retried when query1 returned an unusable
-        response. A timeout/DNS/TLS error escaped before failover, which left
-        fetch_ihsg() empty and in turn could produce zero JST training rows.
-        """
         text_url = str(url)
         is_query1_ihsg = (
             "query1.finance.yahoo.com" in text_url
             and any(path in text_url for path in _IHSG_PATHS)
         )
-
         if not is_query1_ihsg:
             return _ORIGINAL_GET(url, *args, **kwargs)
-
         primary_response = None
         primary_error = None
         try:
@@ -142,10 +150,7 @@ try:
                 return primary_response
         except Exception as exc:
             primary_error = exc
-
-        fallback_url = text_url.replace(
-            "query1.finance.yahoo.com", "query2.finance.yahoo.com", 1
-        )
+        fallback_url = text_url.replace("query1.finance.yahoo.com", "query2.finance.yahoo.com", 1)
         try:
             fallback = _ORIGINAL_GET(fallback_url, *args, **kwargs)
             if _usable_chart_response(fallback):
@@ -162,5 +167,4 @@ try:
 
     requests.get = _get_with_ihsg_failover
 except Exception:
-    # Network recovery must never prevent interpreter startup.
     pass

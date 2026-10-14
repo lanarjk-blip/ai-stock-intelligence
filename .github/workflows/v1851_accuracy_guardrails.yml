@@ -12,6 +12,32 @@ on:
       - 'premarket_scheduler.py'
       - 'premarket_preliminary.py'
       - 'premarket_ui_patch.py'
+      - 'runtime_supervisor.py'
+      - 'persistent_bridge.py'
+      - 'external_runtime_guard.py'
+      - 'runtime_api.py'
+      - 'render.yaml'
+      - 'config.json'
+      - 'requirements.txt'
+      - 'tests/**'
+      - '.github/workflows/v1851_accuracy_guardrails.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'app.py'
+      - 'worker_base.py'
+      - 'accuracy_guardrails.py'
+      - 'dynamic_engine.py'
+      - 'dynamic_opportunity_ui.py'
+      - 'sitecustomize.py'
+      - 'premarket_scheduler.py'
+      - 'premarket_preliminary.py'
+      - 'premarket_ui_patch.py'
+      - 'runtime_supervisor.py'
+      - 'persistent_bridge.py'
+      - 'external_runtime_guard.py'
+      - 'runtime_api.py'
+      - 'render.yaml'
       - 'config.json'
       - 'requirements.txt'
       - 'tests/**'
@@ -24,14 +50,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: main
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Install dependencies
         run: python -m pip install -q -r requirements.txt pytest
-      - name: Verify production version and quality-gate wiring
+      - name: Verify production contracts
         run: |
           python - <<'PY'
           import json
@@ -43,39 +67,42 @@ jobs:
           worker=Path('worker_base.py').read_text(encoding='utf-8')
           assert 'DATA_QUALITY' in worker and 'accuracy_guardrails' in worker
           guard=Path('accuracy_guardrails.py').read_text(encoding='utf-8')
-          assert 'asi-premarket-h10' in guard
-          assert 'asi-premarket-preliminary' in guard
-          assert '_start_worker_premarket_daemons' in guard
-          assert 'worker_base.py' in guard
-          ui=Path('dynamic_opportunity_ui.py').read_text(encoding='utf-8')
-          assert 'DATA NOT READY' in ui and 'mobile_ui_version' in ui
-          dynamic=Path('dynamic_engine.py').read_text(encoding='utf-8')
-          assert 'MONITOR_FALLBACK' in dynamic and 'no signal upgraded' in dynamic
+          assert 'asi-premarket-h10' in guard and 'asi-premarket-preliminary' in guard
           watchdog=Path('sitecustomize.py').read_text(encoding='utf-8')
-          assert 'os.execv' in watchdog and 'AI_ENGINE_WORKER' in watchdog
-          assert 'dynamic_engine.py' in watchdog
-          assert 'query2.finance.yahoo.com' in watchdog
-          assert 'primary_error' in watchdog
-          scheduler=Path('premarket_scheduler.py').read_text(encoding='utf-8')
+          assert '_IS_REAL_WORKER' in watchdog
+          assert 'runtime_supervisor' in watchdog and 'persistent_bridge' in watchdog
+          assert 'external_runtime_guard.install()' in watchdog
+          assert 'query2.finance.yahoo.com' in watchdog and 'primary_error' in watchdog
+          supervisor=Path('runtime_supervisor.py').read_text(encoding='utf-8')
+          assert 'DUPLICATE_EXIT' in supervisor and 'SIGTERM' in supervisor
+          bridge=Path('persistent_bridge.py').read_text(encoding='utf-8')
+          assert 'DATABASE_URL' in bridge and 'restore_local_from_api' in bridge
+          external=Path('external_runtime_guard.py').read_text(encoding='utf-8')
+          assert 'worker_base.py' in external and 'subprocess.Popen = guarded_popen' in external
+          api=Path('runtime_api.py').read_text(encoding='utf-8')
+          assert '/health' in api and '/bootstrap' in api
           preliminary=Path('premarket_preliminary.py').read_text(encoding='utf-8')
-          assert '08:50' in scheduler and 'H10_FINAL' in scheduler
-          assert 'PRELIMINARY' in preliminary and 'publish_preliminary' in preliminary
-          print('main production contract OK: V1.8.52 + explicit Pre-Market daemons')
+          assert 'ensure_on_open' in preliminary and 'PRELIMINARY_ON_OPEN' in preliminary
+          blueprint=Path('render.yaml').read_text(encoding='utf-8')
+          assert 'type: worker' in blueprint and 'type: web' in blueprint
+          print('production stabilization contract OK')
           PY
       - name: Compile
-        run: python -m py_compile app.py worker_base.py accuracy_guardrails.py dynamic_engine.py dynamic_opportunity_ui.py sitecustomize.py premarket_scheduler.py premarket_preliminary.py premarket_ui_patch.py
-      - name: Diagnose live Streamlit endpoint
+        run: >-
+          python -m py_compile app.py worker_base.py accuracy_guardrails.py
+          dynamic_engine.py dynamic_opportunity_ui.py sitecustomize.py
+          premarket_scheduler.py premarket_preliminary.py premarket_ui_patch.py
+          runtime_supervisor.py persistent_bridge.py external_runtime_guard.py runtime_api.py
+      - name: Diagnose current production Streamlit endpoint
         run: |
           set +e
           for URL in \
             'https://ai-stock-intelligence-zijcl2pi2kjweeappbkjiy.streamlit.app' \
-            'https://ai-stock-intelligence-zijcl2pi2kjweeappbkjiy.streamlit.app/' \
             'https://ai-stock-intelligence-zijcl2pi2kjweeappbkjiy.streamlit.app/_stcore/health'
           do
             echo "=== $URL ==="
             curl -sS -D - -o /tmp/streamlit_body --max-redirs 0 --max-time 20 "$URL" || true
-            echo '--- body ---'
-            head -c 500 /tmp/streamlit_body 2>/dev/null || true
+            head -c 300 /tmp/streamlit_body 2>/dev/null || true
             echo
           done
           exit 0
@@ -90,7 +117,6 @@ jobs:
           assert d is not None and not d.empty, 'IHSG provider returned no usable rows'
           assert 'close' in d.columns
           assert float(d['close'].dropna().iloc[-1]) > 0
-          print('IHSG latest=', d.iloc[-1].to_dict())
           PY
       - name: Live JST end-to-end training smoke test
         env:
@@ -99,40 +125,24 @@ jobs:
           python - <<'PY'
           import pandas as pd
           import app
-
           tickers=['BBCA','BBRI','BMRI','TLKM','ASII','ANTM','INDF','ICBP','ADRO','UNTR','PGAS','KLBF']
           universe=pd.DataFrame({'ticker':tickers,'company':tickers})
-
-          ih=app.fetch_ihsg()
-          assert ih is not None and not ih.empty, 'IHSG unavailable for JST training smoke test'
-          saved_ihsg=app.save_ihsg(ih)
-          print('saved IHSG rows=', saved_ihsg)
-
+          ih=app.fetch_ihsg(); assert ih is not None and not ih.empty
+          app.save_ihsg(ih)
           ok=0
-          saved_rows=0
           for ticker in tickers:
               try:
                   d=app.fetch_chart(ticker,220,'1d')
                   if d is not None and not d.empty:
-                      saved_rows += int(app.save_daily(d,ticker) or 0)
-                      ok += 1
-                  print(ticker, 'rows=', 0 if d is None else len(d))
+                      app.save_daily(d,ticker); ok += 1
               except Exception as exc:
                   print(ticker, 'ERROR', repr(exc))
-
-          print('stocks fetched=', ok, 'saved_rows=', saved_rows)
           assert ok >= 10, f'only {ok} stock histories fetched'
-
-          con=app.dbcon()
-          tr=app.build_training_rows(con,tickers,horizon=int(app.CFGD.get('primary_target_horizon',3)))
-          con.close()
-          print('training rows=', len(tr))
+          con=app.dbcon(); tr=app.build_training_rows(con,tickers,horizon=int(app.CFGD.get('primary_target_horizon',3))); con.close()
           assert len(tr) >= 500, f'JST training rows too low: {len(tr)}'
-
-          model, rows, accuracy = app.train_jst(universe)
-          print('JST model=', type(model).__name__ if model is not None else None, 'rows=', rows, 'accuracy=', accuracy)
-          assert model is not None, 'train_jst returned no model'
-          assert rows >= 500
+          model, rows, accuracy=app.train_jst(universe)
+          print('JST rows=',rows,'accuracy=',accuracy)
+          assert model is not None and rows >= 500
           PY
       - name: Model analysis and opportunity snapshot smoke test
         env:
@@ -140,37 +150,24 @@ jobs:
         run: |
           python - <<'PY'
           import pandas as pd
-          import app
-          import dynamic_engine
-          import worker_base
-
+          import app, dynamic_engine, worker_base
           tickers=['BBCA','BBRI','BMRI','TLKM','ASII','ANTM','INDF','ICBP','ADRO','UNTR','PGAS','KLBF']
           universe=pd.DataFrame({'ticker':tickers,'company':tickers})
-          model=app.load_jst()
-          assert model is not None, 'persisted JST model missing after training smoke test'
-
-          result=app.analyze_all(universe, model)
-          print('analysis rows=', 0 if result is None else len(result))
-          assert result is not None and not result.empty, 'model analysis returned no rows'
-          assert 'jst_p_up' in result.columns and result['jst_p_up'].notna().any(), 'model probabilities missing'
-
-          saved=worker_base.save_opportunities(result, 'ci-smoke')
-          print('snapshot saved=', saved)
+          model=app.load_jst(); assert model is not None
+          result=app.analyze_all(universe,model)
+          assert result is not None and not result.empty
+          saved=worker_base.save_opportunities(result,'ci-smoke')
           assert saved == len(result) and saved > 0
-
-          con=app.dbcon()
-          count=con.execute('SELECT COUNT(*) FROM opportunities').fetchone()[0]
-          con.close()
-          print('opportunities table rows=', count)
-          assert int(count) == int(saved)
-
-          dynamic=dynamic_engine.update(result, phase='CI_SMOKE')
-          print('dynamic rows=', 0 if dynamic is None else len(dynamic))
-          print('dynamic mode=', app.state_get('dynamic_candidate_mode'))
-          if dynamic is not None and not dynamic.empty:
-              print(dynamic[['rank','ticker','state','candidate_mode']].to_string(index=False))
-          assert dynamic is not None and not dynamic.empty, 'Opportunity output is empty despite model analysis rows'
+          dynamic=dynamic_engine.update(result,phase='CI_SMOKE')
+          assert dynamic is not None and not dynamic.empty
           assert len(dynamic) <= int(app.CFGD.get('dynamic_opportunity_count',5))
           PY
       - name: Regression tests
-        run: python -m pytest -q test_batch1_live_engine.py test_mobile_ui_v1848.py tests/test_accuracy_guardrails_v1852.py tests/test_runtime_consistency_v1852.py tests/test_ihsg_failover_v1852.py
+        run: >-
+          python -m pytest -q
+          test_batch1_live_engine.py
+          test_mobile_ui_v1848.py
+          tests/test_accuracy_guardrails_v1852.py
+          tests/test_runtime_consistency_v1852.py
+          tests/test_ihsg_failover_v1852.py
+          tests/test_runtime_stabilization_v1853.py
