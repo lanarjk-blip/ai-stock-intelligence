@@ -1,0 +1,67 @@
+name: V1.8.49 Worker Reliability Patch
+on:
+  push:
+    paths:
+      - '.github/workflows/v1849_worker_reliability.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-worker-collector-v1849
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply focused worker fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('worker_base.py')
+          s=p.read_text(encoding='utf-8')
+          old='''        df = app.fetch_chart(\n            ticker,\n            CFG["daily_period_days"],\n            CFG["daily_interval"],\n        )'''
+          new='''        # V1.8.49: use the resilient collector path when available.\n        # It can resolve provider symbol changes and reuse valid cached data.\n        recover = getattr(app, "fetch_chart_recover", None)\n        if callable(recover):\n            df = recover(\n                ticker,\n                CFG["daily_period_days"],\n                CFG["daily_interval"],\n            )\n        else:\n            df = app.fetch_chart(\n                ticker,\n                CFG["daily_period_days"],\n                CFG["daily_interval"],\n            )'''
+          if old not in s:
+              raise SystemExit('fetch_one anchor not found')
+          s=s.replace(old,new,1)
+          old2='''    except Exception as exc:\n        log(\n            "UNIVERSE",\n            "PRIORITY_FALLBACK",\n            str(exc),\n        )\n\n        return universe'''
+          new2='''    except FileNotFoundError:\n        # Seed is only an optimization. The canonical universe remains valid.\n        log(\n            "UNIVERSE",\n            "PRIORITY_SKIP",\n            "universe_seed.csv unavailable; using canonical universe",\n        )\n        return universe\n\n    except Exception as exc:\n        log(\n            "UNIVERSE",\n            "PRIORITY_FALLBACK",\n            str(exc),\n        )\n\n        return universe'''
+          if old2 not in s:
+              raise SystemExit('priority anchor not found')
+          s=s.replace(old2,new2,1)
+          p.write_text(s,encoding='utf-8')
+
+          c=Path('config.json')
+          x=c.read_text(encoding='utf-8')
+          if '"engine_version": "1.8.48"' not in x:
+              raise SystemExit('config version anchor not found')
+          x=x.replace('"engine_version": "1.8.48"','"engine_version": "1.8.49"',1)
+          x=x.replace('"production_stabilization_version": "1.8.47"','"production_stabilization_version": "1.8.49"',1)
+          c.write_text(x,encoding='utf-8')
+          PY
+      - name: Compile
+        run: python -m py_compile worker_base.py app.py
+      - name: Focused assertions
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('worker_base.py').read_text(encoding='utf-8')
+          c=Path('config.json').read_text(encoding='utf-8')
+          assert 'recover = getattr(app, "fetch_chart_recover", None)' in s
+          assert '"PRIORITY_SKIP"' in s
+          assert '"engine_version": "1.8.49"' in c
+          print('V1.8.49 focused assertions passed')
+          PY
+      - name: Regression tests
+        run: |
+          python -m pytest -q test_batch1_live_engine.py test_mobile_ui_v1848.py
+      - name: Commit patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add worker_base.py config.json
+          git diff --cached --check
+          git commit -m 'V1.8.49 harden worker collector and universe fallback'
+          git push origin HEAD:fix-worker-collector-v1849
