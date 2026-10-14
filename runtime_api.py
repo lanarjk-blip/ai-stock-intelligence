@@ -1,9 +1,8 @@
 """Read-only production runtime API.
 
-This service exposes only the market-engine control plane required by the
-Streamlit/APK client. It never exposes DATABASE_URL, credentials, raw logs, or
-write actions. Render runs it separately from the background worker; both use
-the same Neon DATABASE_URL.
+This service exposes only the market-engine data required by the Streamlit/APK
+client. It never exposes DATABASE_URL, raw price history, model binaries,
+notification outboxes, credentials, or write actions.
 """
 from __future__ import annotations
 
@@ -13,8 +12,9 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException
 
 import persistent_bridge
+import ui_replica
 
-app = FastAPI(title="AI Stock Intelligence Runtime API", version="1.0")
+app = FastAPI(title="AI Stock Intelligence Runtime API", version="1.1")
 
 _SENSITIVE_STATE_PARTS = (
     "token", "secret", "password", "credential", "service_account",
@@ -76,7 +76,7 @@ def health():
 
 @app.get("/bootstrap")
 def bootstrap():
-    """Return the latest safe control-plane snapshot for a fresh UI runtime."""
+    """Return the latest safe production snapshot for the Streamlit UI cache."""
     _require_db()
     con = persistent_bridge._pg_connect()
     try:
@@ -84,7 +84,8 @@ def bootstrap():
             cur.execute("SELECT key,value FROM asi_state")
             state_rows = cur.fetchall()
             cur.execute(
-                "SELECT generated_at,payload,bridge_version FROM asi_opportunity_snapshot WHERE singleton=1"
+                "SELECT generated_at,payload,bridge_version "
+                "FROM asi_opportunity_snapshot WHERE singleton=1"
             )
             snap = cur.fetchone()
             cur.execute(
@@ -104,6 +105,7 @@ def bootstrap():
                    FROM asi_runtime_heartbeat WHERE singleton=1"""
             )
             heartbeat = cur.fetchone()
+        replica = ui_replica.read_remote(con)
         con.rollback()
     finally:
         con.close()
@@ -157,5 +159,6 @@ def bootstrap():
         "opportunity_snapshot": snapshot,
         "premarket_runs": run_payload,
         "premarket_picks": pick_payload,
+        "ui_replica": replica,
         "heartbeat": hb,
     }
