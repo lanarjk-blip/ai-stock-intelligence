@@ -1,8 +1,9 @@
 """Production accuracy guardrails for AI Stock Intelligence.
 
 The engine must not publish confident recommendations when the underlying
-market dataset is incomplete or stale. This module intentionally contains no
-UI code so the same rules can be tested and reused by worker/API surfaces.
+market dataset is incomplete or stale. Publication quality is based primarily
+on usable persisted coverage, not on how many symbols happened to refresh in
+one provider cycle.
 """
 from datetime import datetime, timezone
 
@@ -20,11 +21,15 @@ def evaluate_data_quality(*, universe_count, collected_ok, ready_symbols,
                           min_ready_ratio=0.70,
                           min_price_rows=5000,
                           max_age_hours=8.0):
-    """Return a strict publication gate plus diagnostics.
+    """Return the publication gate plus diagnostics.
 
-    READY means the dataset is broad enough and recent enough to support
-    full-universe recommendations. NOT_READY means analysis may continue for
-    diagnostics, but BUY/Top-5 publication should be blocked.
+    ``collection_ratio`` is retained as a refresh-health diagnostic. It is not
+    by itself a publication blocker because providers can return only a subset
+    in a cycle while a broad, valid persisted dataset is still available.
+
+    ``ready_ratio`` measures usable symbols in persisted storage and is the
+    coverage criterion for publishing full-universe recommendations. Freshness
+    and minimum row count remain mandatory.
     """
     universe_count = max(int(universe_count or 0), 0)
     collected_ok = max(int(collected_ok or 0), 0)
@@ -34,12 +39,15 @@ def evaluate_data_quality(*, universe_count, collected_ok, ready_symbols,
     ready_ratio = _ratio(ready_symbols, universe_count)
 
     reasons = []
+    warnings = []
     if universe_count <= 0:
         reasons.append("empty universe")
     if collection_ratio < float(min_collection_ratio):
-        reasons.append(f"collection coverage {collection_ratio:.1%} < {float(min_collection_ratio):.0%}")
+        warnings.append(
+            f"fresh collection coverage {collection_ratio:.1%} < {float(min_collection_ratio):.0%}"
+        )
     if ready_ratio < float(min_ready_ratio):
-        reasons.append(f"ready-symbol coverage {ready_ratio:.1%} < {float(min_ready_ratio):.0%}")
+        reasons.append(f"usable-symbol coverage {ready_ratio:.1%} < {float(min_ready_ratio):.0%}")
     if price_rows < int(min_price_rows):
         reasons.append(f"price rows {price_rows} < {int(min_price_rows)}")
 
@@ -52,7 +60,10 @@ def evaluate_data_quality(*, universe_count, collected_ok, ready_symbols,
             current = now or datetime.now(timezone.utc)
             if current.tzinfo is None:
                 current = current.replace(tzinfo=timezone.utc)
-            age_hours = max(0.0, (current.astimezone(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds() / 3600.0)
+            age_hours = max(
+                0.0,
+                (current.astimezone(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds() / 3600.0,
+            )
             if age_hours > float(max_age_hours):
                 reasons.append(f"collection age {age_hours:.1f}h > {float(max_age_hours):.1f}h")
         except Exception:
@@ -69,4 +80,5 @@ def evaluate_data_quality(*, universe_count, collected_ok, ready_symbols,
         "price_rows": price_rows,
         "age_hours": age_hours,
         "reasons": reasons,
+        "warnings": warnings,
     }
