@@ -20,7 +20,10 @@ def test_worker_reload_watchdog_exists():
     assert "accuracy_guardrails.py" in watchdog
     assert "config.json" in watchdog
     assert "premarket_scheduler.py" in watchdog
+    assert "premarket_preliminary.py" in watchdog
+    assert "premarket_ui_patch.py" in watchdog
     assert "asi-premarket-h10" in watchdog
+    assert "asi-premarket-preliminary" in watchdog
 
 
 def test_premarket_h10_deadline_contract_is_explicit_and_compilable():
@@ -46,3 +49,35 @@ def test_premarket_h10_deadline_contract_is_explicit_and_compilable():
     assert 'c.loc[original.isin({"BUY", "STRONG_BUY"}), "decision"] = "WAIT"' in scheduler
     assert "SELL/AVOID" in scheduler
     assert "premarket_h10_timing" in scheduler
+
+
+def test_premarket_preliminary_is_always_visible_without_faking_final_lock():
+    preliminary = Path("premarket_preliminary.py").read_text(encoding="utf-8")
+    ui_patch = Path("premarket_ui_patch.py").read_text(encoding="utf-8")
+    ast.parse(preliminary)
+    ast.parse(ui_patch)
+
+    # Before H-10 and on non-trading/off-market periods, the app should retain
+    # useful next-session candidates instead of an empty Pre-Market surface.
+    assert 'state == "BEFORE"' in preliminary
+    assert 'state == "PREPARE"' in preliminary
+    assert 'state == "LIGHT"' in preliminary
+    assert 'state == "OFF"' in preliminary
+    assert '== "CLOSED"' in preliminary
+    assert '"PRELIMINARY"' in preliminary
+
+    # The H-10 final result is immutable and preliminary may never overwrite it.
+    assert "_already_finalized" in preliminary
+    assert "H10_FINAL" in preliminary
+    assert '"FINAL_EXISTS"' in preliminary
+
+    # Reuse the exact H-10 selection logic so failed strict BUY rows remain
+    # WAIT/MONITOR and preliminary does not invent a trade recommendation.
+    assert "select_candidates" in preliminary
+    assert "premarket-preliminary" in preliminary
+
+    # UI wording must explicitly distinguish a candidate draft from a lock.
+    assert '"PRELIMINARY"' in ui_patch
+    assert "belum final H-10" in preliminary
+    assert "Daftar ini masih boleh berubah" in ui_patch
+    assert "08:50 WIB" in ui_patch
