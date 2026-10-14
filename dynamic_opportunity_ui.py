@@ -2,7 +2,7 @@
 
 V1.8.52 keeps the production Top Opportunity surface behind the DATA_QUALITY
 publication gate, normalizes stale shell version labels from config.json, and
-renders a compact mobile decision card without turning MONITOR candidates into
+renders a compact decision-first UI without turning MONITOR candidates into
 fake BUY signals.
 """
 from __future__ import annotations
@@ -48,7 +48,43 @@ def _install_runtime_version_patch():
         pass
 
 
+def _install_compact_tab_patch():
+    """Turn the legacy seven-tab shell into the agreed five-tab navigation.
+
+    Pre-Market is appended to Home. AI/Validation and Engine/Log are appended
+    to Lainnya. The app code can keep its seven context variables while the
+    user sees only five stable destinations.
+    """
+    try:
+        original_tabs = st.tabs
+        if getattr(original_tabs, '_asi_compact_tabs', False):
+            return
+
+        legacy = [
+            '🏠 Ringkasan', '🌅 Pre-Market', '🚀 Opportunity', '🔎 Analisis Saham',
+            '📚 History & Shadow', '🧠 AI & Validasi', '⚙️ Engine / Log'
+        ]
+
+        def tabs(labels, *args, **kwargs):
+            labels_list = list(labels)
+            if labels_list == legacy:
+                compact = original_tabs(
+                    ['🏠 Home', '🚀 Opportunity', '🔎 Analisis', '📚 History', '⚙️ Lainnya'],
+                    *args, **kwargs
+                )
+                home, opportunity, analysis, history, more = compact
+                # Preserve the legacy unpacking contract used by app.py.
+                return [home, home, opportunity, analysis, history, more, more]
+            return original_tabs(labels, *args, **kwargs)
+
+        tabs._asi_compact_tabs = True
+        st.tabs = tabs
+    except Exception:
+        pass
+
+
 _install_runtime_version_patch()
+_install_compact_tab_patch()
 
 
 def _text(value, default='—'):
