@@ -9,11 +9,15 @@ import time
 
 _BASE = os.path.dirname(os.path.abspath(__file__))
 _RUNTIME_IDENTITY = None
+_IS_REAL_WORKER = (
+    os.environ.get("AI_ENGINE_WORKER") == "1"
+    and os.path.basename(str(sys.argv[0] or "")) == "worker_base.py"
+)
 
 # Claim the worker singleton as early as Python allows. This executes before
 # worker_base.py imports app.py, so an orphan/duplicate generation cannot write
 # contradictory state first and get noticed later.
-if os.environ.get("AI_ENGINE_WORKER") == "1":
+if _IS_REAL_WORKER:
     try:
         import runtime_supervisor
         _RUNTIME_IDENTITY = dict(runtime_supervisor.CLAIM or {})
@@ -22,15 +26,14 @@ if os.environ.get("AI_ENGINE_WORKER") == "1":
     except Exception as exc:
         print(f"[RUNTIME_SUPERVISOR] startup error: {exc!r}", flush=True)
 
-# Restore critical state before app.py initializes.  This turns a fresh
-# Streamlit/Render filesystem into a cache of the persistent Neon control plane
-# instead of treating local SQLite as the source of truth.
+# Restore critical state before app.py initializes. This turns a fresh
+# Streamlit/Render filesystem into a cache of the persistent control plane.
 try:
     import persistent_bridge
     if persistent_bridge.enabled():
         restored = persistent_bridge.restore_local_from_remote()
         print(f"[PERSIST_BRIDGE] pre-app restore {restored}", flush=True)
-        if os.environ.get("AI_ENGINE_WORKER") == "1":
+        if _IS_REAL_WORKER:
             persistent_bridge.start_worker_bridge(_RUNTIME_IDENTITY)
 except Exception as exc:
     print(f"[PERSIST_BRIDGE] startup degraded: {exc!r}", flush=True)
@@ -47,6 +50,8 @@ _WATCH = (
     "premarket_ui_patch.py",
     "persistent_bridge.py",
     "runtime_supervisor.py",
+    "runtime_api.py",
+    "render.yaml",
     "sitecustomize.py",
 )
 
@@ -77,7 +82,6 @@ def _watch_worker():
 
 
 def _run_premarket_scheduler():
-    """Start deadline-first Pre-Market after worker imports have settled."""
     try:
         time.sleep(3)
         import premarket_scheduler
@@ -87,7 +91,6 @@ def _run_premarket_scheduler():
 
 
 def _run_premarket_preliminary():
-    """Keep next-session candidates visible before the hard H-10 lock."""
     try:
         time.sleep(4)
         import premarket_preliminary
@@ -96,19 +99,11 @@ def _run_premarket_preliminary():
         print(f"[PREMARKET_PRELIMINARY] startup error: {exc!r}", flush=True)
 
 
-if os.environ.get("AI_ENGINE_WORKER") == "1":
+if _IS_REAL_WORKER:
     threading.Thread(target=_watch_worker, name="asi-runtime-watchdog", daemon=True).start()
-    threading.Thread(
-        target=_run_premarket_scheduler,
-        name="asi-premarket-h10",
-        daemon=True,
-    ).start()
-    threading.Thread(
-        target=_run_premarket_preliminary,
-        name="asi-premarket-preliminary",
-        daemon=True,
-    ).start()
-else:
+    threading.Thread(target=_run_premarket_scheduler, name="asi-premarket-h10", daemon=True).start()
+    threading.Thread(target=_run_premarket_preliminary, name="asi-premarket-preliminary", daemon=True).start()
+elif os.environ.get("AI_ENGINE_WORKER") != "1":
     try:
         import premarket_ui_patch
         premarket_ui_patch.install()
@@ -144,7 +139,6 @@ try:
             "query1.finance.yahoo.com" in text_url
             and any(path in text_url for path in _IHSG_PATHS)
         )
-
         if not is_query1_ihsg:
             return _ORIGINAL_GET(url, *args, **kwargs)
 
@@ -157,9 +151,7 @@ try:
         except Exception as exc:
             primary_error = exc
 
-        fallback_url = text_url.replace(
-            "query1.finance.yahoo.com", "query2.finance.yahoo.com", 1
-        )
+        fallback_url = text_url.replace("query1.finance.yahoo.com", "query2.finance.yahoo.com", 1)
         try:
             fallback = _ORIGINAL_GET(fallback_url, *args, **kwargs)
             if _usable_chart_response(fallback):
