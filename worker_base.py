@@ -140,11 +140,21 @@ def stale(key, hours):
 
 def fetch_one(ticker):
     try:
-        df = app.fetch_chart(
-            ticker,
-            CFG["daily_period_days"],
-            CFG["daily_interval"],
-        )
+        # V1.8.49: use the resilient collector path when available.
+        # It can resolve provider symbol changes and reuse valid cached data.
+        recover = getattr(app, "fetch_chart_recover", None)
+        if callable(recover):
+            df = recover(
+                ticker,
+                CFG["daily_period_days"],
+                CFG["daily_interval"],
+            )
+        else:
+            df = app.fetch_chart(
+                ticker,
+                CFG["daily_period_days"],
+                CFG["daily_interval"],
+            )
 
         rows = app.save_daily(df, ticker)
 
@@ -336,6 +346,15 @@ def prioritize_universe(universe):
             .drop_duplicates("ticker")
             .reset_index(drop=True)
         )
+
+    except FileNotFoundError:
+        # Seed is only an optimization. The canonical universe remains valid.
+        log(
+            "UNIVERSE",
+            "PRIORITY_SKIP",
+            "universe_seed.csv unavailable; using canonical universe",
+        )
+        return universe
 
     except Exception as exc:
         log(
