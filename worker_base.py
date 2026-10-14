@@ -19,6 +19,7 @@ import premarket_evaluation
 import premarket_explain
 import closing_overnight
 import market_session
+import accuracy_guardrails
 
 
 BASE = app.BASE
@@ -965,6 +966,33 @@ def analyze_and_publish(
         )
 
         return pd.DataFrame()
+
+    # V1.8.51: never publish full-universe BUY/Top-5 output from weak data.
+    # Analysis can run for diagnostics, but publication waits for broad, fresh coverage.
+    if str(source).lower() == "full-universe" and CFG.get("data_quality_gate_enabled", True):
+        quality = accuracy_guardrails.evaluate_data_quality(
+            universe_count=len(universe),
+            collected_ok=app.state_get("last_collection_ok") or 0,
+            ready_symbols=count_ready_symbols(60),
+            price_rows=count_price_rows(),
+            last_collection=app.state_get("last_collection"),
+            min_collection_ratio=CFG.get("data_quality_min_collection_ratio", 0.80),
+            min_ready_ratio=CFG.get("data_quality_min_ready_ratio", 0.70),
+            min_price_rows=CFG.get("data_quality_min_price_rows", 5000),
+            max_age_hours=CFG.get("data_quality_max_age_hours", 8),
+        )
+        app.state_set("data_quality_status", quality["status"])
+        app.state_set("data_quality_collection_ratio", quality["collection_ratio"])
+        app.state_set("data_quality_ready_ratio", quality["ready_ratio"])
+        app.state_set("data_quality_reasons", " | ".join(quality["reasons"]))
+        if not quality["ready"]:
+            log("DATA_QUALITY", "BLOCK", " | ".join(quality["reasons"]))
+            return pd.DataFrame()
+        log(
+            "DATA_QUALITY",
+            "READY",
+            f"collection={quality['collection_ratio']:.1%} ready={quality['ready_ratio']:.1%} rows={quality['price_rows']}",
+        )
 
     saved = save_opportunities(
         res,
