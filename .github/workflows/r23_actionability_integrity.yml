@@ -1,0 +1,165 @@
+name: R23 Actionability Integrity
+on:
+  push:
+    branches: [fix-actionability-integrity-r23]
+permissions:
+  contents: write
+jobs:
+  integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-actionability-integrity-r23
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install -q -r requirements.txt pytest
+      - name: Apply integrated actionability patch
+        run: python tools/apply_r23_actionability_patch.py
+      - name: Compile production modules
+        run: >-
+          python -m py_compile premarket_scheduler.py premarket_preliminary.py
+          dynamic_engine.py top5_timeline.py recommendation_history.py
+          dynamic_opportunity_ui.py runtime_supervisor.py
+      - name: Behavior regression for actionability boundaries
+        env:
+          AI_ENGINE_WORKER: '0'
+        run: |
+          python - <<'PY'
+          import os, sqlite3, tempfile
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+          import pandas as pd
+
+          import app
+          import premarket_scheduler as h10
+          import premarket_preliminary as prelim
+          import dynamic_engine
+          import top5_timeline
+          import recommendation_history
+
+          td=tempfile.mkdtemp(prefix='asi-r23-')
+          db=os.path.join(td,'market.db')
+          app.DB=db
+          app.DB_DIR=td
+          app.init_db()
+          h10._ensure_tables()
+
+          con=sqlite3.connect(db)
+          cols={r[1] for r in con.execute('PRAGMA table_info(premarket_picks)').fetchall()}
+          assert 'reference_price' in cols, cols
+          con.close()
+
+          row=pd.Series({
+              'ticker':'TEST','company':'Test','decision':'BUY','confidence':0.7,
+              'jst_p_up':0.7,'ai_score':80,'risk':'LOW','close':100.0,
+              'entry_low':99.0,'entry_high':101.0,'stop_loss':95.0,
+              'target_1':105.0,'target_2':110.0,'market_regime':'SIDEWAYS'
+          })
+          item=h10._record_from_row(row,'2026-10-15','2026-10-14T23:00:00+00:00',1,'BUY_READY','')
+          assert item['reference_price']==100.0, item
+          prelim._write_preliminary({'picks':[item],'mode':'BUY_READY','generated_at':'x'},'2026-10-15')
+          con=sqlite3.connect(db)
+          ref=con.execute('SELECT reference_price FROM premarket_picks WHERE market_date=?',('2026-10-15',)).fetchone()[0]
+          assert float(ref)==100.0, ref
+
+          # Opening Confirmation must reject PRELIMINARY and yesterday's daily candle.
+          now=datetime(2026,10,15,10,0,tzinfo=ZoneInfo('Asia/Jakarta'))
+          blocked=dynamic_engine.update_opening_confirmation(now)
+          assert blocked.empty
+          assert app.state_get('opening_confirmation_status')=='BLOCKED_NO_H10_FINAL'
+
+          con.execute("UPDATE premarket_runs SET status='LOCKED',note='H10_FINAL test' WHERE market_date='2026-10-15'")
+          con.execute("UPDATE premarket_picks SET decision='WAIT',reference_price=100,entry_low=99,entry_high=101 WHERE market_date='2026-10-15'")
+          con.execute("INSERT OR REPLACE INTO prices(ticker,date,open,high,low,close,volume,source,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                      ('TEST','2026-10-14',100,102,98,101,1,'test','x'))
+          con.commit(); con.close()
+          stale=dynamic_engine.update_opening_confirmation(now)
+          assert len(stale)==1 and pd.isna(stale.iloc[0]['open_price']), stale
+          assert stale.iloc[0]['status']=='WAIT', stale.iloc[0].to_dict()
+
+          con=sqlite3.connect(db)
+          con.execute("INSERT OR REPLACE INTO prices(ticker,date,open,high,low,close,volume,source,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                      ('TEST','2026-10-15',100,102,98,101,1,'test','x'))
+          con.commit(); con.close()
+          wait=dynamic_engine.update_opening_confirmation(now)
+          assert wait.iloc[0]['status']=='WAIT', wait.iloc[0].to_dict()
+          assert 'tidak di-upgrade menjadi BUY' in wait.iloc[0]['reason']
+
+          con=sqlite3.connect(db)
+          con.execute("UPDATE premarket_picks SET decision='BUY' WHERE market_date='2026-10-15'")
+          con.commit(); con.close()
+          buy=dynamic_engine.update_opening_confirmation(now)
+          assert buy.iloc[0]['status']=='BUY', buy.iloc[0].to_dict()
+
+          # MONITOR fallback must remain MONITOR after DB round-trip.
+          dynamic_engine._cached_time_signal=lambda ticker:{'edge':0.20,'confidence':0.90,'horizon':'EOD','entry_status':'ACTIVE'}
+          dynamic_engine.update_opening_confirmation=lambda *a,**k: pd.DataFrame()
+          res=pd.DataFrame([{
+              'ticker':'FALL','company':'Fallback','decision':'BUY','decision_reason':'synthetic',
+              'ai_score':44.0,'relative_percentile':0.99,'relative_rank_score':99.0,
+              'close':100.0,'entry_low':99.0,'entry_high':101.0,'stop_loss':95.0,
+              'target_1':105.0,'target_2':110.0,'risk_reward_2':2.0,'risk':'LOW',
+              'jst_p_up':0.90,'jst_p_down':0.05,'jst_confidence':0.90,
+              'market_regime':'BULLISH','market_score':75.0
+          }])
+          out=dynamic_engine.update(res,'OPEN')
+          assert out.iloc[0]['candidate_mode']=='MONITOR_FALLBACK', out.iloc[0].to_dict()
+          assert out.iloc[0]['state']=='MONITOR', out.iloc[0].to_dict()
+          assert out.iloc[0]['decision']=='BUY'
+          con=sqlite3.connect(db)
+          persisted=con.execute('SELECT state,decision,candidate_mode FROM dynamic_opportunities WHERE ticker=?',('FALL',)).fetchone()
+          con.close()
+          assert persisted==('MONITOR','BUY','MONITOR_FALLBACK'), persisted
+
+          # Fallback rows must not create ENTRY_READY events.
+          top5_timeline.ensure_tables(db)
+          con=top5_timeline._connect(db)
+          try:
+              events=top5_timeline._sync_action_state(
+                  con,
+                  pd.DataFrame([{'ticker':'FALL','state':'ENTRY READY','entry_status':'ACTIVE','candidate_mode':'MONITOR_FALLBACK'}]),
+                  '2026-10-15T03:00:00+00:00',True,[],['FALL'],'2026-10-15T10:00:00+07:00'
+              )
+              con.commit()
+              ready=con.execute('SELECT is_entry_ready FROM live_action_state WHERE ticker=?',('FALL',)).fetchone()[0]
+          finally:
+              con.close()
+          assert events==0 and ready==0, (events,ready)
+
+          # History can record MONITOR rows, but shadow portfolio must only seed true BUYs.
+          fallback=pd.DataFrame([{
+              'rank':1,'ticker':'MON1','company':'Monitor','decision':'BUY','candidate_mode':'MONITOR_FALLBACK',
+              'state':'MONITOR','entry_status':'ACTIVE','opportunity_score':80,'ai_score':80,
+              'p_up':0.8,'p_down':0.1,'confidence':0.8,'close':100,'entry_low':99,'entry_high':101,
+              'stop_loss':95,'target_1':105,'target_2':110,'risk_reward':2,'risk':'LOW','market_regime':'BULLISH','reason':'fallback'
+          }])
+          rr=recommendation_history.record_snapshot(db,fallback,{},'full-universe')
+          con=sqlite3.connect(db)
+          assert con.execute("SELECT candidate_mode FROM recommendation_history WHERE ticker='MON1'").fetchone()[0]=='MONITOR_FALLBACK'
+          assert con.execute("SELECT COUNT(*) FROM shadow_positions WHERE ticker='MON1'").fetchone()[0]==0
+          con.close()
+
+          strict=fallback.copy()
+          strict.loc[0,'ticker']='BUY1'; strict.loc[0,'company']='Buy'; strict.loc[0,'candidate_mode']='STRICT'; strict.loc[0,'state']='ENTRY READY'
+          recommendation_history.record_snapshot(db,strict,{},'full-universe')
+          con=sqlite3.connect(db)
+          assert con.execute("SELECT COUNT(*) FROM shadow_positions WHERE ticker='BUY1'").fetchone()[0]==1
+          con.close()
+
+          holiday=datetime(2026,12,24,8,40,tzinfo=ZoneInfo('Asia/Jakarta'))
+          assert h10._is_trading_day(holiday) is False
+          print('R23 ACTIONABILITY BEHAVIOR PASSED')
+          PY
+      - name: Run complete tests
+        run: python -m pytest -q
+      - name: Commit validated patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add premarket_scheduler.py premarket_preliminary.py dynamic_engine.py top5_timeline.py recommendation_history.py dynamic_opportunity_ui.py runtime_supervisor.py
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Harden actionability boundaries across Pre-Market and Dynamic Opportunity'
+          git push origin HEAD:fix-actionability-integrity-r23
