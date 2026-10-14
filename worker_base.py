@@ -138,6 +138,23 @@ def stale(key, hours):
 # DATA COLLECTION
 # ============================================================
 
+def _recover_dataframe(value):
+    """Normalize fetch_chart_recover output to a DataFrame.
+
+    The recovery API currently returns (dataframe, status, symbol, error),
+    while older/future implementations may return a DataFrame directly.
+    Never allow tuple metadata to reach save_daily()/DataFrame.empty.
+    """
+    if isinstance(value, pd.DataFrame):
+        return value
+    if isinstance(value, tuple):
+        for item in value:
+            if isinstance(item, pd.DataFrame):
+                return item
+    raise TypeError(
+        f"fetch_chart_recover returned no DataFrame: {type(value).__name__}"
+    )
+
 def fetch_one(ticker):
     try:
         # V1.8.49: use the resilient collector path when available.
@@ -149,9 +166,7 @@ def fetch_one(ticker):
                 CFG["daily_period_days"],
                 CFG["daily_interval"],
             )
-            # fetch_chart_recover returns (dataframe, status, symbol, error).
-            # Keep compatibility if a future implementation returns only a dataframe.
-            df = recovered[0] if isinstance(recovered, tuple) else recovered
+            df = _recover_dataframe(recovered)
         else:
             df = app.fetch_chart(
                 ticker,
