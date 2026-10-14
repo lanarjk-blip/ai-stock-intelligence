@@ -457,7 +457,7 @@ def finalize_h10(now=None):
     finally:
         con.close()
 
-    final_time = _now_wib()
+    final_time = local
     deadline = _parse_hhmm(FINAL_LOCK, "08:50")
     deadline_seconds = deadline.hour * 3600 + deadline.minute * 60
     actual_seconds = final_time.hour * 3600 + final_time.minute * 60 + final_time.second
