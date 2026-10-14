@@ -1,7 +1,7 @@
 """Read-only UI replica between the authoritative worker and Streamlit.
 
 When production intelligence runs on Render, Streamlit must not run a second
-engine just to populate its tabs.  This module mirrors a strict whitelist of
+engine just to populate its tabs. This module mirrors a strict whitelist of
 small/medium SQLite tables that the dashboard reads, plus selected safe JSON
 files. Raw prices, intraday bars, secrets, notification outboxes, and model
 binaries are deliberately excluded from the public UI replica.
@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import sqlite3
 from datetime import date, datetime
 
@@ -19,18 +20,18 @@ import pandas as pd
 # table -> (row limit, deterministic ordering)
 TABLE_SPECS = {
     "dynamic_opportunities": (50, "rank ASC"),
-    "dynamic_opportunity_history": (1000, "id DESC"),
+    "dynamic_opportunity_history": (500, "id DESC"),
     "dynamic_opportunity_pool": (200, "rank ASC"),
     "hold_intelligence": (100, "hold_score DESC"),
-    "hold_intelligence_history": (1000, "id DESC"),
-    "alert_history": (1000, "id DESC"),
+    "hold_intelligence_history": (500, "id DESC"),
+    "alert_history": (500, "id DESC"),
     "outlook": (10, "id ASC"),
-    "premarket_evaluations": (1000, "market_date DESC, ticker ASC"),
-    "recommendation_runs": (500, "generated_at DESC"),
-    "recommendation_history": (5000, "id DESC"),
-    "shadow_positions": (2000, "id DESC"),
-    "opening_confirmation": (500, "market_date DESC, ticker ASC"),
-    "engine_log": (500, "id DESC"),
+    "premarket_evaluations": (500, "market_date DESC, ticker ASC"),
+    "recommendation_runs": (300, "generated_at DESC"),
+    "recommendation_history": (2500, "id DESC"),
+    "shadow_positions": (1000, "id DESC"),
+    "opening_confirmation": (300, "market_date DESC, ticker ASC"),
+    "engine_log": (300, "id DESC"),
 }
 
 SAFE_JSON_FILES = {
@@ -38,6 +39,12 @@ SAFE_JSON_FILES = {
 }
 
 MAX_FILE_BYTES = 5 * 1024 * 1024
+_MAX_LOG_DETAIL = 1200
+_REDACT_PATTERNS = [
+    re.compile(r"(?i)(authorization\s*[:=]\s*)([^\s,;]+)"),
+    re.compile(r"(?i)((?:api[_-]?key|token|secret|password|private[_-]?key)\s*[:=]\s*)([^\s,;]+)"),
+    re.compile(r"(?i)(bearer\s+)([A-Za-z0-9._~+\-/=]+)"),
+]
 
 
 def _safe_value(value):
@@ -53,6 +60,13 @@ def _safe_value(value):
     if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
         return None
     return value
+
+
+def _sanitize_log_detail(value):
+    text = str(value or "")[:_MAX_LOG_DETAIL]
+    for pattern in _REDACT_PATTERNS:
+        text = pattern.sub(r"\1[REDACTED]", text)
+    return text
 
 
 def _table_exists(con, table):
@@ -96,12 +110,15 @@ def read_local(db_path, db_dir):
                     f'SELECT * FROM "{table}" ORDER BY {order_by} LIMIT ?',
                     (int(limit),),
                 ).fetchall()
+                clean_rows = []
+                for row in rows:
+                    clean = {str(k): _safe_value(v) for k, v in dict(row).items()}
+                    if table == "engine_log" and "detail" in clean:
+                        clean["detail"] = _sanitize_log_detail(clean.get("detail"))
+                    clean_rows.append(clean)
                 tables[table] = {
                     "columns": columns,
-                    "rows": [
-                        {str(k): _safe_value(v) for k, v in dict(row).items()}
-                        for row in rows
-                    ],
+                    "rows": clean_rows,
                 }
         finally:
             con.close()
