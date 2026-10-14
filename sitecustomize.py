@@ -18,6 +18,7 @@ _WATCH = (
     "accuracy_guardrails.py",
     "config.json",
     "app.py",
+    "dynamic_engine.py",
     "dynamic_opportunity_ui.py",
     "sitecustomize.py",
 )
@@ -106,8 +107,6 @@ try:
             fallback = _ORIGINAL_GET(fallback_url, *args, **kwargs)
             if _usable_chart_response(fallback):
                 return fallback
-            # Preserve the original HTTP response when both hosts responded but
-            # neither carried usable chart data, so app.py can handle it normally.
             if primary_response is not None:
                 return primary_response
             return fallback
