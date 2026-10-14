@@ -26,6 +26,23 @@ def test_worker_reload_watchdog_exists():
     assert "asi-premarket-preliminary" in watchdog
 
 
+def test_worker_has_guaranteed_premarket_bootstrap_not_only_sitecustomize():
+    worker = Path("worker_base.py").read_text(encoding="utf-8")
+    guard = Path("accuracy_guardrails.py").read_text(encoding="utf-8")
+    ast.parse(guard)
+
+    # worker_base imports this module directly in every production worker.
+    assert "import accuracy_guardrails" in worker
+    assert "_start_worker_premarket_daemons" in guard
+    assert 'os.environ.get("AI_ENGINE_WORKER") != "1"' in guard
+    assert 'os.path.basename(str(sys.argv[0] or "")) != "worker_base.py"' in guard
+    assert 'name="asi-premarket-h10"' in guard
+    assert 'name="asi-premarket-preliminary"' in guard
+    assert "import premarket_scheduler" in guard
+    assert "import premarket_preliminary" in guard
+    assert "threading.enumerate()" in guard
+
+
 def test_premarket_h10_deadline_contract_is_explicit_and_compilable():
     scheduler = Path("premarket_scheduler.py").read_text(encoding="utf-8")
     ast.parse(scheduler)
