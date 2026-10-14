@@ -1,9 +1,10 @@
 """Runtime consistency, H-10 Pre-Market deadline, and provider recovery.
 
-The detached worker self-reloads when runtime-critical source changes. A
-separate Pre-Market deadline daemon keeps the 08:50 WIB finalization independent
-from the ordinary 30-minute engine loop. IHSG also gets Yahoo query1 -> query2
-failover so missing market context cannot silently collapse JST training.
+The detached worker self-reloads when runtime-critical source changes. Separate
+Pre-Market daemons keep preliminary next-session candidates visible and enforce
+the 08:50 WIB finalization independently from the ordinary 30-minute engine
+loop. IHSG also gets Yahoo query1 -> query2 failover so missing market context
+cannot silently collapse JST training.
 """
 from __future__ import annotations
 
@@ -22,6 +23,8 @@ _WATCH = (
     "dynamic_engine.py",
     "dynamic_opportunity_ui.py",
     "premarket_scheduler.py",
+    "premarket_preliminary.py",
+    "premarket_ui_patch.py",
     "sitecustomize.py",
 )
 
@@ -58,9 +61,17 @@ def _run_premarket_scheduler():
         import premarket_scheduler
         premarket_scheduler.run_forever()
     except Exception as exc:
-        # The ordinary worker must remain alive even if this auxiliary daemon
-        # ever fails during startup. Its own loop handles runtime exceptions.
         print(f"[PREMARKET_H10] startup error: {exc!r}", flush=True)
+
+
+def _run_premarket_preliminary():
+    """Keep next-session candidates visible before the hard H-10 lock."""
+    try:
+        time.sleep(4)
+        import premarket_preliminary
+        premarket_preliminary.run_forever()
+    except Exception as exc:
+        print(f"[PREMARKET_PRELIMINARY] startup error: {exc!r}", flush=True)
 
 
 if os.environ.get("AI_ENGINE_WORKER") == "1":
@@ -70,6 +81,19 @@ if os.environ.get("AI_ENGINE_WORKER") == "1":
         name="asi-premarket-h10",
         daemon=True,
     ).start()
+    threading.Thread(
+        target=_run_premarket_preliminary,
+        name="asi-premarket-preliminary",
+        daemon=True,
+    ).start()
+else:
+    # The legacy app copy calls every non-NO_TRADE state "locked". Install a
+    # narrow wording patch so PRELIMINARY remains visibly preliminary.
+    try:
+        import premarket_ui_patch
+        premarket_ui_patch.install()
+    except Exception:
+        pass
 
 
 # Targeted IHSG failover. Do not alter ordinary stock/API requests.
