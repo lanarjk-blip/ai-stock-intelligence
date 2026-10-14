@@ -3,10 +3,71 @@
 Publication quality is based on usable persisted coverage. A partial provider
 refresh is diagnostic only and must never block an otherwise healthy persisted
 dataset.
+
+This module is imported directly by ``worker_base.py``.  The production worker
+therefore uses it as a guaranteed bootstrap point for the H-10 and preliminary
+Pre-Market daemons instead of relying only on Python's optional sitecustomize
+startup hook.
 """
 from datetime import datetime, timezone
+import os
+import sys
+import threading
+import time
 
-GUARDRAIL_REVISION = "usable-v1852-r2"
+GUARDRAIL_REVISION = "usable-v1852-r3-premarket-bootstrap"
+
+
+def _run_h10_daemon():
+    """Launch the hard-deadline Pre-Market scheduler inside the real worker."""
+    try:
+        # Give worker_base.cycle() enough time to create engine_log first so the
+        # startup marker is visible in the production diagnostics table.
+        time.sleep(5)
+        import premarket_scheduler
+        premarket_scheduler.run_forever()
+    except Exception as exc:
+        print(f"[PREMARKET_H10] explicit worker bootstrap error: {exc!r}", flush=True)
+
+
+def _run_preliminary_daemon():
+    """Launch always-visible next-session candidates inside the real worker."""
+    try:
+        time.sleep(6)
+        import premarket_preliminary
+        premarket_preliminary.run_forever()
+    except Exception as exc:
+        print(f"[PREMARKET_PRELIMINARY] explicit worker bootstrap error: {exc!r}", flush=True)
+
+
+def _start_worker_premarket_daemons():
+    """Start each Pre-Market daemon exactly once in the production worker.
+
+    CI smoke tests also set AI_ENGINE_WORKER=1, so the argv guard prevents
+    background scheduling from leaking into inline validation processes.  The
+    thread-name guard also avoids duplicates when sitecustomize happens to run.
+    """
+    if os.environ.get("AI_ENGINE_WORKER") != "1":
+        return
+    if os.path.basename(str(sys.argv[0] or "")) != "worker_base.py":
+        return
+
+    live_names = {thread.name for thread in threading.enumerate()}
+    if "asi-premarket-h10" not in live_names:
+        threading.Thread(
+            target=_run_h10_daemon,
+            name="asi-premarket-h10",
+            daemon=True,
+        ).start()
+    if "asi-premarket-preliminary" not in live_names:
+        threading.Thread(
+            target=_run_preliminary_daemon,
+            name="asi-premarket-preliminary",
+            daemon=True,
+        ).start()
+
+
+_start_worker_premarket_daemons()
 
 
 def _ratio(a, b):
