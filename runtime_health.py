@@ -55,17 +55,23 @@ def _remote_state():
 def remote_runtime_health(now=None, max_age_seconds=None):
     required = external_runtime_expected()
     if not required:
-        return {
-            "required": False,
-            "ready": True,
-            "status": "LOCAL_RUNTIME",
-            "age_seconds": None,
-            "heartbeat_at": "",
-            "build": "",
-            "generation": "",
-            "pid": 0,
-            "reason": "external runtime not configured",
-        }
+        try:
+            import local_runtime_health
+            local = dict(local_runtime_health.health(now=now, max_age_seconds=max_age_seconds) or {})
+            local["required"] = True
+            return local
+        except Exception as exc:
+            return {
+                "required": True,
+                "ready": False,
+                "status": "LOCAL_RUNTIME_INVALID",
+                "age_seconds": None,
+                "heartbeat_at": "",
+                "build": "",
+                "generation": "",
+                "pid": 0,
+                "reason": f"local runtime guard failed: {exc}",
+            }
 
     cfg = _config()
     limit = int(

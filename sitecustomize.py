@@ -75,6 +75,7 @@ _WATCH = (
     "premarket_preliminary.py",
     "premarket_ui_patch.py",
     "runtime_health.py",
+    "local_runtime_health.py",
     "runtime_health_ui_patch.py",
     "persistent_bridge.py",
     "ui_replica.py",
@@ -112,6 +113,21 @@ def _watch_worker():
                 os.execv(sys.executable, [sys.executable, os.path.join(_BASE, "worker_base.py")])
 
 
+def _run_local_worker_heartbeat():
+    try:
+        import local_runtime_health
+        identity = dict(_RUNTIME_IDENTITY or {})
+        while True:
+            local_runtime_health.write_worker_heartbeat(
+                pid=os.getpid(),
+                generation=identity.get("generation", ""),
+                build=identity.get("build", ""),
+            )
+            time.sleep(30)
+    except Exception as exc:
+        print(f"[LOCAL_RUNTIME_HEALTH] heartbeat error: {exc!r}", flush=True)
+
+
 def _run_premarket_scheduler():
     try:
         time.sleep(3)
@@ -132,6 +148,7 @@ def _run_premarket_preliminary():
 
 if _IS_REAL_WORKER:
     threading.Thread(target=_watch_worker, name="asi-runtime-watchdog", daemon=True).start()
+    threading.Thread(target=_run_local_worker_heartbeat, name="asi-local-heartbeat", daemon=True).start()
     threading.Thread(target=_run_premarket_scheduler, name="asi-premarket-h10", daemon=True).start()
     threading.Thread(target=_run_premarket_preliminary, name="asi-premarket-preliminary", daemon=True).start()
 elif not _IS_RUNTIME_API and os.environ.get("AI_ENGINE_WORKER") != "1":
