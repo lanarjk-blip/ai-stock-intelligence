@@ -1,11 +1,14 @@
-"""Actionable Dynamic Opportunity UI for AI Stock Intelligence V1.8.43.
+"""Actionable Dynamic Opportunity UI.
 
-Keeps ranking separate from an actual buy condition. A high opportunity rank is
-not presented as a BUY unless state=ENTRY READY and entry_status=ACTIVE.
+V1.8.52 makes the user-facing Top Opportunity surface obey the production
+DATA_QUALITY publication gate. Bootstrap rows may still exist for diagnostics,
+but they must never look like a production Top-5 while the gate is blocked.
 """
 from __future__ import annotations
 
 import html
+import os
+import sqlite3
 import pandas as pd
 import streamlit as st
 
@@ -29,6 +32,37 @@ def _pct(value):
 def _num(value, digits=1):
     try:
         return f'{float(value):.{digits}f}'
+    except Exception:
+        return '—'
+
+
+def _quality_gate_state():
+    """Read the worker's persisted publication gate without importing app.py."""
+    db = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'db', 'market.db')
+    try:
+        con = sqlite3.connect(db, timeout=5)
+        rows = con.execute(
+            "SELECT key,value FROM state WHERE key IN "
+            "('data_quality_status','data_quality_collection_ratio','data_quality_ready_ratio','data_quality_reasons')"
+        ).fetchall()
+        con.close()
+        state = {str(k): str(v) for k, v in rows}
+        status = state.get('data_quality_status', '').upper()
+        return {
+            'known': bool(status),
+            'ready': status == 'READY',
+            'status': status or 'UNKNOWN',
+            'collection_ratio': state.get('data_quality_collection_ratio', ''),
+            'ready_ratio': state.get('data_quality_ready_ratio', ''),
+            'reasons': state.get('data_quality_reasons', ''),
+        }
+    except Exception:
+        return {'known': False, 'ready': False, 'status': 'UNKNOWN', 'collection_ratio': '', 'ready_ratio': '', 'reasons': ''}
+
+
+def _ratio_label(value):
+    try:
+        return f'{float(value) * 100:.1f}%'
     except Exception:
         return '—'
 
@@ -67,21 +101,27 @@ def _css():
 
 
 def render_actionable_dynamic(dyn, render_table=None, table_limit=None):
-    """Render semantic live cards plus the existing detailed data table.
-
-    Parameters
-    ----------
-    dyn: pandas.DataFrame
-        Dynamic opportunity rows from dynamic_engine.
-    render_table: callable | None
-        Existing app render_clickable_dataframe helper. If supplied, the full
-        detailed table remains available below the actionable cards.
-    table_limit: int | None
-        Optional number of rows shown in the detail table.
-    """
+    """Render production Top Opportunity only when DATA_QUALITY is READY."""
     _css()
+    quality = _quality_gate_state()
+    if quality['known'] and not quality['ready']:
+        collection = _ratio_label(quality.get('collection_ratio'))
+        ready = _ratio_label(quality.get('ready_ratio'))
+        st.warning(
+            f"🛡️ **DATA NOT READY • Top-5 produksi ditahan.** "
+            f"Collection coverage **{collection}**, ready-symbol coverage **{ready}**. "
+            "Kandidat bootstrap/diagnostik tidak ditampilkan sebagai rekomendasi."
+        )
+        if quality.get('reasons'):
+            st.caption('Quality gate: ' + quality['reasons'])
+        return
+
     if dyn is None or dyn.empty:
         st.info('Belum ada kandidat Dynamic Opportunity.')
+        return
+
+    if not quality['known']:
+        st.info('🛡️ Quality Gate belum memiliki status final. Top-5 ditahan sampai pemeriksaan data selesai.')
         return
 
     st.markdown(
