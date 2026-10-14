@@ -1,4 +1,4 @@
-name: V1.8.49 Worker Reliability Patch
+name: V1.8.50 Collector Contract Fix
 on:
   push:
     paths:
@@ -11,42 +11,71 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: fix-v1849-recover-tuple
+          ref: fix-v1850-collector-contract
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Install test dependencies
         run: python -m pip install -q -r requirements.txt pytest
-      - name: Apply recover tuple hotfix
+      - name: Apply V1.8.50 collector fix
         run: |
           python - <<'PY'
           from pathlib import Path
           p=Path('worker_base.py')
           s=p.read_text(encoding='utf-8')
-          old='''        if callable(recover):\n            df = recover(\n                ticker,\n                CFG["daily_period_days"],\n                CFG["daily_interval"],\n            )\n        else:'''
-          new='''        if callable(recover):\n            recovered = recover(\n                ticker,\n                CFG["daily_period_days"],\n                CFG["daily_interval"],\n            )\n            # fetch_chart_recover returns (dataframe, status, symbol, error).\n            # Keep compatibility if a future implementation returns only a dataframe.\n            df = recovered[0] if isinstance(recovered, tuple) else recovered\n        else:'''
-          if old not in s:
-              raise SystemExit('fetch_one recover anchor not found')
-          s=s.replace(old,new,1)
+          anchor='''# ============================================================\n# DATA COLLECTION\n# ============================================================\n\ndef fetch_one(ticker):'''
+          helper='''# ============================================================\n# DATA COLLECTION\n# ============================================================\n\ndef _recover_dataframe(value):\n    """Normalize fetch_chart_recover output to a DataFrame.\n\n    The recovery API currently returns (dataframe, status, symbol, error),\n    while older/future implementations may return a DataFrame directly.\n    Never allow tuple metadata to reach save_daily()/DataFrame.empty.\n    """\n    if isinstance(value, pd.DataFrame):\n        return value\n    if isinstance(value, tuple):\n        for item in value:\n            if isinstance(item, pd.DataFrame):\n                return item\n    raise TypeError(\n        f"fetch_chart_recover returned no DataFrame: {type(value).__name__}"\n    )\n\ndef fetch_one(ticker):'''
+          if '_recover_dataframe(value)' not in s:
+              if anchor not in s:
+                  raise SystemExit('data collection anchor not found')
+              s=s.replace(anchor,helper,1)
+          old='''            # fetch_chart_recover returns (dataframe, status, symbol, error).\n            # Keep compatibility if a future implementation returns only a dataframe.\n            df = recovered[0] if isinstance(recovered, tuple) else recovered'''
+          new='''            df = _recover_dataframe(recovered)'''
+          if old in s:
+              s=s.replace(old,new,1)
+          elif 'df = _recover_dataframe(recovered)' not in s:
+              raise SystemExit('recover normalization anchor not found')
           p.write_text(s,encoding='utf-8')
+
+          c=Path('config.json')
+          t=c.read_text(encoding='utf-8')
+          t=t.replace('"engine_version": "1.8.49"','"engine_version": "1.8.50"')
+          t=t.replace('"production_stabilization_version": "1.8.49"','"production_stabilization_version": "1.8.50"')
+          c.write_text(t,encoding='utf-8')
           PY
       - name: Compile
         run: python -m py_compile worker_base.py app.py
-      - name: Focused assertions
+      - name: Contract assertions
         run: |
           python - <<'PY'
-          import ast
+          import ast, json
           from pathlib import Path
+          import pandas as pd
           s=Path('worker_base.py').read_text(encoding='utf-8')
-          c=Path('config.json').read_text(encoding='utf-8')
           ast.parse(s)
-          assert 'recovered = recover(' in s
-          assert 'df = recovered[0] if isinstance(recovered, tuple) else recovered' in s
-          assert 'rows = app.save_daily(df, ticker)' in s
-          assert '"PRIORITY_SKIP"' in s
-          assert 'def cached_ihsg_available():' in s
-          assert '"engine_version": "1.8.49"' in c
-          print('V1.8.49 tuple hotfix assertions passed')
+          assert 'def _recover_dataframe(value):' in s
+          assert 'df = _recover_dataframe(recovered)' in s
+          assert 'df = recovered[0] if isinstance(recovered, tuple) else recovered' not in s
+          cfg=json.loads(Path('config.json').read_text(encoding='utf-8'))
+          assert cfg['engine_version']=='1.8.50'
+          assert cfg['production_stabilization_version']=='1.8.50'
+          # Exercise the exact return contract without importing Streamlit worker side effects.
+          mod=ast.parse(s)
+          fn=next(n for n in mod.body if isinstance(n,ast.FunctionDef) and n.name=='_recover_dataframe')
+          unit=ast.Module(body=[fn],type_ignores=[])
+          ns={'pd':pd}
+          exec(compile(unit,'worker_base.py','exec'),ns)
+          f=ns['_recover_dataframe']
+          df=pd.DataFrame({'close':[1.0]})
+          assert f((df,'DIRECT','TEST.JK','')) is df
+          assert f(df) is df
+          try:
+              f(('DIRECT','TEST.JK',''))
+          except TypeError as exc:
+              assert 'no DataFrame' in str(exc)
+          else:
+              raise AssertionError('invalid tuple must fail explicitly')
+          print('V1.8.50 collector contract assertions passed')
           PY
       - name: Regression tests
         run: python -m pytest -q test_batch1_live_engine.py test_mobile_ui_v1848.py
@@ -54,11 +83,11 @@ jobs:
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add worker_base.py
+          git add worker_base.py config.json
           git diff --cached --check
           if git diff --cached --quiet; then
-            echo 'No worker changes to commit'
+            echo 'No collector changes to commit'
           else
-            git commit -m 'Fix V1.8.49 recover tuple contract'
-            git push origin HEAD:fix-v1849-recover-tuple
+            git commit -m 'V1.8.50 harden collector recovery contract'
+            git push origin HEAD:fix-v1850-collector-contract
           fi
