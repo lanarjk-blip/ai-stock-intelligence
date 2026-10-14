@@ -1,0 +1,91 @@
+name: Local Runtime Consistency Guard
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/v1852_local_runtime_guard.yml'
+permissions:
+  contents: write
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Wire local heartbeat into worker startup and runtime health
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('sitecustomize.py')
+          s=p.read_text(encoding='utf-8')
+          if 'def _run_local_worker_heartbeat()' not in s:
+              anchor='''def _run_premarket_scheduler():\n'''
+              block='''def _run_local_worker_heartbeat():\n    try:\n        import local_runtime_health\n        identity = dict(_RUNTIME_IDENTITY or {})\n        while True:\n            local_runtime_health.write_worker_heartbeat(\n                pid=os.getpid(),\n                generation=identity.get("generation", ""),\n                build=identity.get("build", ""),\n            )\n            time.sleep(30)\n    except Exception as exc:\n        print(f"[LOCAL_RUNTIME_HEALTH] heartbeat error: {exc!r}", flush=True)\n\n\n'''
+              if anchor not in s: raise SystemExit('sitecustomize anchor missing')
+              s=s.replace(anchor,block+anchor,1)
+          line='''    threading.Thread(target=_watch_worker, name="asi-runtime-watchdog", daemon=True).start()\n'''
+          add='''    threading.Thread(target=_watch_worker, name="asi-runtime-watchdog", daemon=True).start()\n    threading.Thread(target=_run_local_worker_heartbeat, name="asi-local-heartbeat", daemon=True).start()\n'''
+          if 'name="asi-local-heartbeat"' not in s:
+              if line not in s: raise SystemExit('thread anchor missing')
+              s=s.replace(line,add,1)
+          if '"local_runtime_health.py",' not in s:
+              s=s.replace('    "runtime_health.py",\n','    "runtime_health.py",\n    "local_runtime_health.py",\n',1)
+          p.write_text(s,encoding='utf-8')
+
+          p=Path('runtime_health.py')
+          s=p.read_text(encoding='utf-8')
+          old='''    if not required:\n        return {\n            "required": False,\n            "ready": True,\n            "status": "LOCAL_RUNTIME",\n            "age_seconds": None,\n            "heartbeat_at": "",\n            "build": "",\n            "generation": "",\n            "pid": 0,\n            "reason": "external runtime not configured",\n        }\n'''
+          new='''    if not required:\n        try:\n            import local_runtime_health\n            local = dict(local_runtime_health.health(now=now, max_age_seconds=max_age_seconds) or {})\n            local["required"] = True\n            return local\n        except Exception as exc:\n            return {\n                "required": True,\n                "ready": False,\n                "status": "LOCAL_RUNTIME_INVALID",\n                "age_seconds": None,\n                "heartbeat_at": "",\n                "build": "",\n                "generation": "",\n                "pid": 0,\n                "reason": f"local runtime guard failed: {exc}",\n            }\n'''
+          if old not in s and 'import local_runtime_health' not in s:
+              raise SystemExit('runtime_health local-mode anchor missing')
+          if old in s: s=s.replace(old,new,1)
+          p.write_text(s,encoding='utf-8')
+          PY
+      - name: Test freshness and build mismatch behavior
+        run: |
+          python -m py_compile local_runtime_health.py runtime_health.py sitecustomize.py
+          python - <<'PY'
+          from datetime import datetime, timezone, timedelta
+          import os, sqlite3, tempfile
+          import local_runtime_health as l
+
+          original=l.DB
+          td=tempfile.mkdtemp(); l.DB=os.path.join(td,'market.db')
+          try:
+              missing=l.health()
+              assert missing['ready'] is False and missing['status']=='LOCAL_RUNTIME_MISSING', missing
+              l.write_worker_heartbeat(pid=123,generation='test',build='R22')
+              good=l.health()
+              print('good=',good)
+              assert good['ready'] is True and good['status']=='LOCAL_RUNTIME_READY', good
+              con=sqlite3.connect(l.DB)
+              con.execute("UPDATE state SET value='deadbeef' WHERE key='local_worker_source_fingerprint'")
+              con.commit(); con.close()
+              mismatch=l.health()
+              print('mismatch=',mismatch)
+              assert mismatch['ready'] is False and mismatch['status']=='LOCAL_BUILD_MISMATCH', mismatch
+              l.write_worker_heartbeat(pid=123,generation='test',build='R22')
+              old=(datetime.now(timezone.utc)-timedelta(seconds=400)).isoformat()
+              con=sqlite3.connect(l.DB)
+              con.execute("UPDATE state SET value=? WHERE key='local_worker_heartbeat_at'",(old,))
+              con.commit(); con.close()
+              stale=l.health(max_age_seconds=180)
+              print('stale=',stale)
+              assert stale['ready'] is False and stale['status']=='LOCAL_RUNTIME_STALE', stale
+          finally:
+              l.DB=original
+          print('LOCAL RUNTIME GUARD PASSED')
+          PY
+      - name: Commit guard wiring
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add sitecustomize.py runtime_health.py
+          git diff --cached --check
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Block actionable UI when local worker is stale or mismatched'
+          git push origin HEAD:main
