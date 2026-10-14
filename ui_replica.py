@@ -27,7 +27,7 @@ TABLE_SPECS = {
     "alert_history": (500, "id DESC"),
     "outlook": (10, "id ASC"),
     "premarket_evaluations": (500, "market_date DESC, ticker ASC"),
-    "recommendation_runs": (300, "generated_at DESC"),
+    "recommendation_runs": (300, "created_at DESC"),
     "recommendation_history": (2500, "id DESC"),
     "shadow_positions": (1000, "id DESC"),
     "opening_confirmation": (300, "market_date DESC, ticker ASC"),
@@ -96,30 +96,42 @@ def ensure_remote_schema(con):
         )""")
 
 
+def _read_table(con, table, limit, order_by):
+    columns = _table_columns(con, table)
+    try:
+        rows = con.execute(
+            f'SELECT * FROM "{table}" ORDER BY {order_by} LIMIT ?',
+            (int(limit),),
+        ).fetchall()
+    except sqlite3.Error:
+        # Schema drift in one legacy table must not take down the whole UI.
+        rows = con.execute(
+            f'SELECT * FROM "{table}" LIMIT ?',
+            (int(limit),),
+        ).fetchall()
+    clean_rows = []
+    for row in rows:
+        clean = {str(k): _safe_value(v) for k, v in dict(row).items()}
+        if table == "engine_log" and "detail" in clean:
+            clean["detail"] = _sanitize_log_detail(clean.get("detail"))
+        clean_rows.append(clean)
+    return {"columns": columns, "rows": clean_rows}
+
+
 def read_local(db_path, db_dir):
     tables = {}
+    table_errors = {}
     if os.path.exists(db_path):
         con = sqlite3.connect(db_path, timeout=20)
         con.row_factory = sqlite3.Row
         try:
             for table, (limit, order_by) in TABLE_SPECS.items():
-                if not _table_exists(con, table):
-                    continue
-                columns = _table_columns(con, table)
-                rows = con.execute(
-                    f'SELECT * FROM "{table}" ORDER BY {order_by} LIMIT ?',
-                    (int(limit),),
-                ).fetchall()
-                clean_rows = []
-                for row in rows:
-                    clean = {str(k): _safe_value(v) for k, v in dict(row).items()}
-                    if table == "engine_log" and "detail" in clean:
-                        clean["detail"] = _sanitize_log_detail(clean.get("detail"))
-                    clean_rows.append(clean)
-                tables[table] = {
-                    "columns": columns,
-                    "rows": clean_rows,
-                }
+                try:
+                    if not _table_exists(con, table):
+                        continue
+                    tables[table] = _read_table(con, table, limit, order_by)
+                except Exception as exc:
+                    table_errors[table] = f"{type(exc).__name__}: {exc}"[:300]
         finally:
             con.close()
 
@@ -133,7 +145,7 @@ def read_local(db_path, db_dir):
                 files[name] = json.load(fh)
         except Exception:
             continue
-    return {"tables": tables, "files": files}
+    return {"tables": tables, "files": files, "errors": table_errors}
 
 
 def sync_to_remote(con, db_path, db_dir, bridge_version):
@@ -165,6 +177,7 @@ def sync_to_remote(con, db_path, db_dir, bridge_version):
     return {
         "tables": len(replica["tables"]),
         "files": len(replica["files"]),
+        "errors": replica.get("errors") or {},
     }
 
 
@@ -199,20 +212,24 @@ def write_local(replica, db_path, db_dir):
 
     con = sqlite3.connect(db_path, timeout=30)
     written_tables = 0
+    table_errors = {}
     try:
         for table, payload in tables.items():
             if table not in TABLE_SPECS:
                 continue
-            payload = payload or {}
-            columns = [str(c) for c in (payload.get("columns") or [])]
-            rows = payload.get("rows") or []
-            if not columns and rows:
-                columns = list(rows[0].keys())
-            if not columns:
-                continue
-            frame = pd.DataFrame(rows, columns=columns)
-            frame.to_sql(table, con, if_exists="replace", index=False)
-            written_tables += 1
+            try:
+                payload = payload or {}
+                columns = [str(c) for c in (payload.get("columns") or [])]
+                rows = payload.get("rows") or []
+                if not columns and rows:
+                    columns = list(rows[0].keys())
+                if not columns:
+                    continue
+                frame = pd.DataFrame(rows, columns=columns)
+                frame.to_sql(table, con, if_exists="replace", index=False)
+                written_tables += 1
+            except Exception as exc:
+                table_errors[table] = f"{type(exc).__name__}: {exc}"[:300]
         con.commit()
     finally:
         con.close()
@@ -238,4 +255,8 @@ def write_local(replica, db_path, db_dir):
             except OSError:
                 pass
 
-    return {"tables": written_tables, "files": written_files}
+    return {
+        "tables": written_tables,
+        "files": written_files,
+        "errors": table_errors,
+    }
