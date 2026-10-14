@@ -9,6 +9,9 @@ on:
       - 'dynamic_engine.py'
       - 'dynamic_opportunity_ui.py'
       - 'sitecustomize.py'
+      - 'premarket_scheduler.py'
+      - 'premarket_preliminary.py'
+      - 'premarket_ui_patch.py'
       - 'config.json'
       - 'requirements.txt'
       - 'tests/**'
@@ -39,6 +42,11 @@ jobs:
           assert cfg['data_quality_gate_enabled'] is True
           worker=Path('worker_base.py').read_text(encoding='utf-8')
           assert 'DATA_QUALITY' in worker and 'accuracy_guardrails' in worker
+          guard=Path('accuracy_guardrails.py').read_text(encoding='utf-8')
+          assert 'asi-premarket-h10' in guard
+          assert 'asi-premarket-preliminary' in guard
+          assert '_start_worker_premarket_daemons' in guard
+          assert 'worker_base.py' in guard
           ui=Path('dynamic_opportunity_ui.py').read_text(encoding='utf-8')
           assert 'DATA NOT READY' in ui and 'mobile_ui_version' in ui
           dynamic=Path('dynamic_engine.py').read_text(encoding='utf-8')
@@ -48,10 +56,14 @@ jobs:
           assert 'dynamic_engine.py' in watchdog
           assert 'query2.finance.yahoo.com' in watchdog
           assert 'primary_error' in watchdog
-          print('main production contract OK: V1.8.52')
+          scheduler=Path('premarket_scheduler.py').read_text(encoding='utf-8')
+          preliminary=Path('premarket_preliminary.py').read_text(encoding='utf-8')
+          assert '08:50' in scheduler and 'H10_FINAL' in scheduler
+          assert 'PRELIMINARY' in preliminary and 'publish_preliminary' in preliminary
+          print('main production contract OK: V1.8.52 + explicit Pre-Market daemons')
           PY
       - name: Compile
-        run: python -m py_compile app.py worker_base.py accuracy_guardrails.py dynamic_engine.py dynamic_opportunity_ui.py sitecustomize.py
+        run: python -m py_compile app.py worker_base.py accuracy_guardrails.py dynamic_engine.py dynamic_opportunity_ui.py sitecustomize.py premarket_scheduler.py premarket_preliminary.py premarket_ui_patch.py
       - name: Diagnose live Streamlit endpoint
         run: |
           set +e
