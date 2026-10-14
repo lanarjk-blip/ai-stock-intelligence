@@ -1,11 +1,12 @@
-"""Production accuracy guardrails for AI Stock Intelligence.
+"""Production accuracy guardrails for AI Stock Intelligence V1.8.52.
 
-The engine must not publish confident recommendations when the underlying
-market dataset is incomplete or stale. Publication quality is based primarily
-on usable persisted coverage, not on how many symbols happened to refresh in
-one provider cycle.
+Publication quality is based on usable persisted coverage. A partial provider
+refresh is diagnostic only and must never block an otherwise healthy persisted
+dataset.
 """
 from datetime import datetime, timezone
+
+GUARDRAIL_REVISION = "usable-v1852-r2"
 
 
 def _ratio(a, b):
@@ -21,15 +22,10 @@ def evaluate_data_quality(*, universe_count, collected_ok, ready_symbols,
                           min_ready_ratio=0.70,
                           min_price_rows=5000,
                           max_age_hours=8.0):
-    """Return the publication gate plus diagnostics.
+    """Return publication gate plus diagnostics.
 
-    ``collection_ratio`` is retained as a refresh-health diagnostic. It is not
-    by itself a publication blocker because providers can return only a subset
-    in a cycle while a broad, valid persisted dataset is still available.
-
-    ``ready_ratio`` measures usable symbols in persisted storage and is the
-    coverage criterion for publishing full-universe recommendations. Freshness
-    and minimum row count remain mandatory.
+    Fresh collection coverage is intentionally warning-only. Blocking criteria
+    are usable persisted-symbol coverage, row count and data freshness.
     """
     universe_count = max(int(universe_count or 0), 0)
     collected_ok = max(int(collected_ok or 0), 0)
@@ -60,10 +56,7 @@ def evaluate_data_quality(*, universe_count, collected_ok, ready_symbols,
             current = now or datetime.now(timezone.utc)
             if current.tzinfo is None:
                 current = current.replace(tzinfo=timezone.utc)
-            age_hours = max(
-                0.0,
-                (current.astimezone(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds() / 3600.0,
-            )
+            age_hours = max(0.0, (current.astimezone(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds() / 3600.0)
             if age_hours > float(max_age_hours):
                 reasons.append(f"collection age {age_hours:.1f}h > {float(max_age_hours):.1f}h")
         except Exception:
@@ -73,6 +66,7 @@ def evaluate_data_quality(*, universe_count, collected_ok, ready_symbols,
 
     ready = not reasons
     return {
+        "revision": GUARDRAIL_REVISION,
         "ready": ready,
         "status": "READY" if ready else "DATA_NOT_READY",
         "collection_ratio": collection_ratio,

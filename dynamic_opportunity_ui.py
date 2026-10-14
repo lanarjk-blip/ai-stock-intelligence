@@ -1,16 +1,53 @@
 """Actionable Dynamic Opportunity UI.
 
 V1.8.52 makes the user-facing Top Opportunity surface obey the production
-DATA_QUALITY publication gate. Bootstrap rows may still exist for diagnostics,
-but they must never look like a production Top-5 while the gate is blocked.
+DATA_QUALITY publication gate. It also normalizes stale hard-coded UI version
+labels to the version declared by config.json while the legacy app shell is
+being retired.
 """
 from __future__ import annotations
 
 import html
+import json
 import os
 import sqlite3
 import pandas as pd
 import streamlit as st
+
+
+def _install_runtime_version_patch():
+    """Replace stale V1.8.48 labels with the configured runtime version."""
+    try:
+        cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+        with open(cfg_path, 'r', encoding='utf-8') as fh:
+            cfg = json.load(fh)
+        version = str(cfg.get('mobile_ui_version') or cfg.get('engine_version') or '1.8.52')
+        wanted = f'AI Stock Intelligence V{version}'
+
+        original_title = st.title
+        original_page_config = st.set_page_config
+
+        if not getattr(original_title, '_asi_v1852_patch', False):
+            def title(value, *args, **kwargs):
+                if isinstance(value, str) and value.startswith('📈 AI Stock Intelligence V'):
+                    value = f'📈 {wanted}'
+                return original_title(value, *args, **kwargs)
+            title._asi_v1852_patch = True
+            st.title = title
+
+        if not getattr(original_page_config, '_asi_v1852_patch', False):
+            def set_page_config(*args, **kwargs):
+                if isinstance(kwargs.get('page_title'), str) and kwargs['page_title'].startswith('AI Stock Intelligence V'):
+                    kwargs['page_title'] = wanted
+                return original_page_config(*args, **kwargs)
+            set_page_config._asi_v1852_patch = True
+            st.set_page_config = set_page_config
+    except Exception:
+        # Version normalization must never make the dashboard unavailable.
+        pass
+
+
+_install_runtime_version_patch()
 
 
 def _text(value, default='—'):
