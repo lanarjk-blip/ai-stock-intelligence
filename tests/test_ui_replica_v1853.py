@@ -2,7 +2,7 @@ import json
 import sqlite3
 
 
-def test_ui_replica_whitelist_and_log_redaction(tmp_path):
+def test_ui_replica_whitelist_schema_drift_and_log_redaction(tmp_path):
     import ui_replica
 
     source = tmp_path / "source.db"
@@ -11,10 +11,25 @@ def test_ui_replica_whitelist_and_log_redaction(tmp_path):
         ticker TEXT, rank INTEGER, opportunity_score REAL, state TEXT
     )""")
     con.execute("INSERT INTO dynamic_opportunities VALUES('BBCA',1,88.5,'MONITOR')")
+
     con.execute("""CREATE TABLE recommendation_history (
         id INTEGER, generated_at TEXT, ticker TEXT, recommendation TEXT
     )""")
     con.execute("INSERT INTO recommendation_history VALUES(1,'2026-10-15T00:00:00Z','BBCA','WAIT')")
+
+    # Production recommendation_runs uses created_at, not generated_at.
+    con.execute("""CREATE TABLE recommendation_runs (
+        run_id TEXT, created_at TEXT, market_date TEXT, source_phase TEXT
+    )""")
+    con.execute(
+        "INSERT INTO recommendation_runs VALUES('run-1','2026-10-15T00:01:00Z','2026-10-15','full-universe')"
+    )
+
+    # Deliberately omit the configured ORDER BY id column. Replica must fall
+    # back to an unordered bounded read instead of dropping every other table.
+    con.execute("CREATE TABLE outlook (market_status TEXT, summary TEXT)")
+    con.execute("INSERT INTO outlook VALUES('CLOSED','schema drift fallback works')")
+
     con.execute("""CREATE TABLE engine_log (
         id INTEGER, ts TEXT, phase TEXT, status TEXT, detail TEXT
     )""")
@@ -22,16 +37,24 @@ def test_ui_replica_whitelist_and_log_redaction(tmp_path):
         "INSERT INTO engine_log VALUES(1,'2026-10-15T00:00:00Z','TEST','ERROR',?)",
         ("authorization=BearerSecret token=abc123 password=hunter2 harmless=yes",),
     )
+
+    # Raw market history must never enter the public replica.
     con.execute("CREATE TABLE prices (ticker TEXT,date TEXT,close REAL)")
     con.execute("INSERT INTO prices VALUES('BBCA','2026-10-15',100)")
     con.commit()
     con.close()
 
     replica = ui_replica.read_local(str(source), str(tmp_path))
+    assert replica["errors"] == {}
     assert "dynamic_opportunities" in replica["tables"]
     assert "recommendation_history" in replica["tables"]
+    assert "recommendation_runs" in replica["tables"]
+    assert replica["tables"]["recommendation_runs"]["rows"][0]["run_id"] == "run-1"
+    assert replica["tables"]["recommendation_runs"]["rows"][0]["created_at"] == "2026-10-15T00:01:00Z"
+    assert replica["tables"]["outlook"]["rows"][0]["market_status"] == "CLOSED"
     assert "engine_log" in replica["tables"]
     assert "prices" not in replica["tables"]
+
     detail = replica["tables"]["engine_log"]["rows"][0]["detail"]
     assert "BearerSecret" not in detail
     assert "abc123" not in detail
@@ -40,16 +63,22 @@ def test_ui_replica_whitelist_and_log_redaction(tmp_path):
 
     target = tmp_path / "target.db"
     model_validation = tmp_path / "model_validation.json"
-    model_validation.write_text(json.dumps({"summary": [{"metric": "accuracy", "value": 0.6}]}), encoding="utf-8")
+    model_validation.write_text(
+        json.dumps({"summary": [{"metric": "accuracy", "value": 0.6}]}),
+        encoding="utf-8",
+    )
     replica = ui_replica.read_local(str(source), str(tmp_path))
     result = ui_replica.write_local(replica, str(target), str(tmp_path / "target_files"))
-    assert result["tables"] >= 3
+    assert result["errors"] == {}
+    assert result["tables"] >= 5
     assert result["files"] == 1
 
     con = sqlite3.connect(target)
     try:
         assert con.execute("SELECT ticker FROM dynamic_opportunities").fetchone()[0] == "BBCA"
         assert con.execute("SELECT ticker FROM recommendation_history").fetchone()[0] == "BBCA"
+        assert con.execute("SELECT run_id FROM recommendation_runs").fetchone()[0] == "run-1"
+        assert con.execute("SELECT summary FROM outlook").fetchone()[0] == "schema drift fallback works"
     finally:
         con.close()
 
