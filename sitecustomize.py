@@ -1,10 +1,8 @@
-"""Runtime consistency watchdog for AI Stock Intelligence V1.8.52.
+"""Runtime consistency and narrow provider recovery for V1.8.52.
 
-The background worker is a detached long-running process. Streamlit can reload
-application source without replacing that child process, leaving an old worker
-running new config. When this module is loaded in worker mode it watches the
-runtime-critical files and replaces the worker process when their fingerprint
-changes.
+The detached worker self-reloads when runtime-critical source changes.  IHSG
+also gets the same Yahoo query1 -> query2 failover already used by equity
+collection so missing market context cannot silently collapse JST training.
 """
 from __future__ import annotations
 
@@ -21,6 +19,7 @@ _WATCH = (
     "config.json",
     "app.py",
     "dynamic_opportunity_ui.py",
+    "sitecustomize.py",
 )
 
 
@@ -51,3 +50,50 @@ def _watch_worker():
 
 if os.environ.get("AI_ENGINE_WORKER") == "1":
     threading.Thread(target=_watch_worker, name="asi-runtime-watchdog", daemon=True).start()
+
+
+# Targeted IHSG failover.  Do not alter ordinary stock/API requests.
+try:
+    import requests
+
+    _ORIGINAL_GET = requests.get
+    _IHSG_PATHS = ("/v8/finance/chart/%5EJKSE", "/v8/finance/chart/^JKSE")
+
+    def _usable_chart_response(response):
+        try:
+            if response is None or int(response.status_code) >= 400:
+                return False
+            payload = response.json() or {}
+            result = (payload.get("chart") or {}).get("result") or []
+            if not result:
+                return False
+            first = result[0] or {}
+            timestamps = first.get("timestamp") or []
+            quotes = ((first.get("indicators") or {}).get("quote") or [])
+            return bool(timestamps and quotes)
+        except Exception:
+            return False
+
+    def _get_with_ihsg_failover(url, *args, **kwargs):
+        response = _ORIGINAL_GET(url, *args, **kwargs)
+        text_url = str(url)
+        is_query1_ihsg = (
+            "query1.finance.yahoo.com" in text_url
+            and any(path in text_url for path in _IHSG_PATHS)
+        )
+        if is_query1_ihsg and not _usable_chart_response(response):
+            fallback_url = text_url.replace(
+                "query1.finance.yahoo.com", "query2.finance.yahoo.com", 1
+            )
+            try:
+                fallback = _ORIGINAL_GET(fallback_url, *args, **kwargs)
+                if _usable_chart_response(fallback):
+                    return fallback
+            except Exception:
+                pass
+        return response
+
+    requests.get = _get_with_ihsg_failover
+except Exception:
+    # Network recovery must never prevent interpreter startup.
+    pass
