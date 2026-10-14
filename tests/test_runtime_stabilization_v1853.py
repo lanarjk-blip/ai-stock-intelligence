@@ -113,6 +113,18 @@ def test_persistent_bridge_local_restore_roundtrip(tmp_path, monkeypatch):
         con.close()
 
 
+def test_runtime_api_filters_sensitive_state_keys():
+    import runtime_api
+
+    assert runtime_api._safe_state_key("data_quality_status") is True
+    assert runtime_api._safe_state_key("snapshot_source") is True
+    for key in (
+        "api_token", "client_secret", "db_password", "service_account_json",
+        "private_key", "api_key", "whatsapp_access", "fcm_device_token",
+    ):
+        assert runtime_api._safe_state_key(key) is False, key
+
+
 def test_runtime_api_and_render_blueprint_contract():
     api = Path("runtime_api.py").read_text(encoding="utf-8")
     blueprint = Path("render.yaml").read_text(encoding="utf-8")
@@ -123,6 +135,8 @@ def test_runtime_api_and_render_blueprint_contract():
 
     assert '@app.get("/health")' in api
     assert '@app.get("/bootstrap")' in api
+    assert "_SENSITIVE_STATE_PARTS" in api
+    assert "if _safe_state_key(k)" in api
     assert "def restore_local_from_api" in bridge
     assert "runtime_api_url" in bridge
     assert "type: worker" in blueprint
