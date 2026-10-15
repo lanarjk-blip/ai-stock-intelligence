@@ -80,7 +80,7 @@ jobs:
           con=sqlite3.connect(db)
           con.execute("INSERT OR REPLACE INTO top5_live_state(singleton,updated_at,tickers_json) VALUES(1,'x',?)",(json.dumps(['OLD']),))
           con.execute("INSERT OR REPLACE INTO live_action_state(ticker,updated_at,state,entry_status,is_entry_ready) VALUES('OLD','x','ENTRY READY','ACTIVE',1)")
-          con.execute("INSERT INTO top5_timeline(event_at_utc,event_at_wib,event_type,ticker,reason,notification_status) VALUES('x','x','ENTRY_READY','OLD','x','PENDING')")
+          con.execute("INSERT INTO top5_timeline(event_at_utc,event_at_wib,event_type,ticker,old_top5_json,new_top5_json,reason,notification_status) VALUES('x','x','ENTRY_READY','OLD',?,?,?,'PENDING')",(json.dumps(['OLD']),json.dumps(['OLD']),'x'))
           con.commit(); con.close()
           result=top5_timeline.record_top5(db,pd.DataFrame(),source_phase='full-universe',config={})
           assert result['status']=='CLEARED_EMPTY', result
