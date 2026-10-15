@@ -18,6 +18,7 @@ import premarket_intelligence
 import premarket_evaluation
 import premarket_explain
 import closing_overnight
+import hold_engine
 import market_session
 import accuracy_guardrails
 
@@ -1068,12 +1069,24 @@ def analyze_and_publish(
         except Exception:
             log("HISTORY", "ERROR", traceback.format_exc()[-1800:])
 
-        # V1.8.41 Stage 2: Pre-Market is separate from live Dynamic Opportunity.
+        # PRELIM-R2/H10-R1 are the sole Pre-Market writers. The legacy full-universe
+        # lock used to race the 08:50 scheduler and could expose an early LOCKED row.
+        log("PREMARKET", "SCHEDULER_OWNED", "legacy full-universe lock disabled; PRELIM-R2/H10-R1 own writes")
+
+    # Hold Horizon intelligence is refreshed only from the authoritative full-universe
+    # result and receives the actual IDX session phase, not the scan-source label.
+    if str(source).lower() == "full-universe":
         try:
-            pre = lock_premarket_picks(res, source_phase=source)
-            app.state_set("premarket_status", pre.get("status", ""))
+            session = market_session.session_status(CFG)
+            hold_phase = str(session.get("status") or "CLOSED").upper()
+            hold = hold_engine.update(res, phase=hold_phase)
+            app.state_set("hold_intelligence_status", "READY" if hold is not None and not hold.empty else "NO_CANDIDATE")
+            log("HOLD", "UPDATED" if hold is not None and not hold.empty else "NO_CANDIDATE",
+                f"phase={hold_phase} candidates={0 if hold is None else len(hold)}")
         except Exception:
-            log("PREMARKET", "ERROR", traceback.format_exc()[-1800:])
+            app.state_set("hold_intelligence_status", "ERROR")
+            app.state_set("hold_intelligence_error", traceback.format_exc()[-900:])
+            log("HOLD", "ERROR", traceback.format_exc()[-1800:])
 
     # V1.8.44: strict next-session Closing / Overnight Intelligence.
     if str(source).lower() == "full-universe":

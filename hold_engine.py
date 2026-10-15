@@ -83,14 +83,14 @@ def _hold_score(r,ts,dc,market_ctx):
     edge=float(ts['edge'])*100; tconf=float(ts['confidence'])*100
     trend=dc['trend']; trend_bonus=5 if trend=='BULLISH' else (-5 if trend=='BEARISH' else 0)
     alignment,regime_effect=_ihsg_effect(r,market_ctx)
-    risk_pen={'LOW':0,'MEDIUM':4,'HIGH':9}.get(str(r.risk),6)
+    risk_pen={'LOW':0,'MEDIUM':4,'HIGH':9,'EXTREME':14}.get(str(r.risk or '').upper().strip(),6)
     persistence=0.42*pup+0.18*conf+0.14*rel+0.10*(50+edge)+0.08*tconf+0.08*alignment+trend_bonus+regime_effect-risk_pen
     return float(np.clip(persistence,0,100))
 
 def _overnight(r,ts,dc,phase,market_ctx):
     pup=float(r.jst_p_up or .5); pdown=float(r.jst_p_down or .5); conf=float(r.jst_confidence or 0)
     rel=float(r.relative_percentile or 0); ai=float(r.ai_score or 0)
-    edge=float(ts['edge']); risk=str(r.risk)
+    edge=float(ts['edge']); risk=str(r.risk or '').upper().strip()
     score=50 + (pup-pdown)*35 + (ai-50)*0.25 + (rel-.5)*20 + edge*30
     if dc['trend']=='BULLISH': score+=4
     elif dc['trend']=='BEARISH': score-=4
@@ -109,16 +109,16 @@ def _overnight(r,ts,dc,phase,market_ctx):
     return label,bias,score
 
 def _state(score,r,overnight):
-    dec=str(r.decision)
+    dec=str(r.decision or '').upper().strip()
     if overnight=='INVALIDATING': return 'REDUCE WATCH'
-    if score>=70 and dec in ('BUY','NEAR ENTRY','WATCH'): return 'HOLD CANDIDATE'
+    if score>=70 and dec in ('BUY','STRONG_BUY','NEAR ENTRY','WATCH'): return 'HOLD CANDIDATE'
     if score>=58: return 'HOLD / MONITOR'
     return 'REVIEW'
 
 def update(res,phase='CLOSED'):
     ensure_tables()
     if res is None or res.empty: return pd.DataFrame()
-    c=res.copy(); c=c[~c.decision.isin(['SELL/AVOID'])].copy()
+    c=res.copy(); decisions=c.decision.astype(str).str.upper().str.strip(); c=c[~decisions.isin({'SELL','SELL/AVOID','AVOID','STRONG_SELL','EXIT'})].copy()
     c=c[pd.to_numeric(c.ai_score,errors='coerce').fillna(0)>=45]
     c=c[pd.to_numeric(c.relative_percentile,errors='coerce').fillna(0)>=0.70]
     if c.empty: return pd.DataFrame()
