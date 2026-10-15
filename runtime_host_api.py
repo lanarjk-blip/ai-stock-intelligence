@@ -2,8 +2,9 @@
 
 The canonical runtime_api keeps /health diagnostic and HTTP-200 friendly so the
 UI can explain stale/warming engine states. The single-service runtime needs a
-stricter Render health check: after cold-start grace, a missing/stale/stalled
-worker must make the service unready so Render restarts worker and API together.
+stricter Render health check: a missing/stale/stalled worker must eventually
+make the service unready so Render restarts worker and API together, while a
+cold first cycle that is still making fresh progress must not be restart-looped.
 """
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ from fastapi import HTTPException
 import runtime_api
 
 app = runtime_api.app
-READY_VERSION = "RUNTIME-READY-R1"
+READY_VERSION = "RUNTIME-READY-R2"
 _STARTED_MONOTONIC = time.monotonic()
 
 
@@ -29,6 +30,21 @@ def startup_grace_seconds(env: Dict[str, str] | None = None) -> int:
     return max(60, min(value, 3600))
 
 
+def _progressing_warmup(status: str, engine: Dict[str, Any]) -> bool:
+    """True only for a live worker whose first cycle is still making progress."""
+    if status not in {"ENGINE_WARMING", "RUNTIME_ENGINE_WARMING"}:
+        return False
+    engine_status = str(engine.get("status") or "")
+    if engine_status not in {"ENGINE_WARMING", "RUNTIME_ENGINE_WARMING"}:
+        return False
+    try:
+        age = float(engine.get("engine_progress_age_seconds"))
+        limit = float(engine.get("engine_progress_max_age_seconds"))
+    except (TypeError, ValueError):
+        return False
+    return age >= 0 and limit > 0 and age <= limit
+
+
 def readiness_decision(
     health_payload: Dict[str, Any] | None,
     *,
@@ -39,17 +55,22 @@ def readiness_decision(
     status = str(payload.get("status") or "RUNTIME_INVALID")
     engine = dict(payload.get("engine") or {})
     engine_status = str(engine.get("status") or "")
-    ready = bool(payload.get("ok"))
+    engine_ready = bool(payload.get("ok"))
+    progress_warmup = bool((not engine_ready) and _progressing_warmup(status, engine))
+    deployment_ready = bool(engine_ready or progress_warmup)
+
     warming = status == "RUNTIME_MISSING" or engine_status in {
         "ENGINE_WARMING",
         "RUNTIME_ENGINE_WARMING",
     }
     within_grace = float(elapsed_seconds) < float(grace_seconds)
-    grace_active = bool((not ready) and warming and within_grace)
+    grace_active = bool((not deployment_ready) and warming and within_grace)
     remaining = max(0, int(float(grace_seconds) - float(elapsed_seconds))) if grace_active else 0
     return {
         **payload,
-        "ready": ready,
+        "engine_ready": engine_ready,
+        "ready": deployment_ready,
+        "progressing_warmup": progress_warmup,
         "readiness_version": READY_VERSION,
         "startup_grace": grace_active,
         "startup_grace_seconds": int(grace_seconds),
@@ -69,6 +90,8 @@ def ready():
         if elapsed < grace:
             return {
                 "ready": False,
+                "engine_ready": False,
+                "progressing_warmup": False,
                 "status": "RUNTIME_API_WARMING",
                 "readiness_version": READY_VERSION,
                 "startup_grace": True,
@@ -80,6 +103,8 @@ def ready():
             status_code=503,
             detail={
                 "ready": False,
+                "engine_ready": False,
+                "progressing_warmup": False,
                 "status": "RUNTIME_API_UNAVAILABLE",
                 "readiness_version": READY_VERSION,
                 "startup_grace": False,
