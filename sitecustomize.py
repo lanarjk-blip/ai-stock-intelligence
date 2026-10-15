@@ -77,6 +77,21 @@ try:
 except Exception as exc:
     print(f"[PERSIST_BRIDGE] startup degraded: {exc!r}", flush=True)
 
+# Persistence restore can overlay old local_worker_* state from a checkpoint or
+# control plane. Re-assert this process identity synchronously before UI health
+# checks or background heartbeat threads rely on that state.
+if _IS_REAL_WORKER:
+    try:
+        import local_runtime_health
+        _identity = dict(_RUNTIME_IDENTITY or {})
+        local_runtime_health.write_worker_heartbeat(
+            pid=os.getpid(),
+            generation=_identity.get("generation", ""),
+            build=_identity.get("build", ""),
+        )
+    except Exception as exc:
+        print(f"[LOCAL_RUNTIME_HEALTH] post-restore heartbeat error: {exc!r}", flush=True)
+
 _WATCH = (
     "worker_base.py",
     "accuracy_guardrails.py",
