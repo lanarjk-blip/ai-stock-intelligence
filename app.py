@@ -1909,7 +1909,17 @@ def render_premarket_panel():
     recovery=_ensure_premarket_on_open()
     run=read_premarket_run()
     st.subheader('🌅 Pre-Market Top Picks')
-    st.caption('Runtime recovery R22.2 • health-gated on-open preliminary • H-10 final 08:50 WIB')
+    try:
+        import runtime_health
+        _runtime_health=runtime_health.remote_runtime_health()
+        _runtime_status=str(_runtime_health.get('status') or 'UNKNOWN')
+        _runtime_fp=str(_runtime_health.get('expected_fingerprint') or _runtime_health.get('worker_fingerprint') or '')[:10] or 'unknown'
+        _runtime_build=str(_runtime_health.get('build') or CFGD.get('mobile_ui_version','1.8.52'))
+    except Exception:
+        _runtime_status='UNKNOWN'
+        _runtime_fp='unknown'
+        _runtime_build=str(CFGD.get('mobile_ui_version','1.8.52'))
+    st.caption(f'Runtime {_runtime_build} • {_runtime_status} • fp {_runtime_fp} • on-open health-gated • H-10 final 08:50 WIB')
     st.caption(
         'Daftar ini adalah pilihan yang dikunci untuk sesi berikutnya. '
         'Setelah LOCKED, daftar tidak boleh diganti hanya karena hasil pasar berubah. '
@@ -1996,7 +2006,7 @@ def render_premarket_panel():
         render_clickable_dataframe(show,[c for c in ['ticker','Decision','Outcome','Verdict','Return %','Close'] if c in show.columns],2)
 
 def render_app():
-    st.set_page_config(page_title='AI Stock Intelligence V1.8.48', page_icon='📈', layout='wide')
+    st.set_page_config(page_title=f"AI Stock Intelligence V{CFGD.get('mobile_ui_version','1.8.52')}", page_icon='📈', layout='wide')
     st.markdown("""
     <style>
       .block-container{padding-top:1.15rem;padding-bottom:2rem;max-width:1500px}
@@ -2039,7 +2049,7 @@ def render_app():
         if any(k in x for k in ['WATCH','WAIT','NEAR','DEVELOP','SIDEWAYS','WARNING','MEDIUM','PREPAR']): return 'yellow'
         return 'gray'
 
-    st.title('📈 AI Stock Intelligence V1.8.48')
+    st.title(f"📈 AI Stock Intelligence V{CFGD.get('mobile_ui_version','1.8.52')}")
     st.caption('Continuous Intelligence • Rank → Opportunity → Alert → Deep Analysis → Risk → Hold → Overnight')
     st.markdown('<div class="asi-row">'+_pill('READY' if ready else 'PREPARING', 'green' if ready else 'yellow')+_pill(f'Model {active_name}', 'green' if model else 'gray')+_pill(f'Snapshot {snap_at or "belum ada"}', 'green' if snap_at else 'gray')+'</div>', unsafe_allow_html=True)
 
