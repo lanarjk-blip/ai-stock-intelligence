@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException
 import persistent_bridge
 import ui_replica
 
-app = FastAPI(title="AI Stock Intelligence Runtime API", version="1.1")
+app = FastAPI(title="AI Stock Intelligence Runtime API", version="1.2")
 
 _SENSITIVE_STATE_PARTS = (
     "token", "secret", "password", "credential", "service_account",
@@ -94,10 +94,13 @@ def bootstrap():
             )
             runs = cur.fetchall()
             cur.execute(
-                """SELECT market_date,rank,payload FROM asi_premarket_picks
-                   WHERE market_date IN (
-                     SELECT market_date FROM asi_premarket_runs ORDER BY market_date DESC LIMIT 20
-                   ) ORDER BY market_date,rank"""
+                """SELECT p.market_date,p.rank,p.payload FROM asi_premarket_picks p
+                   JOIN (
+                     SELECT market_date,pick_count FROM asi_premarket_runs
+                     ORDER BY market_date DESC LIMIT 20
+                   ) r ON r.market_date=p.market_date
+                   WHERE p.rank BETWEEN 1 AND r.pick_count
+                   ORDER BY p.market_date,p.rank"""
             )
             picks = cur.fetchall()
             cur.execute(
