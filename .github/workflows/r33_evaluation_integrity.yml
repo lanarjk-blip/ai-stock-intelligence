@@ -1,0 +1,52 @@
+name: R33 Evaluation Integrity
+on:
+  push:
+    branches: [fix-evaluation-integrity-r33]
+    paths:
+      - 'tools/apply_r33_evaluation_integrity.py'
+      - 'tests/test_evaluation_integrity_r33.py'
+      - '.github/workflows/r33_evaluation_integrity.yml'
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-evaluation-integrity-r33
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply R33 patch
+        run: python tools/apply_r33_evaluation_integrity.py
+      - name: Compile
+        run: python -m py_compile recommendation_history.py
+      - name: Install dependencies
+        run: python -m pip install -q -r requirements.txt pytest
+      - name: R33 targeted tests
+        run: python -m pytest -q tests/test_evaluation_integrity_r33.py
+      - name: Full regression suite
+        run: python -m pytest -q
+      - name: Static evaluation contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('recommendation_history.py').read_text(encoding='utf-8')
+          assert 'def _row_actionability' in s
+          assert 'state == "ENTRY READY"' in s
+          assert 'entry == "ACTIVE" and fresh' in s
+          assert 'actionable_at_record' in s
+          assert 'intraday_fresh' in s and 'price_source' in s and 'session_status' in s
+          assert 'candidate_mode != "MONITOR_FALLBACK"' not in s[s.index('def record_snapshot'):]
+          print('R33 evaluation integrity contract OK')
+          PY
+      - name: Commit production patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add recommendation_history.py
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Seed shadow trades only from valid actionable recommendations'
+          git pull --rebase origin fix-evaluation-integrity-r33
+          git push origin HEAD:fix-evaluation-integrity-r33
