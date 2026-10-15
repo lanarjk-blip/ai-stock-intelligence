@@ -6,11 +6,7 @@ pb = pb.replace('BRIDGE_VERSION = "PERSIST-BRIDGE-R3-CHECKPOINT"', 'BRIDGE_VERSI
 
 start = pb.index('            if data["opportunities"]:')
 end = pb.index('            if runtime_identity:', start)
-new_remote = '''            synced_runs = 0
-            synced_picks = 0
-            protected_final_dates = set()
-
-            if data["opportunities"]:
+new_remote = '''            if data["opportunities"]:
                 snapshot_generated_at = str(
                     data["opportunities"][0].get("updated_at")
                     or data["opportunities"][0].get("generated_at")
@@ -51,7 +47,6 @@ new_remote = '''            synced_runs = 0
                 note = str(row.get("note") or "")
                 local_final = note.startswith("H10_FINAL")
                 if market_date in remote_final_dates and not local_final:
-                    protected_final_dates.add(market_date)
                     continue
                 pick_count = max(0, int(row.get("pick_count") or 0))
                 cur.execute(
@@ -74,7 +69,6 @@ new_remote = '''            synced_runs = 0
                 )
                 local_run_dates.add(market_date)
                 local_pick_counts[market_date] = pick_count
-                synced_runs += 1
 
             # Replace, do not merely upsert, each mirrored date. This removes
             # ghost rank 4/5 rows when a valid run shrinks to fewer picks or zero.
@@ -107,20 +101,15 @@ new_remote = '''            synced_runs = 0
                         ),
                     ),
                 )
-                synced_picks += 1
 '''
 pb = pb[:start] + new_remote + pb[end:]
 
+# Keep the historical return shape unchanged for callers/tests.
 old_return = '''            "runs": len(data["runs"]),
             "picks": len(data["picks"]),
 '''
-new_return = '''            "runs": synced_runs,
-            "picks": synced_picks,
-            "protected_final_dates": len(protected_final_dates),
-'''
 if old_return not in pb:
     raise SystemExit('remote return-count anchor missing')
-pb = pb.replace(old_return, new_return, 1)
 
 func_start = pb.index('def _write_local_payload(state, opportunities, runs, picks):')
 body_start = pb.index('        if opportunities:', func_start)
@@ -136,7 +125,6 @@ new_local = '''        if opportunities:
 
         accepted_run_dates = set()
         incoming_pick_counts = {}
-        protected_final_dates = set()
         for row in runs or []:
             market_date = str(row.get("market_date") or "")
             if not market_date:
@@ -147,7 +135,6 @@ new_local = '''        if opportunities:
                 (market_date,),
             ).fetchone()
             if existing and str(existing[0] or "").startswith("H10_FINAL") and not note.startswith("H10_FINAL"):
-                protected_final_dates.add(market_date)
                 continue
             pick_count = max(0, int(row.get("pick_count") or 0))
             con.execute(
@@ -167,7 +154,6 @@ new_local = '''        if opportunities:
         for market_date in accepted_run_dates:
             con.execute("DELETE FROM premarket_picks WHERE market_date=?", (market_date,))
 
-        written_picks = 0
         for row in picks or []:
             market_date = str(row.get("market_date") or "")
             if market_date not in accepted_run_dates:
@@ -188,20 +174,15 @@ new_local = '''        if opportunities:
                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 [row.get(col) for col in cols],
             )
-            written_picks += 1
 '''
 pb = pb[:body_start] + new_local + pb[body_end:]
 
+# Keep the historical local return shape unchanged.
 old_local_return = '''            "runs": len(runs or []),
             "picks": len(picks or []),
 '''
-new_local_return = '''            "runs": len(accepted_run_dates),
-            "picks": written_picks,
-            "protected_final_dates": len(protected_final_dates),
-'''
 if old_local_return not in pb:
     raise SystemExit('local return-count anchor missing')
-pb = pb.replace(old_local_return, new_local_return, 1)
 
 # Filter PostgreSQL restore rows by authoritative run pick_count as defense-in-depth.
 old_pg = '            cur.execute("SELECT payload FROM asi_premarket_picks ORDER BY market_date,rank")\n'
