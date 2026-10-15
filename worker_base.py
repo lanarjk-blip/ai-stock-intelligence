@@ -195,7 +195,7 @@ def fetch_one(ticker):
         return ticker, False, 0, str(exc)[:300]
 
 
-def collect_fast(universe):
+def collect_fast(universe, state_prefix="last_collection"):
     if universe is None or universe.empty:
         return 0, 0, ["Universe kosong"]
 
@@ -270,15 +270,40 @@ def collect_fast(universe):
     now = datetime.now(timezone.utc).isoformat()
     mark_engine_progress("COLLECT_DONE", f"completed={completed}/{len(tickers)} ok={ok} rows={rows}")
 
-    app.state_set("last_collection", now)
-    app.state_set("last_collection_ok", ok)
-    app.state_set("last_collection_rows", rows)
-    app.state_set(
-        "last_collection_errors",
-        len(errors),
-    )
+    if state_prefix:
+        prefix = str(state_prefix)
+        app.state_set(prefix, now)
+        app.state_set(prefix + "_ok", ok)
+        app.state_set(prefix + "_rows", rows)
+        app.state_set(prefix + "_errors", len(errors))
 
     return ok, rows, errors
+
+
+def full_collection_status(universe_count):
+    """Return (due, reason) while preserving the last broad quality sample."""
+    total = max(1, int(universe_count or 0))
+    hours = float(CFG.get("full_collect_hours", 6))
+    if stale("last_collection", hours):
+        return True, "STALE_OR_MISSING"
+    try:
+        collected_ok = int(app.state_get("last_collection_ok") or 0)
+        ready_symbols = int(count_ready_symbols(60))
+        price_rows = int(count_price_rows())
+    except Exception:
+        return True, "QUALITY_STATE_INVALID"
+    min_collection = float(CFG.get("data_quality_min_collection_ratio", 0.80))
+    min_ready = float(CFG.get("data_quality_min_ready_ratio", 0.70))
+    min_rows = int(CFG.get("data_quality_min_price_rows", 5000))
+    collection_ratio = collected_ok / total
+    ready_ratio = ready_symbols / total
+    if collection_ratio < min_collection:
+        return True, f"COLLECTION_COVERAGE_{collection_ratio:.3f}"
+    if ready_ratio < min_ready:
+        return True, f"READY_COVERAGE_{ready_ratio:.3f}"
+    if price_rows < min_rows:
+        return True, f"PRICE_ROWS_{price_rows}"
+    return False, "FRESH_CACHE"
 
 
 # ============================================================
@@ -1451,131 +1476,75 @@ def cycle():
     )
 
     # ========================================================
-    # PHASE 1
-    # FAST BOOTSTRAP
+    # PHASE 1-2
+    # COLD-START BOOTSTRAP ONLY
     # ========================================================
 
-    bootstrap_n = min(
-        int(
-            CFG.get(
-                "bootstrap_symbols",
-                30,
-            )
-        ),
-        len(universe),
-    )
-
-    bootstrap = (
-        universe
-        .head(bootstrap_n)
-        .copy()
-    )
-
-    log(
-        "BOOTSTRAP",
-        "START",
-        f"symbols={len(bootstrap)}",
-    )
-
-    ok, rows, errors = collect_fast(
-        bootstrap
-    )
-
-    log(
-        "BOOTSTRAP",
-        "COLLECT_DONE",
-        (
-            f"ok={ok}/{len(bootstrap)} "
-            f"rows={rows} "
-            f"errors={len(errors)}"
-        ),
-    )
-
-    # Produce READY quickly, even before model training.
-    # V1.8.42 diagnostic: expose a small sample of real provider failures.
-    if errors:
-        log(
-            "BOOTSTRAP",
-            "ERROR_SAMPLE",
-            " | ".join(str(err)[:350] for err in errors[:5]),
+    cold_start = not bool(app.state_get("engine_last_run"))
+    if cold_start:
+        bootstrap_n = min(
+            int(CFG.get("bootstrap_symbols", 30)),
+            len(universe),
         )
-
-    bootstrap_res = analyze_and_publish(
-        bootstrap,
-        "technical-bootstrap",
-        model=None,
-    )
-
-    if not bootstrap_res.empty:
-        log(
-            "BOOTSTRAP",
-            "SNAPSHOT_READY",
-            f"count={len(bootstrap_res)}",
-        )
-
-    # ========================================================
-    # PHASE 2
-    # MARKET DATA + EARLY MODEL ATTEMPT
-    # ========================================================
-
-    mark_engine_progress("BOOTSTRAP_MARKET_DATA")
-    refresh_market_data()
-
-    mark_engine_progress("BOOTSTRAP_MODEL_TRAIN")
-    maybe_train(
-        bootstrap,
-        force=False,
-    )
-    mark_engine_progress("BOOTSTRAP_MODEL_DONE")
-
-    model = load_model()
-
-    if model is not None:
-        refined = analyze_and_publish(
+        bootstrap = universe.head(bootstrap_n).copy()
+        log("BOOTSTRAP", "START", f"symbols={len(bootstrap)}")
+        ok, rows, errors = collect_fast(
             bootstrap,
-            "model-refined-bootstrap",
-            model=model,
+            state_prefix="last_bootstrap_collection",
         )
-
-        if not refined.empty:
-            log(
-                "MODEL_REFINE",
-                "SNAPSHOT_UPDATED",
-                f"count={len(refined)}",
-            )
+        log(
+            "BOOTSTRAP",
+            "COLLECT_DONE",
+            f"ok={ok}/{len(bootstrap)} rows={rows} errors={len(errors)}",
+        )
+        if errors:
+            log("BOOTSTRAP", "ERROR_SAMPLE", " | ".join(str(err)[:350] for err in errors[:5]))
+        bootstrap_res = analyze_and_publish(bootstrap, "technical-bootstrap", model=None)
+        if not bootstrap_res.empty:
+            log("BOOTSTRAP", "SNAPSHOT_READY", f"count={len(bootstrap_res)}")
+        mark_engine_progress("BOOTSTRAP_MARKET_DATA")
+        refresh_market_data()
+        mark_engine_progress("BOOTSTRAP_MODEL_TRAIN")
+        maybe_train(bootstrap, force=False)
+        mark_engine_progress("BOOTSTRAP_MODEL_DONE")
+        bootstrap_model = load_model()
+        if bootstrap_model is not None:
+            refined = analyze_and_publish(bootstrap, "model-refined-bootstrap", model=bootstrap_model)
+            if not refined.empty:
+                log("MODEL_REFINE", "SNAPSHOT_UPDATED", f"count={len(refined)}")
+    else:
+        log("BOOTSTRAP", "SKIP", "warm runtime; full snapshot already exists")
 
     # ========================================================
     # PHASE 3
-    # FULL UNIVERSE COLLECTION
+    # FULL UNIVERSE COLLECTION WHEN DUE
     # ========================================================
 
-    log(
-        "FULL_COLLECT",
-        "START",
-        f"symbols={len(universe)}",
-    )
-
-    ok, rows, errors = collect_fast(
-        universe
-    )
-
-    log(
-        "FULL_COLLECT",
-        "DONE",
-        (
-            f"ok={ok}/{len(universe)} "
-            f"rows={rows} "
-            f"errors={len(errors)}"
-        ),
-    )
-
-    # V1.8.42 diagnostic: expose a small sample of real provider failures.
-    if errors:
+    full_due, full_reason = full_collection_status(len(universe))
+    if full_due:
+        app.state_set("full_collection_mode", "FETCH")
+        app.state_set("full_collection_reason", full_reason)
+        log("FULL_COLLECT", "START", f"symbols={len(universe)} reason={full_reason}")
+        ok, rows, errors = collect_fast(universe, state_prefix="last_collection")
         log(
             "FULL_COLLECT",
-            "ERROR_SAMPLE",
-            " | ".join(str(err)[:350] for err in errors[:5]),
+            "DONE",
+            f"ok={ok}/{len(universe)} rows={rows} errors={len(errors)}",
         )
+        if errors:
+            log("FULL_COLLECT", "ERROR_SAMPLE", " | ".join(str(err)[:350] for err in errors[:5]))
+    else:
+        app.state_set("full_collection_mode", "CACHE")
+        app.state_set("full_collection_reason", full_reason)
+        ok = int(app.state_get("last_collection_ok") or 0)
+        rows = int(app.state_get("last_collection_rows") or 0)
+        errors = []
+        log(
+            "FULL_COLLECT",
+            "SKIP_FRESH_CACHE",
+            f"reason={full_reason} previous_ok={ok}/{len(universe)} previous_rows={rows}",
+        )
+        mark_engine_progress("FULL_COLLECT_CACHE", f"ok={ok}/{len(universe)} rows={rows}")
 
     # ========================================================
     # PHASE 4
@@ -1585,12 +1554,12 @@ def cycle():
     mark_engine_progress("FULL_MARKET_DATA")
     refresh_market_data()
 
-    # Force another attempt because the full collection may
-    # have supplied the data that bootstrap did not have.
+    # Train only when the deployed model is missing or stale according to
+    # jst_retrain_hours. A fresh cached model is reused across cycles.
     mark_engine_progress("FULL_MODEL_TRAIN")
     maybe_train(
         universe,
-        force=True,
+        force=False,
     )
     mark_engine_progress("FULL_MODEL_DONE")
 
@@ -1669,21 +1638,27 @@ def cycle():
     return result
 
 
+def cycle_interval_seconds(now=None):
+    """Use the existing live/post-close/off-market cadence configuration."""
+    session = market_session.session_status(CFG, now=now)
+    status = str(session.get("status") or "").upper()
+    live = bool(session.get("live"))
+    if live or status == "BREAK":
+        minutes = CFG.get("market_open_cycle_minutes", 10)
+    elif status == "CLOSED":
+        minutes = CFG.get("post_close_cycle_minutes", 30)
+    elif status in {"WEEKEND", "HOLIDAY"}:
+        minutes = CFG.get("off_market_cycle_minutes", 60)
+    else:
+        minutes = CFG.get("refresh_minutes", CFG.get("worker_cycle_minutes", 30))
+    return max(5, int(minutes)) * 60
+
+
 # ============================================================
 # WORKER LOOP
 # ============================================================
 
 def run_forever():
-    interval = max(
-        5,
-        int(
-            CFG.get(
-                "worker_cycle_minutes",
-                30,
-            )
-        ),
-    ) * 60
-
     print(
         (
             "AI Stock Intelligence "
@@ -1728,10 +1703,12 @@ def run_forever():
             - started
         )
 
+        interval = cycle_interval_seconds()
         sleep_for = max(
             30,
             interval - elapsed,
         )
+        app.state_set("engine_next_cycle_interval_seconds", int(interval))
 
         print(
             (
