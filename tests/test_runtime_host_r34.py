@@ -1,5 +1,3 @@
-import os
-
 import pytest
 
 import runtime_host
@@ -33,7 +31,7 @@ def test_child_envs_make_worker_authoritative_but_not_api():
 def test_child_commands_bind_api_to_render_port_and_use_existing_worker():
     commands = runtime_host.child_commands("12345")
     assert commands["worker"][-1] == "worker_base.py"
-    assert "runtime_api:app" in commands["api"]
+    assert "runtime_host_api:app" in commands["api"]
     assert commands["api"][-1] == "12345"
 
 
