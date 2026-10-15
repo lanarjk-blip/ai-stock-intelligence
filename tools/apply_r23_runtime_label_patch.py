@@ -1,4 +1,4 @@
-# final-r23-runtime-label-trigger-v2
+# final-r23-runtime-label-trigger-v3
 from pathlib import Path
 
 p=Path('app.py')
@@ -27,4 +27,4 @@ if 'AI Stock Intelligence V1.8.48' in s:
     raise SystemExit('stale V1.8.48 label remains after patch')
 
 p.write_text(s,encoding='utf-8')
-print('R23 DYNAMIC RUNTIME LABEL PATCH V2 APPLIED')
+print('R23 DYNAMIC RUNTIME LABEL PATCH V3 APPLIED')
