@@ -1,0 +1,103 @@
+name: R23 Data Quality Safety
+on:
+  push:
+    branches: [fix-actionability-integrity-r23]
+    paths:
+      - 'tools/apply_r23_data_quality_safety_patch.py'
+      - '.github/workflows/r23_data_quality_safety.yml'
+permissions:
+  contents: write
+jobs:
+  safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-actionability-integrity-r23
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install
+        run: python -m pip install -q -r requirements.txt pytest
+      - name: Apply safety patch
+        run: python tools/apply_r23_data_quality_safety_patch.py
+      - name: Compile
+        run: python -m py_compile worker_base.py premarket_scheduler.py dynamic_engine.py hold_engine.py top5_timeline.py
+      - name: Verify H10 downgrade and stale-action clearing
+        env:
+          AI_ENGINE_WORKER: '0'
+        run: |
+          python - <<'PY'
+          import json, os, sqlite3, tempfile
+          from datetime import datetime, timezone
+          import pandas as pd
+
+          import app
+          import dynamic_engine
+          import hold_engine
+          import premarket_scheduler as h10
+          import top5_timeline
+          import worker_base
+
+          td=tempfile.mkdtemp(prefix='asi-r23-quality-')
+          db=os.path.join(td,'market.db')
+          app.DB=db; app.DB_DIR=td; worker_base.app.DB=db; dynamic_engine.app.DB=db; hold_engine.app.DB=db; h10.app.DB=db
+          app.init_db(); dynamic_engine.ensure_tables(); hold_engine.ensure_tables(); h10._ensure_tables(); top5_timeline.ensure_tables(db)
+
+          # Even an underlying BUY must become WAIT while quality is not READY.
+          buy=pd.DataFrame([{
+              'ticker':'BUY1','company':'Buy','decision':'BUY','ai_score':95,'jst_p_up':.90,
+              'jst_confidence':.9,'risk':'LOW','close':100,'entry_low':99,'entry_high':101,
+              'stop_loss':95,'target_1':110,'target_2':120,'decision_priority':0,
+              'decision_score':99,'relative_rank_score':99,'market_regime':'BULLISH'
+          }])
+          app.state_set('data_quality_status','DATA_NOT_READY')
+          app.state_set('data_quality_reasons','usable-symbol coverage low')
+          picks,mode,reason=h10.select_candidates(buy)
+          assert mode=='QUALITY_MONITOR',(mode,reason)
+          assert picks.iloc[0]['decision']=='WAIT',picks.iloc[0].to_dict()
+          assert 'Data quality guard' in reason
+
+          # READY but stale timestamp is still monitor-only.
+          app.state_set('data_quality_status','READY')
+          app.state_set('last_collection','2026-10-14T00:00:00+00:00')
+          ok,reason=h10._quality_allows_actionable(datetime(2026,10,15,8,30,tzinfo=h10.WIB))
+          assert ok is False and 'collection age' in reason,(ok,reason)
+
+          # Fresh READY allows strict selection again.
+          app.state_set('last_collection','2026-10-15T01:00:00+00:00')
+          ok,reason=h10._quality_allows_actionable(datetime(2026,10,15,8,30,tzinfo=h10.WIB))
+          assert ok is True,(ok,reason)
+
+          # Simulate stale actionable derivatives, then verify worker BLOCK cleanup calls.
+          con=sqlite3.connect(db)
+          con.execute("INSERT INTO dynamic_opportunities(ticker,rank) VALUES('OLD',1)")
+          con.execute("INSERT INTO dynamic_opportunity_pool(ticker,rank) VALUES('OLD',1)")
+          con.execute("INSERT INTO hold_intelligence(ticker) VALUES('OLDH')")
+          con.execute("INSERT OR REPLACE INTO top5_live_state(singleton,updated_at,tickers_json) VALUES(1,'x',?)",(json.dumps(['OLD']),))
+          con.execute("INSERT OR REPLACE INTO live_action_state(ticker,updated_at,state,entry_status,is_entry_ready) VALUES('OLD','x','ENTRY READY','ACTIVE',1)")
+          con.commit(); con.close()
+          dynamic_engine._clear_dynamic_current('DATA_QUALITY_BLOCK')
+          hold_engine._clear_current('DATA_QUALITY_BLOCK')
+          cleared=top5_timeline.record_top5(db,pd.DataFrame(),source_phase='data-quality-block',config={})
+          con=sqlite3.connect(db)
+          assert con.execute('SELECT COUNT(*) FROM dynamic_opportunities').fetchone()[0]==0
+          assert con.execute('SELECT COUNT(*) FROM dynamic_opportunity_pool').fetchone()[0]==0
+          assert con.execute('SELECT COUNT(*) FROM hold_intelligence').fetchone()[0]==0
+          assert json.loads(con.execute('SELECT tickers_json FROM top5_live_state WHERE singleton=1').fetchone()[0])==[]
+          assert con.execute("SELECT is_entry_ready FROM live_action_state WHERE ticker='OLD'").fetchone()[0]==0
+          con.close()
+          assert cleared['status']=='CLEARED_EMPTY',cleared
+          print('R23 DATA QUALITY SAFETY PASSED')
+          PY
+      - name: Full tests
+        run: python -m pytest -q
+      - name: Commit validated safety changes
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add worker_base.py premarket_scheduler.py
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Propagate data-quality blocks to every actionable surface'
+          git pull --rebase origin fix-actionability-integrity-r23
+          git push origin HEAD:fix-actionability-integrity-r23
