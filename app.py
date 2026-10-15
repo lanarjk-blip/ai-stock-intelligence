@@ -1442,6 +1442,22 @@ def build_ai_ask_snapshot(universal_row, dynamic_row, ticker, session=None, live
         snapshot['intraday_at']=str(live_info.get('ts') or '')
     return snapshot
 
+def resolve_stock_display_price(ticker, daily_close, session=None, live_info=None):
+    session=dict(session or market_session.session_status(CFGD) or {})
+    live_required=bool(session.get('live'))
+    if live_info is None:
+        try:
+            import dynamic_engine as _dynamic_engine
+            live_info=_dynamic_engine._latest_intraday_live_price(str(ticker))
+        except Exception:
+            live_info={}
+    live_info=dict(live_info or {})
+    if live_required and live_info.get('fresh') and live_info.get('price') is not None:
+        try:price=float(live_info.get('price'))
+        except Exception:price=float(daily_close)
+        return {'price':price,'label':'Harga live','source':'LIVE_INTRADAY','fresh':True,'at':str(live_info.get('ts') or '')}
+    return {'price':float(daily_close),'label':'Daily close','source':'DAILY_CLOSE','fresh':False,'at':''}
+
 def stock_search_panel(universe, res, forced_ticker=None):
     """V1.8.18 Search & On-Demand Deep Analysis.
     Reuses the same cached prices, registry and decision snapshot as the engine.
@@ -1511,13 +1527,15 @@ def stock_search_panel(universe, res, forced_ticker=None):
     latest_source=str(prices.source.iloc[-1]) if 'source' in prices.columns else 'engine'
     latest_updated=str(prices.updated_at.iloc[-1]) if 'updated_at' in prices.columns else ''
 
+    display_price=resolve_stock_display_price(selected_ticker,close)
     p1,p2,p3,p4,p5=st.columns(5)
-    p1.metric('Harga terakhir',f'Rp {close:,.0f}')
+    p1.metric(display_price['label'],f"Rp {float(display_price['price']):,.0f}")
     p2.metric('Perubahan 1D',f'{ch:+.2f}%' if np.isfinite(ch) else '—')
     p3.metric('Volume',f'{float(r.volume):,.0f}' if pd.notna(r.volume) else '—')
     p4.metric('MA20',f'{float(r.ma20):,.0f}' if pd.notna(r.ma20) else '—')
     p5.metric('RSI 14',f'{float(r.rsi14):.1f}' if pd.notna(r.rsi14) else '—')
-    st.caption(f'Data harga terakhir: {r.date} • source={latest_source} • updated={latest_updated}')
+    live_note=(f" • live_at={display_price['at']}" if display_price.get('fresh') else '')
+    st.caption(f"Sumber harga tampilan: {display_price['source']}{live_note} • daily candle: {r.date} • daily_source={latest_source} • updated={latest_updated}")
 
     # V1.8.28: Universal Stock Intelligence. One compact status layer summarizes
     # rank, opportunity, session and next checkpoint for the currently selected ticker.

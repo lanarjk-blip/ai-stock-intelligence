@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 import app
+import market_session
 
 CFG=app.CFGD
 
@@ -19,7 +20,7 @@ def ensure_tables():
         next_session_bias TEXT, overnight_score REAL, reason TEXT,
         last_opportunity_score REAL, opportunity_rank INTEGER)''')
     existing={str(r[1]) for r in con.execute('PRAGMA table_info(hold_intelligence)').fetchall()}
-    for col,typ in [('market_regime','TEXT'),('market_score','REAL'),('ihsg_alignment','REAL'),('regime_effect','REAL')]:
+    for col,typ in [('market_regime','TEXT'),('market_score','REAL'),('ihsg_alignment','REAL'),('regime_effect','REAL'),('price_source','TEXT'),('intraday_fresh','INTEGER'),('intraday_at','TEXT'),('time_status','TEXT')]:
         if col not in existing: con.execute(f'ALTER TABLE hold_intelligence ADD COLUMN {col} {typ}')
     con.execute('''CREATE TABLE IF NOT EXISTS hold_intelligence_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT, generated_at TEXT, ticker TEXT,
@@ -47,15 +48,73 @@ def _daily_context(ticker):
         return {'trend':trend,'ret5':ret5,'vol_ratio':vr}
     except Exception: return {'trend':'UNKNOWN','ret5':0.0,'vol_ratio':1.0}
 
-def _time(ticker):
+def _live_intraday_context(ticker, now=None):
+    session=market_session.session_status(CFG,now=now)
+    live=bool(session.get('live'))
+    market_date=str(session.get('market_date') or '')
+    result={'live_required':live,'fresh':False,'price':None,'ts':'','age_minutes':None,'market_date':market_date}
+    if not live:
+        return result
+    try:
+        con=dbcon()
+        d=pd.read_sql_query(
+            'SELECT ts,close FROM intraday WHERE ticker=? ORDER BY ts DESC LIMIT 20',
+            con,params=(str(ticker).upper().replace('.JK',''),)
+        )
+        con.close()
+        if d.empty:return result
+        d['ts']=pd.to_datetime(d['ts'],utc=True,errors='coerce')
+        d=d.dropna(subset=['ts','close'])
+        if d.empty:return result
+        d['wib']=d['ts'].dt.tz_convert('Asia/Jakarta')
+        d=d[d['wib'].dt.date.astype(str)==market_date]
+        if d.empty:return result
+        row=d.sort_values('ts').iloc[-1]
+        local_now=pd.Timestamp(session.get('wib'))
+        if local_now.tzinfo is None:local_now=local_now.tz_localize('Asia/Jakarta')
+        age=max(0.0,(local_now.tz_convert('UTC')-row['ts']).total_seconds()/60.0)
+        limit=max(45,int(CFG.get('intraday_live_stale_minutes',45)),int(CFG.get('intraday_refresh_minutes',30))+10)
+        result.update({'fresh':age<=limit,'price':float(row['close']),'ts':row['ts'].isoformat(),'age_minutes':age})
+        return result
+    except Exception:
+        try:con.close()
+        except Exception:pass
+        return result
+
+
+def _time(ticker, now=None):
+    live=_live_intraday_context(ticker,now=now)
+    if live.get('live_required') and not live.get('fresh'):
+        return {
+            'edge':0.0,'confidence':0.0,'horizon':'EOD','status':'NEUTRAL',
+            'live_required':True,'intraday_fresh':False,
+            'intraday_at':str(live.get('ts') or ''),'price_source':'DAILY_CLOSE_STALE_INTRADAY',
+            'live_price':None,
+        }
     try:
         tp=app.intraday_prediction(str(ticker))
-        if tp is None or tp.empty: return {'edge':0.0,'confidence':0.0,'horizon':'EOD','status':'NEUTRAL'}
-        r=tp[tp.horizon.astype(str)=='EOD']
-        if r.empty: r=tp.iloc[[0]]
-        r=r.iloc[0]
-        return {'edge':float(r.edge),'confidence':float(r.confidence),'horizon':str(r.horizon),'status':str(r.entry_status)}
-    except Exception: return {'edge':0.0,'confidence':0.0,'horizon':'EOD','status':'NEUTRAL'}
+        if tp is None or tp.empty:
+            edge=0.0; confidence=0.0; horizon='EOD'; status='NEUTRAL'
+        else:
+            r=tp[tp.horizon.astype(str)=='EOD']
+            if r.empty:r=tp.iloc[[0]]
+            r=r.iloc[0]
+            edge=float(r.edge); confidence=float(r.confidence); horizon=str(r.horizon); status=str(r.entry_status)
+        return {
+            'edge':edge,'confidence':confidence,'horizon':horizon,'status':status,
+            'live_required':bool(live.get('live_required')),'intraday_fresh':bool(live.get('fresh')),
+            'intraday_at':str(live.get('ts') or ''),
+            'price_source':'LIVE_INTRADAY' if live.get('fresh') else 'HISTORICAL_INTRADAY',
+            'live_price':float(live['price']) if live.get('fresh') and live.get('price') is not None else None,
+        }
+    except Exception:
+        return {
+            'edge':0.0,'confidence':0.0,'horizon':'EOD','status':'NEUTRAL',
+            'live_required':bool(live.get('live_required')),'intraday_fresh':bool(live.get('fresh')),
+            'intraday_at':str(live.get('ts') or ''),
+            'price_source':'LIVE_INTRADAY' if live.get('fresh') else ('DAILY_CLOSE_STALE_INTRADAY' if live.get('live_required') else 'HISTORICAL_INTRADAY'),
+            'live_price':float(live['price']) if live.get('fresh') and live.get('price') is not None else None,
+        }
 
 def _ihsg_context():
     try:
@@ -143,16 +202,18 @@ def update(res,phase='CLOSED'):
     rows=[]
     for _,r in c.iterrows():
         ts=_time(r.ticker); dc=_daily_context(r.ticker); hs=_hold_score(r,ts,dc,market_ctx); ov, bias, os=_overnight(r,ts,dc,phase,market_ctx)
+        current_price=float(ts['live_price']) if ts.get('live_price') is not None else float(r.close)
         ihsg_alignment,regime_effect=_ihsg_effect(r,market_ctx)
         state=_state(hs,r,ov)
         horizon='1-3D' if hs>=65 else ('NEXT_SESSION' if hs>=55 else 'EOD')
-        reason=f'Hold score {hs:.1f}; P(UP) {float(r.jst_p_up)*100:.1f}%; P(DOWN) {float(r.jst_p_down)*100:.1f}%; time edge {ts["edge"]*100:+.1f}%; overnight {ov}.'
-        rows.append({'ticker':str(r.ticker),'company':str(r.company),'current_price':float(r.close),'state':state,'hold_horizon':horizon,'hold_score':hs,'p_hold':min(0.95,max(0.05,hs/100.0)),'p_up':float(r.jst_p_up),'p_down':float(r.jst_p_down),'confidence':float(r.jst_confidence),'time_edge':float(ts['edge']),'risk':str(r.risk),'stop_loss':r.stop_loss,'target_1':r.target_1,'target_2':r.target_2,'risk_reward':r.risk_reward_2,'invalidation':r.invalidation,'overnight_state':ov,'next_session_bias':bias,'overnight_score':os,'reason':reason,'last_opportunity_score':float(r.ai_score),'opportunity_rank':int(r['rank']) if 'rank' in r.index and pd.notna(r['rank']) else None,
-        'market_regime':market_ctx[0],'market_score':market_ctx[1],'ihsg_alignment':ihsg_alignment,'regime_effect':regime_effect})
+        live_note='intraday FRESH' if ts.get('intraday_fresh') else ('intraday STALE/NEUTRAL' if ts.get('live_required') else 'off-market/historical')
+        reason=f'Hold score {hs:.1f}; P(UP) {float(r.jst_p_up)*100:.1f}%; P(DOWN) {float(r.jst_p_down)*100:.1f}%; time edge {ts["edge"]*100:+.1f}%; {live_note}; overnight {ov}.'
+        rows.append({'ticker':str(r.ticker),'company':str(r.company),'current_price':current_price,'state':state,'hold_horizon':horizon,'hold_score':hs,'p_hold':min(0.95,max(0.05,hs/100.0)),'p_up':float(r.jst_p_up),'p_down':float(r.jst_p_down),'confidence':float(r.jst_confidence),'time_edge':float(ts['edge']),'risk':str(r.risk),'stop_loss':r.stop_loss,'target_1':r.target_1,'target_2':r.target_2,'risk_reward':r.risk_reward_2,'invalidation':r.invalidation,'overnight_state':ov,'next_session_bias':bias,'overnight_score':os,'reason':reason,'last_opportunity_score':float(r.ai_score),'opportunity_rank':int(r['rank']) if 'rank' in r.index and pd.notna(r['rank']) else None,
+        'market_regime':market_ctx[0],'market_score':market_ctx[1],'ihsg_alignment':ihsg_alignment,'regime_effect':regime_effect,'price_source':str(ts.get('price_source') or 'DAILY_CLOSE'),'intraday_fresh':1 if ts.get('intraday_fresh') else 0,'intraday_at':str(ts.get('intraday_at') or ''),'time_status':str(ts.get('status') or 'NEUTRAL')})
     out=pd.DataFrame(rows).sort_values('hold_score',ascending=False).reset_index(drop=True)
     now=datetime.now(timezone.utc).isoformat(); con=dbcon(); con.execute('DELETE FROM hold_intelligence')
     for _,r in out.iterrows():
-        con.execute('''INSERT OR REPLACE INTO hold_intelligence (ticker,company,generated_at,phase,current_price,state,hold_horizon,hold_score,p_hold,p_up,p_down,confidence,time_edge,risk,stop_loss,target_1,target_2,risk_reward,invalidation,overnight_state,next_session_bias,overnight_score,reason,last_opportunity_score,opportunity_rank,market_regime,market_score,ihsg_alignment,regime_effect) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',(r.ticker,r.company,now,phase,r.current_price,r.state,r.hold_horizon,r.hold_score,r.p_hold,r.p_up,r.p_down,r.confidence,r.time_edge,r.risk,r.stop_loss,r.target_1,r.target_2,r.risk_reward,r.invalidation,r.overnight_state,r.next_session_bias,r.overnight_score,r.reason,r.last_opportunity_score,r.opportunity_rank,r.market_regime,r.market_score,r.ihsg_alignment,r.regime_effect))
+        con.execute('''INSERT OR REPLACE INTO hold_intelligence (ticker,company,generated_at,phase,current_price,state,hold_horizon,hold_score,p_hold,p_up,p_down,confidence,time_edge,risk,stop_loss,target_1,target_2,risk_reward,invalidation,overnight_state,next_session_bias,overnight_score,reason,last_opportunity_score,opportunity_rank,market_regime,market_score,ihsg_alignment,regime_effect,price_source,intraday_fresh,intraday_at,time_status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',(r.ticker,r.company,now,phase,r.current_price,r.state,r.hold_horizon,r.hold_score,r.p_hold,r.p_up,r.p_down,r.confidence,r.time_edge,r.risk,r.stop_loss,r.target_1,r.target_2,r.risk_reward,r.invalidation,r.overnight_state,r.next_session_bias,r.overnight_score,r.reason,r.last_opportunity_score,r.opportunity_rank,r.market_regime,r.market_score,r.ihsg_alignment,r.regime_effect,r.price_source,int(r.intraday_fresh),r.intraday_at,r.time_status))
         con.execute('''INSERT INTO hold_intelligence_history(generated_at,ticker,phase,state,hold_horizon,hold_score,overnight_state,next_session_bias,overnight_score,current_price,stop_loss,target_1,risk_reward) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)''',(now,r.ticker,phase,r.state,r.hold_horizon,r.hold_score,r.overnight_state,r.next_session_bias,r.overnight_score,r.current_price,r.stop_loss,r.target_1,r.risk_reward))
     con.commit(); con.close()
     app.state_set('hold_intelligence_at',datetime.now(timezone.utc).isoformat()); app.state_set('hold_intelligence_phase',phase); app.state_set('hold_intelligence_count',len(out)); app.state_set('hold_intelligence_status','READY')
