@@ -1,0 +1,59 @@
+name: Hybrid Worker Validation
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'hybrid_worker.py'
+      - 'hybrid_worker_lease.py'
+      - 'runtime_supervisor.py'
+      - 'data/idx_holidays.json'
+      - 'tests/test_hybrid_worker_r39.py'
+      - 'tests/test_hybrid_worker_lease_r39.py'
+      - '.github/workflows/r39_hybrid_worker_guard.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'hybrid_worker.py'
+      - 'hybrid_worker_lease.py'
+      - 'runtime_supervisor.py'
+      - 'data/idx_holidays.json'
+      - 'tests/test_hybrid_worker_r39.py'
+      - 'tests/test_hybrid_worker_lease_r39.py'
+      - '.github/workflows/r39_hybrid_worker_guard.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  hybrid-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install -q -r requirements.txt pytest
+      - name: Verify hybrid contracts
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          launcher=Path('hybrid_worker.py').read_text(encoding='utf-8')
+          lease=Path('hybrid_worker_lease.py').read_text(encoding='utf-8')
+          supervisor=Path('runtime_supervisor.py').read_text(encoding='utf-8')
+          assert '07:45' in launcher or 'dtime(7, 45)' in launcher
+          assert '16:30' in launcher or 'dtime(16, 30)' in launcher
+          assert 'ASI_HYBRID_WORKER' in launcher and 'ASI_WORKER_DEVICE' in launcher
+          assert 'asi_worker_lease' in lease
+          assert 'lease_until <= now()' in lease
+          assert 'LEASE_LOST fail-closed' in lease
+          assert 'RENEW_EXPIRED fail-closed' in lease
+          assert 'acquire_or_wait' in supervisor and 'start_renewal' in supervisor
+          assert 'HYBRID_FATAL' in supervisor
+          print('R39 hybrid contract OK')
+          PY
+      - name: Compile hybrid runtime
+        run: python -m py_compile hybrid_worker.py hybrid_worker_lease.py runtime_supervisor.py
+      - name: Hybrid regression tests
+        run: python -m pytest -q tests/test_hybrid_worker_r39.py tests/test_hybrid_worker_lease_r39.py
+      - name: Full regression suite
+        run: python -m pytest -q
