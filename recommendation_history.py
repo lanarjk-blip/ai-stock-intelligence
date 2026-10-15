@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 
+from market_session import session_status
+
 
 SCHEMA_VERSION = "1.8.40"
 
@@ -121,6 +123,10 @@ def ensure_tables(db_path):
     existing = {str(r[1]) for r in con.execute("PRAGMA table_info(recommendation_history)").fetchall()}
     if "candidate_mode" not in existing:
         con.execute("ALTER TABLE recommendation_history ADD COLUMN candidate_mode TEXT")
+    for col, typ in [("intraday_fresh", "INTEGER"), ("price_source", "TEXT"),
+                     ("session_status", "TEXT"), ("actionable_at_record", "INTEGER")]:
+        if col not in existing:
+            con.execute(f"ALTER TABLE recommendation_history ADD COLUMN {col} {typ}")
     con.execute("CREATE INDEX IF NOT EXISTS idx_rec_hist_ticker_date ON recommendation_history(ticker, market_date)")
     con.execute("CREATE INDEX IF NOT EXISTS idx_shadow_status_ticker ON shadow_positions(status, ticker)")
     con.commit()
@@ -145,6 +151,29 @@ def _run_id(dynamic_df, source_phase, generated_at, market_date):
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:20]
 
 
+def _row_actionability(row, cfg=None, market=None):
+    """Paper-trade only actual executable entries during live market.
+
+    Off-market BUY/STRONG_BUY remains eligible for NEXT_SESSION shadow evaluation,
+    matching shadow_activation_rule=NEXT_SESSION. During a live regular session,
+    BUY must also be ENTRY READY + ACTIVE + fresh intraday evidence.
+    """
+    cfg = cfg or {}
+    market = dict(market or session_status(cfg) or {})
+    mode = _s(row.get("candidate_mode"), "STRICT").upper()
+    recommendation = _s(row.get("decision", row.get("state", "WATCH")), "WATCH").upper()
+    state = _s(row.get("state"), "").upper()
+    entry = _s(row.get("entry_status"), "").upper()
+    live = bool(market.get("live"))
+    fresh = bool(row.get("intraday_fresh"))
+    base = mode != "MONITOR_FALLBACK" and recommendation in {"BUY", "STRONG_BUY"}
+    if not base:
+        return False
+    if live:
+        return state == "ENTRY READY" and entry == "ACTIVE" and fresh
+    return True
+
+
 def record_snapshot(db_path, dynamic_df, cfg=None, source_phase="full-universe"):
     """Persist an immutable recommendation snapshot and seed paper positions.
 
@@ -161,6 +190,8 @@ def record_snapshot(db_path, dynamic_df, cfg=None, source_phase="full-universe")
     mdate = _market_date(now)
     run_id = _run_id(dynamic_df, source_phase, generated_at, mdate)
     market_regime = _s(dynamic_df.iloc[0].get("market_regime", "UNKNOWN"), "UNKNOWN")
+    market = dict(session_status(cfg) or {})
+    market_status = _s(market.get("status"), "UNKNOWN").upper()
 
     con = _con(db_path)
     seeded = 0
@@ -178,6 +209,7 @@ def record_snapshot(db_path, dynamic_df, cfg=None, source_phase="full-universe")
                 continue
             recommendation = _s(row.get("decision", row.get("state", "WATCH")), "WATCH")
             candidate_mode = _s(row.get("candidate_mode"), "STRICT").upper()
+            actionable = _row_actionability(row, cfg=cfg, market=market)
             vals = (
                 run_id, generated_at, mdate, ticker, _s(row.get("company")), rank,
                 recommendation, candidate_mode, _s(row.get("state")), _s(row.get("entry_status")),
@@ -186,15 +218,16 @@ def record_snapshot(db_path, dynamic_df, cfg=None, source_phase="full-universe")
                 _f(row.get("close")), _f(row.get("entry_low")), _f(row.get("entry_high")),
                 _f(row.get("stop_loss")), _f(row.get("target_1")), _f(row.get("target_2")),
                 _f(row.get("risk_reward")), _s(row.get("risk")), _s(row.get("market_regime")),
-                _s(row.get("reason")),
+                _s(row.get("reason")), 1 if bool(row.get("intraday_fresh")) else 0,
+                _s(row.get("price_source"), ""), market_status, 1 if actionable else 0,
             )
             cur = con.execute(
                 """INSERT OR IGNORE INTO recommendation_history(
                     run_id,generated_at,market_date,ticker,company,rank,recommendation,candidate_mode,
                     opportunity_state,entry_status,opportunity_score,ai_score,p_up,p_down,confidence,
                     reference_price,entry_low,entry_high,stop_loss,target_1,target_2,risk_reward,risk,
-                    market_regime,reason
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    market_regime,reason,intraday_fresh,price_source,session_status,actionable_at_record
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 vals,
             )
             if cur.rowcount <= 0:
@@ -202,10 +235,6 @@ def record_snapshot(db_path, dynamic_df, cfg=None, source_phase="full-universe")
             inserted += 1
             rec_id = int(cur.lastrowid)
 
-            actionable = (
-                candidate_mode != "MONITOR_FALLBACK"
-                and recommendation.upper() in {"BUY", "STRONG_BUY"}
-            )
             if not actionable:
                 continue
 
