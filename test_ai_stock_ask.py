@@ -1,21 +1,41 @@
 from ai_stock_ask import answer_stock
 
 
-def test_buy_when_strong_and_entry_active():
-    r=answer_stock({"ticker":"TEST","decision":"BUY","ai_score":80,"jst_p_up":.70,"entry_status":"ACTIVE","risk":"MEDIUM","market_regime":"BULLISH","entry_low":100,"entry_high":102,"stop_loss":95,"target_1":110},"TODAY")
+def test_buy_when_strong_and_live_entry_ready():
+    r=answer_stock({
+        "ticker":"TEST","decision":"BUY","ai_score":80,"jst_p_up":.70,
+        "entry_status":"ACTIVE","state":"ENTRY READY",
+        "live_required":True,"intraday_fresh":True,"price_source":"LIVE_INTRADAY",
+        "risk":"MEDIUM","market_regime":"BULLISH",
+        "entry_low":100,"entry_high":102,"stop_loss":95,"target_1":110
+    },"TODAY")
     assert r["action"]=="BUY"
     assert r["levels"]["entry_low"]==100
 
 
+def test_daily_buy_without_live_confirmation_stays_wait_today():
+    r=answer_stock({
+        "ticker":"TEST","decision":"BUY","ai_score":80,"jst_p_up":.70,
+        "entry_status":"ACTIVE","risk":"MEDIUM","market_regime":"BULLISH",
+        "entry_low":100,"entry_high":102,"stop_loss":95,"target_1":110
+    },"TODAY")
+    assert r["action"]=="WAIT"
+
+
 def test_wait_when_entry_not_confirmed():
-    r=answer_stock({"ticker":"TEST","decision":"BUY","ai_score":80,"jst_p_up":.70,"entry_status":"WAIT","risk":"LOW"},"TODAY")
+    r=answer_stock({
+        "ticker":"TEST","decision":"BUY","ai_score":80,"jst_p_up":.70,
+        "entry_status":"WAIT","state":"DEVELOPING",
+        "live_required":True,"intraday_fresh":True,"risk":"LOW"
+    },"TODAY")
     assert r["action"]=="WAIT"
 
 
 def test_monitor_fallback_never_becomes_buy():
     r=answer_stock({
         "ticker":"TEST","decision":"BUY","candidate_mode":"MONITOR_FALLBACK",
-        "ai_score":90,"jst_p_up":.80,"entry_status":"ACTIVE","risk":"LOW",
+        "ai_score":90,"jst_p_up":.80,"entry_status":"ACTIVE","state":"ENTRY READY",
+        "live_required":True,"intraday_fresh":True,"risk":"LOW",
         "market_regime":"BULLISH"
     },"TODAY")
     assert r["action"]=="WAIT"
