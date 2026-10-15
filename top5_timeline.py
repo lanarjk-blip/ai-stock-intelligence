@@ -178,6 +178,11 @@ def record_top5(db_path, dynamic, source_phase='full-universe', config=None):
             for _, item in dynamic.iterrows():
                 if str(_row_value(item, 'candidate_mode', '') or '').upper() != 'MONITOR_FALLBACK':
                     actionable_tickers.add(str(_row_value(item, 'ticker', '') or '').strip().upper())
+        actionable_tickers = set()
+        if dynamic is not None and not dynamic.empty:
+            for _, item in dynamic.iterrows():
+                if str(_row_value(item, 'candidate_mode', '') or '').upper() != 'MONITOR_FALLBACK':
+                    actionable_tickers.add(str(_row_value(item, 'ticker', '') or '').strip().upper())
         if old != new:
             for i, ticker in enumerate(entered):
                 if ticker not in actionable_tickers:
