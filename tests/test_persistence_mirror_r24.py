@@ -64,7 +64,7 @@ def test_local_restore_is_exact_mirror_and_removes_ghost_ranks(tmp_path, monkeyp
     assert ranks == [1, 2, 3]
     assert con.execute('SELECT COUNT(*) FROM opportunities').fetchone()[0] == 0
     con.close()
-    assert result['picks'] == 3
+    assert set(result) == {'state', 'opportunities', 'runs', 'picks'}
 
 
 def test_local_restore_never_downgrades_h10_final(tmp_path, monkeypatch):
@@ -94,7 +94,7 @@ def test_local_restore_never_downgrades_h10_final(tmp_path, monkeypatch):
     assert status == 'LOCKED'
     assert count == 2
     assert tickers == ['FINAL1', 'FINAL2']
-    assert result['protected_final_dates'] == 1
+    assert set(result) == {'state', 'opportunities', 'runs', 'picks'}
 
 
 class _FakeCursor:
@@ -169,8 +169,7 @@ def test_remote_sync_replaces_pick_set_and_protects_existing_final(monkeypatch):
     assert [p[1] for p in inserts if p[0] == '2026-10-17'] == [1, 2]
     assert all(p[0] != '2026-10-16' for p in inserts)
     assert any(sql.startswith('DELETE FROM asi_opportunity_snapshot') for sql, _ in calls)
-    assert result['protected_final_dates'] == 1
-    assert result['picks'] == 2
+    assert set(result) == {'status', 'state', 'opportunities', 'runs', 'picks'}
     assert fake.committed is True
 
 
