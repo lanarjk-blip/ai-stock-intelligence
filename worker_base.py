@@ -987,7 +987,29 @@ def analyze_and_publish(
         app.state_set("data_quality_ready_ratio", quality["ready_ratio"])
         app.state_set("data_quality_reasons", " | ".join(quality["reasons"]))
         if not quality["ready"]:
-            log("DATA_QUALITY", "BLOCK", " | ".join(quality["reasons"]))
+            reason_text=" | ".join(quality["reasons"])
+            log("DATA_QUALITY", "BLOCK", reason_text)
+            # A blocked full-universe cycle is authoritative evidence that old
+            # actionable state must not survive as if it were current. Keep the
+            # raw opportunity snapshot for diagnostics/monitor-only recovery,
+            # but clear all live/actionable derivatives and pending alerts.
+            try:
+                dynamic_engine._clear_dynamic_current("DATA_QUALITY_BLOCK")
+            except Exception:
+                log("DATA_QUALITY", "DYNAMIC_CLEAR_ERROR", traceback.format_exc()[-900:])
+            try:
+                hold_engine._clear_current("DATA_QUALITY_BLOCK")
+            except Exception:
+                log("DATA_QUALITY", "HOLD_CLEAR_ERROR", traceback.format_exc()[-900:])
+            try:
+                cleared=top5_timeline.record_top5(
+                    app.DB, pd.DataFrame(), source_phase="full-universe", config=CFG
+                )
+                log("DATA_QUALITY", "TOP5_CLEARED", str(cleared))
+            except Exception:
+                log("DATA_QUALITY", "TOP5_CLEAR_ERROR", traceback.format_exc()[-900:])
+            app.state_set("actionability_status", "DATA_QUALITY_BLOCK")
+            app.state_set("actionability_reason", reason_text)
             return pd.DataFrame()
         log(
             "DATA_QUALITY",
