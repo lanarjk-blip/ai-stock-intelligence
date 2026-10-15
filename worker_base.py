@@ -18,6 +18,7 @@ import premarket_intelligence
 import premarket_evaluation
 import premarket_explain
 import closing_overnight
+import hold_engine
 import market_session
 import accuracy_guardrails
 
@@ -986,7 +987,29 @@ def analyze_and_publish(
         app.state_set("data_quality_ready_ratio", quality["ready_ratio"])
         app.state_set("data_quality_reasons", " | ".join(quality["reasons"]))
         if not quality["ready"]:
-            log("DATA_QUALITY", "BLOCK", " | ".join(quality["reasons"]))
+            reason_text=" | ".join(quality["reasons"])
+            log("DATA_QUALITY", "BLOCK", reason_text)
+            # A blocked full-universe cycle is authoritative evidence that old
+            # actionable state must not survive as if it were current. Keep the
+            # raw opportunity snapshot for diagnostics/monitor-only recovery,
+            # but clear all live/actionable derivatives and pending alerts.
+            try:
+                dynamic_engine._clear_dynamic_current("DATA_QUALITY_BLOCK")
+            except Exception:
+                log("DATA_QUALITY", "DYNAMIC_CLEAR_ERROR", traceback.format_exc()[-900:])
+            try:
+                hold_engine._clear_current("DATA_QUALITY_BLOCK")
+            except Exception:
+                log("DATA_QUALITY", "HOLD_CLEAR_ERROR", traceback.format_exc()[-900:])
+            try:
+                cleared=top5_timeline.record_top5(
+                    app.DB, pd.DataFrame(), source_phase="full-universe", config=CFG
+                )
+                log("DATA_QUALITY", "TOP5_CLEARED", str(cleared))
+            except Exception:
+                log("DATA_QUALITY", "TOP5_CLEAR_ERROR", traceback.format_exc()[-900:])
+            app.state_set("actionability_status", "DATA_QUALITY_BLOCK")
+            app.state_set("actionability_reason", reason_text)
             return pd.DataFrame()
         log(
             "DATA_QUALITY",
@@ -1002,12 +1025,14 @@ def analyze_and_publish(
     write_alerts(res)
 
     dynamic = pd.DataFrame()
+    dynamic_ok = False
     try:
         dynamic = dynamic_engine.update(
             res,
             phase=source.upper(),
         )
 
+        dynamic_ok = True
         dynamic_count = (
             0
             if dynamic is None
@@ -1029,7 +1054,7 @@ def analyze_and_publish(
 
     # V1.8.42: record real full-universe Top-5 transitions and dispatch APK FCM.
     # Bootstrap snapshots must not produce false Top-5 changes.
-    if str(source).lower() == "full-universe" and dynamic is not None and not dynamic.empty:
+    if str(source).lower() == "full-universe" and dynamic_ok:
         try:
             event_result = top5_timeline.record_top5(app.DB, dynamic, source_phase=source, config=CFG)
             log("TOP5_TIMELINE", event_result.get("status", "UNKNOWN"),
@@ -1068,28 +1093,33 @@ def analyze_and_publish(
         except Exception:
             log("HISTORY", "ERROR", traceback.format_exc()[-1800:])
 
-        # V1.8.41 Stage 2: Pre-Market is separate from live Dynamic Opportunity.
-        try:
-            pre = lock_premarket_picks(res, source_phase=source)
-            app.state_set("premarket_status", pre.get("status", ""))
-        except Exception:
-            log("PREMARKET", "ERROR", traceback.format_exc()[-1800:])
+        # PRELIM-R2/H10-R1 are the sole Pre-Market writers. The legacy full-universe
+        # lock used to race the 08:50 scheduler and could expose an early LOCKED row.
+        log("PREMARKET", "SCHEDULER_OWNED", "legacy full-universe lock disabled; PRELIM-R2/H10-R1 own writes")
 
-    # V1.8.44: strict next-session Closing / Overnight Intelligence.
+    # Hold Horizon intelligence is refreshed only from the authoritative full-universe
+    # result and receives the actual IDX session phase, not the scan-source label.
     if str(source).lower() == "full-universe":
         try:
-            overnight = closing_overnight.select_overnight(res, CFG)
-            app.state_set("overnight_status", overnight.get("status", ""))
-            app.state_set("overnight_pick_count", len(overnight.get("picks", [])))
-            app.state_set("overnight_reason", overnight.get("reason", ""))
-            picks = overnight.get("picks")
-            if picks is not None and not picks.empty:
-                payload = picks.to_dict(orient="records")
-                app.state_set("overnight_picks_json", json.dumps(payload, ensure_ascii=False, default=str))
-            else:
-                app.state_set("overnight_picks_json", "[]")
-            log("OVERNIGHT", overnight.get("status", "UNKNOWN"), f"picks={len(overnight.get('picks', []))}")
+            session = market_session.session_status(CFG)
+            hold_phase = str(session.get("status") or "CLOSED").upper()
+            hold = hold_engine.update(res, phase=hold_phase)
+            app.state_set("hold_intelligence_status", "READY" if hold is not None and not hold.empty else "NO_CANDIDATE")
+            log("HOLD", "UPDATED" if hold is not None and not hold.empty else "NO_CANDIDATE",
+                f"phase={hold_phase} candidates={0 if hold is None else len(hold)}")
         except Exception:
+            app.state_set("hold_intelligence_status", "ERROR")
+            app.state_set("hold_intelligence_error", traceback.format_exc()[-900:])
+            log("HOLD", "ERROR", traceback.format_exc()[-1800:])
+
+    # Strict next-session Closing / Overnight Intelligence is immutable during
+    # the live session. Only a completed regular session may publish/replace it.
+    if str(source).lower() == "full-universe":
+        try:
+            _refresh_closing_overnight(res)
+        except Exception:
+            app.state_set("overnight_refresh_status", "ERROR")
+            app.state_set("overnight_error", traceback.format_exc()[-900:])
             log("OVERNIGHT", "ERROR", traceback.format_exc()[-1800:])
 
     top = res.iloc[0]
@@ -1150,6 +1180,9 @@ def premarket_market_date():
     return market_session.next_trading_date(CFG, now=_wib_now(), after_close=True)
 
 def lock_premarket_picks(res, source_phase="full-universe"):
+    # Compatibility shim only. PRELIM-R2/H10-R1 exclusively own Pre-Market writes.
+    return {"status":"SCHEDULER_OWNED","pick_count":0}
+
     ensure_premarket_tables()
     market_date = premarket_market_date()
     generated_at = datetime.now(timezone.utc).isoformat()
@@ -1246,7 +1279,7 @@ def evaluate_locked_premarket():
     try:
         dates=[r[0] for r in con.execute(
             """SELECT r.market_date FROM premarket_runs r
-               WHERE r.status='LOCKED' AND r.market_date < ?
+               WHERE r.status='LOCKED' AND r.note LIKE 'H10_FINAL%' AND r.market_date < ?
                  AND EXISTS (SELECT 1 FROM premarket_picks p WHERE p.market_date=r.market_date)
                  AND NOT EXISTS (
                      SELECT 1 FROM premarket_picks p2
@@ -1294,6 +1327,55 @@ def evaluate_locked_premarket():
         app.state_set('premarket_evaluation_at',datetime.now(timezone.utc).isoformat())
         log('PREMARKET_EVAL','UPDATED',f'rows={total}')
     return total
+
+
+def _refresh_closing_overnight(res, now=None):
+    """Publish next-session Overnight Intelligence only after the IDX close.
+
+    Live, break and pre-market cycles preserve the last immutable closing snapshot.
+    """
+    session = market_session.session_status(CFG, now=now)
+    status = str(session.get("status") or "").upper()
+    market_date = str(session.get("market_date") or "")
+    if status != "CLOSED":
+        app.state_set("overnight_refresh_status", f"PRESERVED_{status or 'UNKNOWN'}")
+        log("OVERNIGHT", "PRESERVED", f"session={status or 'UNKNOWN'} source_market_date={market_date}")
+        return {
+            "status": "PRESERVED",
+            "session": status,
+            "market_date": market_date,
+            "pick_count": int(app.state_get("overnight_pick_count") or 0),
+        }
+
+    overnight = closing_overnight.select_overnight(res, CFG)
+    picks = overnight.get("picks")
+    target_date = market_session.next_trading_date(CFG, now=now, after_close=True)
+    generated_at = datetime.now(timezone.utc).isoformat()
+    app.state_set("overnight_status", overnight.get("status", ""))
+    app.state_set("overnight_pick_count", 0 if picks is None else len(picks))
+    app.state_set("overnight_reason", overnight.get("reason", ""))
+    app.state_set("overnight_generated_at", generated_at)
+    app.state_set("overnight_source_market_date", market_date)
+    app.state_set("overnight_target_market_date", target_date)
+    app.state_set("overnight_refresh_status", "CLOSING_FINAL")
+    if picks is not None and not picks.empty:
+        payload = picks.to_dict(orient="records")
+        app.state_set("overnight_picks_json", json.dumps(payload, ensure_ascii=False, default=str))
+    else:
+        app.state_set("overnight_picks_json", "[]")
+    count = 0 if picks is None else len(picks)
+    log(
+        "OVERNIGHT",
+        overnight.get("status", "UNKNOWN"),
+        f"picks={count} source_market_date={market_date} target_market_date={target_date}",
+    )
+    return {
+        "status": overnight.get("status", ""),
+        "session": status,
+        "market_date": market_date,
+        "target_market_date": target_date,
+        "pick_count": count,
+    }
 
 
 # ============================================================

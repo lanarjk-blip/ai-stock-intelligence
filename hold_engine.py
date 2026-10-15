@@ -83,14 +83,14 @@ def _hold_score(r,ts,dc,market_ctx):
     edge=float(ts['edge'])*100; tconf=float(ts['confidence'])*100
     trend=dc['trend']; trend_bonus=5 if trend=='BULLISH' else (-5 if trend=='BEARISH' else 0)
     alignment,regime_effect=_ihsg_effect(r,market_ctx)
-    risk_pen={'LOW':0,'MEDIUM':4,'HIGH':9}.get(str(r.risk),6)
+    risk_pen={'LOW':0,'MEDIUM':4,'HIGH':9,'EXTREME':14}.get(str(r.risk or '').upper().strip(),6)
     persistence=0.42*pup+0.18*conf+0.14*rel+0.10*(50+edge)+0.08*tconf+0.08*alignment+trend_bonus+regime_effect-risk_pen
     return float(np.clip(persistence,0,100))
 
 def _overnight(r,ts,dc,phase,market_ctx):
     pup=float(r.jst_p_up or .5); pdown=float(r.jst_p_down or .5); conf=float(r.jst_confidence or 0)
     rel=float(r.relative_percentile or 0); ai=float(r.ai_score or 0)
-    edge=float(ts['edge']); risk=str(r.risk)
+    edge=float(ts['edge']); risk=str(r.risk or '').upper().strip()
     score=50 + (pup-pdown)*35 + (ai-50)*0.25 + (rel-.5)*20 + edge*30
     if dc['trend']=='BULLISH': score+=4
     elif dc['trend']=='BEARISH': score-=4
@@ -109,19 +109,35 @@ def _overnight(r,ts,dc,phase,market_ctx):
     return label,bias,score
 
 def _state(score,r,overnight):
-    dec=str(r.decision)
+    dec=str(r.decision or '').upper().strip()
     if overnight=='INVALIDATING': return 'REDUCE WATCH'
-    if score>=70 and dec in ('BUY','NEAR ENTRY','WATCH'): return 'HOLD CANDIDATE'
+    if score>=70 and dec in ('BUY','STRONG_BUY','NEAR ENTRY','WATCH'): return 'HOLD CANDIDATE'
     if score>=58: return 'HOLD / MONITOR'
     return 'REVIEW'
 
+def _clear_current(status='NO_CANDIDATE'):
+    con=dbcon()
+    try:
+        con.execute('DELETE FROM hold_intelligence')
+        con.commit()
+    finally:
+        con.close()
+    app.state_set('hold_intelligence_at',datetime.now(timezone.utc).isoformat())
+    app.state_set('hold_intelligence_count',0)
+    app.state_set('hold_intelligence_status',status)
+
+
 def update(res,phase='CLOSED'):
     ensure_tables()
-    if res is None or res.empty: return pd.DataFrame()
-    c=res.copy(); c=c[~c.decision.isin(['SELL/AVOID'])].copy()
+    if res is None or res.empty:
+        _clear_current('NO_DATA')
+        return pd.DataFrame()
+    c=res.copy(); decisions=c.decision.astype(str).str.upper().str.strip(); c=c[~decisions.isin({'SELL','SELL/AVOID','AVOID','STRONG_SELL','EXIT'})].copy()
     c=c[pd.to_numeric(c.ai_score,errors='coerce').fillna(0)>=45]
     c=c[pd.to_numeric(c.relative_percentile,errors='coerce').fillna(0)>=0.70]
-    if c.empty: return pd.DataFrame()
+    if c.empty:
+        _clear_current('NO_CANDIDATE')
+        return pd.DataFrame()
     c=c.sort_values(['relative_rank_score','ai_score'],ascending=False).head(int(CFG.get('hold_candidate_pool',20)))
     market_ctx=_ihsg_context()
     rows=[]
@@ -139,5 +155,5 @@ def update(res,phase='CLOSED'):
         con.execute('''INSERT OR REPLACE INTO hold_intelligence (ticker,company,generated_at,phase,current_price,state,hold_horizon,hold_score,p_hold,p_up,p_down,confidence,time_edge,risk,stop_loss,target_1,target_2,risk_reward,invalidation,overnight_state,next_session_bias,overnight_score,reason,last_opportunity_score,opportunity_rank,market_regime,market_score,ihsg_alignment,regime_effect) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',(r.ticker,r.company,now,phase,r.current_price,r.state,r.hold_horizon,r.hold_score,r.p_hold,r.p_up,r.p_down,r.confidence,r.time_edge,r.risk,r.stop_loss,r.target_1,r.target_2,r.risk_reward,r.invalidation,r.overnight_state,r.next_session_bias,r.overnight_score,r.reason,r.last_opportunity_score,r.opportunity_rank,r.market_regime,r.market_score,r.ihsg_alignment,r.regime_effect))
         con.execute('''INSERT INTO hold_intelligence_history(generated_at,ticker,phase,state,hold_horizon,hold_score,overnight_state,next_session_bias,overnight_score,current_price,stop_loss,target_1,risk_reward) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)''',(now,r.ticker,phase,r.state,r.hold_horizon,r.hold_score,r.overnight_state,r.next_session_bias,r.overnight_score,r.current_price,r.stop_loss,r.target_1,r.risk_reward))
     con.commit(); con.close()
-    app.state_set('hold_intelligence_at',datetime.now().isoformat()); app.state_set('hold_intelligence_phase',phase); app.state_set('hold_intelligence_count',len(out))
+    app.state_set('hold_intelligence_at',datetime.now(timezone.utc).isoformat()); app.state_set('hold_intelligence_phase',phase); app.state_set('hold_intelligence_count',len(out)); app.state_set('hold_intelligence_status','READY')
     return out

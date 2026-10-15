@@ -84,10 +84,19 @@ _WATCH = (
     "app.py",
     "dynamic_engine.py",
     "dynamic_opportunity_ui.py",
+    "top5_timeline.py",
+    "recommendation_history.py",
+    "hold_engine.py",
+    "ai_stock_ask.py",
+    "closing_overnight.py",
+    "fcm_adapter.py",
     "market_session.py",
     "data/idx_holidays.json",
     "premarket_scheduler.py",
     "premarket_preliminary.py",
+    "premarket_intelligence.py",
+    "premarket_evaluation.py",
+    "premarket_explain.py",
     "premarket_ui_patch.py",
     "runtime_health.py",
     "local_runtime_health.py",
@@ -104,14 +113,18 @@ _WATCH = (
 
 
 def _fingerprint():
+    """Hash source content so same-size edits cannot escape worker reload."""
     h = hashlib.sha256()
     for name in _WATCH:
         path = os.path.join(_BASE, name)
         h.update(name.encode("utf-8"))
         try:
-            stat = os.stat(path)
-            h.update(str(stat.st_mtime_ns).encode("ascii"))
-            h.update(str(stat.st_size).encode("ascii"))
+            with open(path, "rb") as fh:
+                while True:
+                    chunk = fh.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    h.update(chunk)
         except OSError:
             h.update(b"missing")
     return h.hexdigest()

@@ -95,6 +95,7 @@ def _payload_for(target_date: str, local, allow_full_analysis=True):
 
 
 def _write_preliminary(payload, target_date):
+    payload = h10._sanitize_payload_for_quality(payload)
     picks = list(payload.get("picks") or [])[: h10.MAX_PICKS]
     if not picks:
         return {"status": "NO_CANDIDATE", "market_date": target_date}
@@ -126,9 +127,9 @@ def _write_preliminary(payload, target_date):
             con.execute(
                 """INSERT INTO premarket_picks
                 (market_date,generated_at,rank,ticker,company,decision,confidence,
-                 ai_score,risk,entry_low,entry_high,stop_loss,target_1,target_2,
+                 ai_score,risk,reference_price,entry_low,entry_high,stop_loss,target_1,target_2,
                  ihsg_regime,reason,source_phase)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     target_date,
                     generated_at,
@@ -139,6 +140,7 @@ def _write_preliminary(payload, target_date):
                     h10._number(item.get("confidence")),
                     h10._number(item.get("ai_score")),
                     str(item.get("risk") or ""),
+                    h10._number(item.get("reference_price")),
                     h10._number(item.get("entry_low")),
                     h10._number(item.get("entry_high")),
                     h10._number(item.get("stop_loss")),

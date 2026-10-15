@@ -92,7 +92,8 @@ def _sync_action_state(con, dynamic, utc_iso, create_events, old_top5, new_top5,
             continue
         state = str(_row_value(row, 'state', '') or '').strip().upper()
         entry = str(_row_value(row, 'entry_status', '') or '').strip().upper()
-        ready = int(state == 'ENTRY READY' and entry == 'ACTIVE')
+        mode = str(_row_value(row, 'candidate_mode', '') or '').strip().upper()
+        ready = int(mode != 'MONITOR_FALLBACK' and state == 'ENTRY READY' and entry == 'ACTIVE')
         previous = con.execute('SELECT is_entry_ready FROM live_action_state WHERE ticker=?', (ticker,)).fetchone()
         was_ready = int(previous[0]) if previous else 0
 
@@ -131,9 +132,6 @@ def record_top5(db_path, dynamic, source_phase='full-universe', config=None):
     if str(source_phase).lower() != 'full-universe':
         return {'status': 'SKIPPED_SOURCE', 'events': 0}
     new = _ranked(dynamic)
-    if not new:
-        return {'status': 'SKIPPED_EMPTY', 'events': 0}
-
     ensure_tables(db_path)
     market = session_status(config)
     live = bool(market.get('live'))
@@ -144,6 +142,19 @@ def record_top5(db_path, dynamic, source_phase='full-universe', config=None):
     with _connect(db_path) as con:
         con.execute('BEGIN IMMEDIATE')
         row = con.execute('SELECT tickers_json FROM top5_live_state WHERE singleton=1').fetchone()
+        if not new:
+            old=[]
+            if row is not None:
+                try:
+                    old=json.loads(row[0]) or []
+                except (ValueError,TypeError):
+                    old=[]
+                con.execute('UPDATE top5_live_state SET updated_at=?,tickers_json=? WHERE singleton=1',(utc_iso,json.dumps([])))
+            else:
+                con.execute('INSERT INTO top5_live_state(singleton,updated_at,tickers_json) VALUES(1,?,?)',(utc_iso,json.dumps([])))
+            con.execute("UPDATE live_action_state SET updated_at=?,state='INACTIVE',entry_status='EMPTY',is_entry_ready=0",(utc_iso,))
+            con.execute("UPDATE top5_timeline SET notification_status='CANCELLED_STALE' WHERE notification_status IN ('PENDING','RETRY')")
+            return {'status':'CLEARED_EMPTY','events':0,'top5':[],'previous_top5':old,'market':market.get('status')}
         if row is None:
             con.execute('INSERT INTO top5_live_state(singleton,updated_at,tickers_json) VALUES(1,?,?)',
                         (utc_iso, json.dumps(new)))
@@ -167,8 +178,15 @@ def record_top5(db_path, dynamic, source_phase='full-universe', config=None):
         events = []
         entered = [t for t in new if t not in old]
         exited = [t for t in old if t not in new]
+        actionable_tickers = set()
+        if dynamic is not None and not dynamic.empty:
+            for _, item in dynamic.iterrows():
+                if str(_row_value(item, 'candidate_mode', '') or '').upper() != 'MONITOR_FALLBACK':
+                    actionable_tickers.add(str(_row_value(item, 'ticker', '') or '').strip().upper())
         if old != new:
             for i, ticker in enumerate(entered):
+                if ticker not in actionable_tickers:
+                    continue
                 replaced = exited[i] if i < len(exited) else ''
                 events.append(('ENTRY', ticker, old.index(ticker)+1 if ticker in old else None,
                                new.index(ticker)+1, replaced, '',

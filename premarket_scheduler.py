@@ -68,8 +68,7 @@ def _now_wib(now=None) -> datetime:
 
 
 def _is_trading_day(local: datetime) -> bool:
-    holidays = {str(x) for x in (CFG.get("market_holidays") or [])}
-    return local.weekday() < 5 and local.date().isoformat() not in holidays
+    return market_session.is_trading_date(local.date(), CFG)
 
 
 def window_state(now=None) -> str:
@@ -141,6 +140,7 @@ def _ensure_tables():
         market_date TEXT NOT NULL, generated_at TEXT NOT NULL,
         rank INTEGER, ticker TEXT, company TEXT, decision TEXT,
         confidence REAL, ai_score REAL, risk TEXT,
+        reference_price REAL,
         entry_low REAL, entry_high REAL, stop_loss REAL,
         target_1 REAL, target_2 REAL, ihsg_regime TEXT,
         reason TEXT, source_phase TEXT,
@@ -148,6 +148,9 @@ def _ensure_tables():
     con.execute("""CREATE TABLE IF NOT EXISTS premarket_runs (
         market_date TEXT PRIMARY KEY, generated_at TEXT NOT NULL,
         status TEXT NOT NULL, pick_count INTEGER NOT NULL, note TEXT)""")
+    existing = {str(r[1]) for r in con.execute("PRAGMA table_info(premarket_picks)").fetchall()}
+    if "reference_price" not in existing:
+        con.execute("ALTER TABLE premarket_picks ADD COLUMN reference_price REAL")
     con.commit()
     con.close()
 
@@ -237,7 +240,7 @@ def _select_monitor_candidates(res: pd.DataFrame) -> pd.DataFrame:
     if "decision" not in c.columns:
         c["decision"] = "MONITOR"
     source_decision = c["decision"].astype(str).str.upper().str.strip()
-    sell = source_decision.isin({"SELL", "SELL/AVOID", "AVOID", "STRONG_SELL"})
+    sell = source_decision.isin({"SELL", "SELL/AVOID", "AVOID", "STRONG_SELL", "EXIT"})
     c = c[~sell].copy()
     source_decision = source_decision.loc[c.index]
     if c.empty:
@@ -271,8 +274,71 @@ def _select_monitor_candidates(res: pd.DataFrame) -> pd.DataFrame:
     return c.reset_index(drop=True)
 
 
+def _quality_allows_actionable(now=None):
+    """Return whether Pre-Market may emit actionable BUY decisions.
+
+    Unknown, blocked or stale quality never removes monitor candidates; it only
+    downgrades the surface to monitor-only so H-10 cannot bypass worker safety.
+    """
+    status=str(_state_get("data_quality_status", "") or "").upper().strip()
+    reasons=str(_state_get("data_quality_reasons", "") or "").strip()
+    if status != "READY":
+        return False, reasons or f"data quality status {status or 'UNKNOWN'}"
+    raw=str(_state_get("last_collection", "") or "").strip()
+    if not raw:
+        return False, "missing collection timestamp"
+    try:
+        dt=datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt=dt.replace(tzinfo=timezone.utc)
+        current=_now_wib(now).astimezone(timezone.utc)
+        age_hours=max(0.0,(current-dt.astimezone(timezone.utc)).total_seconds()/3600.0)
+    except Exception:
+        return False, "invalid collection timestamp"
+    max_age=max(0.5,float(CFG.get("data_quality_max_age_hours",8)))
+    if age_hours > max_age:
+        return False, f"collection age {age_hours:.1f}h > {max_age:.1f}h"
+    return True, "READY"
+
+
+def _sanitize_payload_for_quality(payload, now=None):
+    """Re-check quality immediately before a preliminary/final database write."""
+    quality_ok, quality_reason = _quality_allows_actionable(now)
+    clean = dict(payload or {})
+    if quality_ok:
+        return clean
+    picks = []
+    for item in list(clean.get("picks") or []):
+        row = dict(item or {})
+        decision = str(row.get("decision") or "MONITOR").upper().strip()
+        if decision in {"BUY", "STRONG_BUY", "NEAR ENTRY"}:
+            row["decision"] = "WAIT"
+        row["reason"] = (
+            "MONITOR ONLY: data quality guard. "
+            + str(quality_reason or "not ready")
+            + ". "
+            + str(row.get("reason") or "")
+        )[:900]
+        row["source_phase"] = f"premarket-h10:{VERSION}:QUALITY_MONITOR"
+        picks.append(row)
+    clean["picks"] = picks
+    clean["mode"] = "QUALITY_MONITOR" if picks else "NO_TRADE"
+    clean["reason"] = "Data quality guard: " + str(quality_reason or "not ready")
+    return clean
+
+
 def select_candidates(res: pd.DataFrame):
-    """Strict BUY first; otherwise honest best-available monitor candidates."""
+    """Strict BUY only when runtime data quality is fresh and READY."""
+    quality_ok, quality_reason = _quality_allows_actionable()
+    if not quality_ok:
+        monitor = _select_monitor_candidates(res)
+        if not monitor.empty:
+            return (
+                monitor,
+                "QUALITY_MONITOR",
+                "Data quality guard: " + str(quality_reason or "not ready"),
+            )
+        return pd.DataFrame(), "NO_TRADE", "Data quality guard: " + str(quality_reason or "not ready")
     strict = premarket_intelligence.select_high_conviction(res, CFG)
     picks = strict.get("picks")
     if picks is not None and not picks.empty:
@@ -308,6 +374,7 @@ def _record_from_row(row, market_date, generated_at, rank, mode, reason):
         "confidence": _confidence(row),
         "ai_score": _number(row.get("ai_score")),
         "risk": str(row.get("risk") or ""),
+        "reference_price": close,
         "entry_low": lo,
         "entry_high": hi,
         "stop_loss": _number(row.get("stop_loss")),
@@ -409,6 +476,7 @@ def finalize_h10(now=None):
             picks, mode, reason = select_candidates(res)
             payload = _save_draft(res, market_date, mode, reason)
 
+    payload = _sanitize_payload_for_quality(payload, local)
     picks = list(payload.get("picks") or [])
     mode = str(payload.get("mode") or "NO_TRADE")
     generated_at = datetime.now(timezone.utc).isoformat()
@@ -430,14 +498,15 @@ def finalize_h10(now=None):
             con.execute(
                 """INSERT INTO premarket_picks
                 (market_date,generated_at,rank,ticker,company,decision,confidence,
-                 ai_score,risk,entry_low,entry_high,stop_loss,target_1,target_2,
+                 ai_score,risk,reference_price,entry_low,entry_high,stop_loss,target_1,target_2,
                  ihsg_regime,reason,source_phase)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     market_date, generated_at, i, str(item.get("ticker") or ""),
                     str(item.get("company") or ""), str(item.get("decision") or "MONITOR"),
                     _number(item.get("confidence")), _number(item.get("ai_score")),
-                    str(item.get("risk") or ""), _number(item.get("entry_low")),
+                    str(item.get("risk") or ""), _number(item.get("reference_price")),
+                    _number(item.get("entry_low")),
                     _number(item.get("entry_high")), _number(item.get("stop_loss")),
                     _number(item.get("target_1")), _number(item.get("target_2")),
                     str(item.get("ihsg_regime") or ""), str(item.get("reason") or ""),
