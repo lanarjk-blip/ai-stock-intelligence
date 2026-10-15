@@ -5,6 +5,7 @@ import pandas as pd
 
 import app
 import market_session
+import market_session
 
 CFG = app.CFGD
 DB_DIR = app.DB_DIR
@@ -108,6 +109,8 @@ def _score(row, ts):
 def _state(row, ts, score):
     decision=str(row.decision)
     es=str(ts.get('entry_status','NEUTRAL'))
+    mode=str(getattr(row,'candidate_mode','') or '').upper()
+    if mode=='MONITOR_FALLBACK': return 'MONITOR'
     mode=str(getattr(row,'candidate_mode','') or '').upper()
     if mode=='MONITOR_FALLBACK': return 'MONITOR'
     if es=='ACTIVE' and score>=65 and decision not in ('SELL/AVOID',): return 'ENTRY READY'
@@ -348,6 +351,7 @@ def update_opening_confirmation(now=None):
     try:
         app.state_set('opening_confirmation_at',now)
         app.state_set('opening_confirmation_count',len(out))
+        app.state_set('opening_confirmation_status','READY')
         app.state_set('opening_confirmation_status','READY')
     except Exception:
         pass
