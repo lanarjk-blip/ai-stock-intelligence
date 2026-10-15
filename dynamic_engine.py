@@ -350,16 +350,27 @@ def update_opening_confirmation(now=None):
         app.state_set('opening_confirmation_at',now)
         app.state_set('opening_confirmation_count',len(out))
         app.state_set('opening_confirmation_status','READY')
-        app.state_set('opening_confirmation_status','READY')
-        app.state_set('opening_confirmation_status','READY')
-        app.state_set('opening_confirmation_status','READY')
     except Exception:
         pass
     return out
 
+def _clear_dynamic_current(mode='NO_TRADE'):
+    con=dbcon()
+    try:
+        con.execute('DELETE FROM dynamic_opportunities')
+        con.execute('DELETE FROM dynamic_opportunity_pool')
+        con.commit()
+    finally:
+        con.close()
+    app.state_set('dynamic_opportunity_at',datetime.now(timezone.utc).isoformat())
+    app.state_set('dynamic_opportunity_count',0)
+    app.state_set('dynamic_candidate_mode',str(mode))
+
+
 def update(res, phase='CLOSED'):
     ensure_tables()
     if res is None or res.empty:
+        _clear_dynamic_current('NO_DATA')
         return pd.DataFrame()
 
     prev=read_current()
@@ -371,7 +382,9 @@ def update(res, phase='CLOSED'):
     # an empty Opportunity screen. The fallback never upgrades a decision or
     # changes any model score/probability.
     base=res.copy()
-    non_sell=base[~base.decision.isin(['SELL/AVOID'])].copy()
+    blocked={'SELL','SELL/AVOID','AVOID','STRONG_SELL','EXIT'}
+    decisions=base.decision.astype(str).str.upper().str.strip()
+    non_sell=base[~decisions.isin(blocked)].copy()
     c=non_sell.copy()
     c=c[pd.to_numeric(c.ai_score,errors='coerce').fillna(0)>=45]
     c=c[pd.to_numeric(c.relative_percentile,errors='coerce').fillna(0)>=0.70]
@@ -381,8 +394,7 @@ def update(res, phase='CLOSED'):
         c=non_sell.copy()
         c=c[pd.to_numeric(c.close,errors='coerce').notna()]
         if c.empty:
-            app.state_set('dynamic_candidate_mode','NO_TRADE')
-            app.state_set('dynamic_opportunity_count',0)
+            _clear_dynamic_current('NO_TRADE')
             return pd.DataFrame()
     c=c.sort_values(['relative_rank_score','ai_score'],ascending=False).head(30).reset_index(drop=True)
 

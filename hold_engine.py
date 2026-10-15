@@ -115,13 +115,29 @@ def _state(score,r,overnight):
     if score>=58: return 'HOLD / MONITOR'
     return 'REVIEW'
 
+def _clear_current(status='NO_CANDIDATE'):
+    con=dbcon()
+    try:
+        con.execute('DELETE FROM hold_intelligence')
+        con.commit()
+    finally:
+        con.close()
+    app.state_set('hold_intelligence_at',datetime.now(timezone.utc).isoformat())
+    app.state_set('hold_intelligence_count',0)
+    app.state_set('hold_intelligence_status',status)
+
+
 def update(res,phase='CLOSED'):
     ensure_tables()
-    if res is None or res.empty: return pd.DataFrame()
+    if res is None or res.empty:
+        _clear_current('NO_DATA')
+        return pd.DataFrame()
     c=res.copy(); decisions=c.decision.astype(str).str.upper().str.strip(); c=c[~decisions.isin({'SELL','SELL/AVOID','AVOID','STRONG_SELL','EXIT'})].copy()
     c=c[pd.to_numeric(c.ai_score,errors='coerce').fillna(0)>=45]
     c=c[pd.to_numeric(c.relative_percentile,errors='coerce').fillna(0)>=0.70]
-    if c.empty: return pd.DataFrame()
+    if c.empty:
+        _clear_current('NO_CANDIDATE')
+        return pd.DataFrame()
     c=c.sort_values(['relative_rank_score','ai_score'],ascending=False).head(int(CFG.get('hold_candidate_pool',20)))
     market_ctx=_ihsg_context()
     rows=[]
@@ -139,5 +155,5 @@ def update(res,phase='CLOSED'):
         con.execute('''INSERT OR REPLACE INTO hold_intelligence (ticker,company,generated_at,phase,current_price,state,hold_horizon,hold_score,p_hold,p_up,p_down,confidence,time_edge,risk,stop_loss,target_1,target_2,risk_reward,invalidation,overnight_state,next_session_bias,overnight_score,reason,last_opportunity_score,opportunity_rank,market_regime,market_score,ihsg_alignment,regime_effect) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',(r.ticker,r.company,now,phase,r.current_price,r.state,r.hold_horizon,r.hold_score,r.p_hold,r.p_up,r.p_down,r.confidence,r.time_edge,r.risk,r.stop_loss,r.target_1,r.target_2,r.risk_reward,r.invalidation,r.overnight_state,r.next_session_bias,r.overnight_score,r.reason,r.last_opportunity_score,r.opportunity_rank,r.market_regime,r.market_score,r.ihsg_alignment,r.regime_effect))
         con.execute('''INSERT INTO hold_intelligence_history(generated_at,ticker,phase,state,hold_horizon,hold_score,overnight_state,next_session_bias,overnight_score,current_price,stop_loss,target_1,risk_reward) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)''',(now,r.ticker,phase,r.state,r.hold_horizon,r.hold_score,r.overnight_state,r.next_session_bias,r.overnight_score,r.current_price,r.stop_loss,r.target_1,r.risk_reward))
     con.commit(); con.close()
-    app.state_set('hold_intelligence_at',datetime.now().isoformat()); app.state_set('hold_intelligence_phase',phase); app.state_set('hold_intelligence_count',len(out))
+    app.state_set('hold_intelligence_at',datetime.now(timezone.utc).isoformat()); app.state_set('hold_intelligence_phase',phase); app.state_set('hold_intelligence_count',len(out)); app.state_set('hold_intelligence_status','READY')
     return out

@@ -1003,12 +1003,14 @@ def analyze_and_publish(
     write_alerts(res)
 
     dynamic = pd.DataFrame()
+    dynamic_ok = False
     try:
         dynamic = dynamic_engine.update(
             res,
             phase=source.upper(),
         )
 
+        dynamic_ok = True
         dynamic_count = (
             0
             if dynamic is None
@@ -1030,7 +1032,7 @@ def analyze_and_publish(
 
     # V1.8.42: record real full-universe Top-5 transitions and dispatch APK FCM.
     # Bootstrap snapshots must not produce false Top-5 changes.
-    if str(source).lower() == "full-universe" and dynamic is not None and not dynamic.empty:
+    if str(source).lower() == "full-universe" and dynamic_ok:
         try:
             event_result = top5_timeline.record_top5(app.DB, dynamic, source_phase=source, config=CFG)
             log("TOP5_TIMELINE", event_result.get("status", "UNKNOWN"),
@@ -1163,6 +1165,9 @@ def premarket_market_date():
     return market_session.next_trading_date(CFG, now=_wib_now(), after_close=True)
 
 def lock_premarket_picks(res, source_phase="full-universe"):
+    # Compatibility shim only. PRELIM-R2/H10-R1 exclusively own Pre-Market writes.
+    return {"status":"SCHEDULER_OWNED","pick_count":0}
+
     ensure_premarket_tables()
     market_date = premarket_market_date()
     generated_at = datetime.now(timezone.utc).isoformat()
@@ -1259,7 +1264,7 @@ def evaluate_locked_premarket():
     try:
         dates=[r[0] for r in con.execute(
             """SELECT r.market_date FROM premarket_runs r
-               WHERE r.status='LOCKED' AND r.market_date < ?
+               WHERE r.status='LOCKED' AND r.note LIKE 'H10_FINAL%' AND r.market_date < ?
                  AND EXISTS (SELECT 1 FROM premarket_picks p WHERE p.market_date=r.market_date)
                  AND NOT EXISTS (
                      SELECT 1 FROM premarket_picks p2
