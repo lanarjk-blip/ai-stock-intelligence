@@ -1,5 +1,8 @@
+from datetime import datetime, timedelta, timezone
+
 from fastapi import HTTPException
 
+import runtime_api
 import runtime_host_api
 
 
@@ -10,10 +13,12 @@ def test_readiness_ready_when_runtime_health_is_ready():
         grace_seconds=900,
     )
     assert out["ready"] is True
+    assert out["engine_ready"] is True
+    assert out["progressing_warmup"] is False
     assert out["startup_grace"] is False
 
 
-def test_readiness_allows_only_warming_or_missing_during_startup_grace():
+def test_readiness_allows_only_missing_or_nonprogressing_warmup_during_startup_grace():
     missing = runtime_host_api.readiness_decision(
         {"ok": False, "status": "RUNTIME_MISSING", "engine": {"status": "ENGINE_WARMING"}},
         elapsed_seconds=120,
@@ -32,14 +37,68 @@ def test_readiness_allows_only_warming_or_missing_during_startup_grace():
     assert stalled["startup_grace"] is False
 
 
-def test_readiness_missing_after_grace_is_not_healthy():
+def test_progressing_first_cycle_stays_deployment_ready_after_grace():
     out = runtime_host_api.readiness_decision(
-        {"ok": False, "status": "RUNTIME_MISSING", "engine": {"status": "ENGINE_WARMING"}},
+        {
+            "ok": False,
+            "status": "ENGINE_WARMING",
+            "heartbeat": {"worker_pid": 123},
+            "engine": {
+                "status": "ENGINE_WARMING",
+                "engine_progress_age_seconds": 45,
+                "engine_progress_max_age_seconds": 1200,
+            },
+        },
+        elapsed_seconds=1800,
+        grace_seconds=900,
+    )
+    assert out["engine_ready"] is False
+    assert out["progressing_warmup"] is True
+    assert out["ready"] is True
+    assert out["startup_grace"] is False
+
+
+def test_nonprogressing_warmup_after_grace_is_not_healthy():
+    out = runtime_host_api.readiness_decision(
+        {
+            "ok": False,
+            "status": "ENGINE_WARMING",
+            "engine": {"status": "ENGINE_WARMING", "engine_progress_age_seconds": None},
+        },
         elapsed_seconds=901,
         grace_seconds=900,
     )
     assert out["ready"] is False
+    assert out["progressing_warmup"] is False
     assert out["startup_grace"] is False
+
+
+def test_runtime_health_to_readiness_first_cycle_integration():
+    now = datetime(2026, 10, 15, 2, 0, tzinfo=timezone.utc)
+    state = {
+        "engine_cycle_status": "RUNNING",
+        "engine_last_run": "",
+        "engine_progress_at": (now - timedelta(seconds=30)).isoformat(),
+        "engine_progress_stage": "FULL_COLLECT",
+    }
+    cfg = {
+        "runtime_heartbeat_max_age_seconds": 180,
+        "engine_progress_max_age_seconds": 1200,
+        "engine_result_max_age_minutes": 90,
+    }
+    heartbeat = (123, "gen", "build", now - timedelta(seconds=20), "bridge")
+    health = runtime_api.runtime_health_snapshot(heartbeat, state, now=now, cfg=cfg)
+    assert health["ok"] is False
+    assert health["status"] == "ENGINE_WARMING"
+
+    ready = runtime_host_api.readiness_decision(
+        health,
+        elapsed_seconds=1800,
+        grace_seconds=900,
+    )
+    assert ready["engine_ready"] is False
+    assert ready["progressing_warmup"] is True
+    assert ready["ready"] is True
 
 
 def test_ready_endpoint_returns_503_for_stalled_runtime(monkeypatch):
