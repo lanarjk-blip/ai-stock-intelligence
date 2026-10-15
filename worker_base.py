@@ -280,6 +280,197 @@ def collect_fast(universe, state_prefix="last_collection"):
     return ok, rows, errors
 
 
+
+def _state_age_seconds(key, now=None):
+    value = app.state_get(key)
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        current = now or datetime.now(timezone.utc)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=timezone.utc)
+        return max(0.0, (current.astimezone(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds())
+    except Exception:
+        return None
+
+
+def intraday_refresh_due(now=None):
+    """Refresh live candidate bars on a bounded cadence, never off-market."""
+    session = market_session.session_status(CFG, now=now)
+    status = str(session.get("status") or "").upper()
+    market_date = str(session.get("market_date") or "")
+    if not bool(session.get("live")):
+        return False, f"NOT_LIVE_{status or 'UNKNOWN'}"
+
+    if str(app.state_get("last_intraday_market_date") or "") != market_date:
+        return True, "NEW_MARKET_DATE"
+
+    current = now
+    if current is None:
+        current = datetime.now(timezone.utc)
+    elif current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+
+    refresh_seconds = max(5, int(CFG.get("intraday_refresh_minutes", 30))) * 60
+    success_age = _state_age_seconds("last_intraday_collection", current)
+    if success_age is not None and success_age < refresh_seconds:
+        return False, f"FRESH_{success_age:.0f}s"
+
+    retry_seconds = max(5, int(CFG.get("intraday_refresh_retry_minutes", 10))) * 60
+    attempt_age = _state_age_seconds("last_intraday_attempt", current)
+    if success_age is None and attempt_age is not None and attempt_age < retry_seconds:
+        return False, f"RETRY_BACKOFF_{attempt_age:.0f}s"
+    return True, "DUE"
+
+
+def _intraday_candidate_tickers(res, now=None):
+    """Prioritize H-10 + current Dynamic + strongest daily candidates."""
+    limit = max(5, int(CFG.get("intraday_symbols_per_cycle", 60)))
+    ordered = []
+
+    def add(value):
+        ticker = str(value or "").upper().replace(".JK", "").strip()
+        if ticker and ticker not in ordered:
+            ordered.append(ticker)
+
+    try:
+        con = dbcon()
+        if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='dynamic_opportunities'").fetchone():
+            for row in con.execute("SELECT ticker FROM dynamic_opportunities ORDER BY rank LIMIT 20").fetchall():
+                add(row[0])
+        session = market_session.session_status(CFG, now=now)
+        market_date = str(session.get("market_date") or "")
+        run = None
+        if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='premarket_runs'").fetchone():
+            run = con.execute("SELECT status,note FROM premarket_runs WHERE market_date=?", (market_date,)).fetchone()
+        if run and str(run[0] or "").upper() == "LOCKED" and str(run[1] or "").startswith("H10_FINAL"):
+            for row in con.execute("SELECT ticker FROM premarket_picks WHERE market_date=? ORDER BY rank", (market_date,)).fetchall():
+                add(row[0])
+        con.close()
+    except Exception:
+        try:
+            con.close()
+        except Exception:
+            pass
+
+    if res is not None and not res.empty:
+        ranked = res.copy()
+        sort_cols = [c for c in ("relative_rank_score", "ai_score") if c in ranked.columns]
+        if sort_cols:
+            ranked = ranked.sort_values(sort_cols, ascending=[False] * len(sort_cols))
+        for ticker in ranked.get("ticker", pd.Series(dtype=str)).tolist():
+            add(ticker)
+            if len(ordered) >= limit:
+                break
+    return ordered[:limit]
+
+
+def _intraday_history_count(ticker):
+    try:
+        con = dbcon()
+        row = con.execute("SELECT COUNT(*) FROM intraday WHERE ticker=?", (str(ticker),)).fetchone()
+        con.close()
+        return int(row[0] if row else 0)
+    except Exception:
+        return 0
+
+
+def _fetch_intraday_candidate(ticker, company=""):
+    try:
+        full_days = max(5, int(CFG.get("intraday_period_days", 60)))
+        refresh_days = max(2, int(CFG.get("intraday_refresh_period_days", 5)))
+        period_days = full_days if _intraday_history_count(ticker) < 60 else min(full_days, refresh_days)
+        recover = getattr(app, "fetch_chart_recover", None)
+        if callable(recover):
+            value = recover(
+                ticker,
+                period_days,
+                CFG.get("intraday_interval", "30m"),
+                company=company,
+            )
+            df = _recover_dataframe(value)
+        else:
+            df = app.fetch_chart(ticker, period_days, CFG.get("intraday_interval", "30m"))
+        return str(ticker), df, ""
+    except Exception as exc:
+        return str(ticker), pd.DataFrame(), str(exc)[:300]
+
+
+def refresh_intraday_candidates(res, now=None, force=False):
+    """Refresh only relevant live candidates and persist bars serially."""
+    session = market_session.session_status(CFG, now=now)
+    if not bool(session.get("live")):
+        status = str(session.get("status") or "UNKNOWN").upper()
+        app.state_set("intraday_refresh_status", f"SKIP_{status}")
+        return {"status": f"SKIP_{status}", "ok": 0, "rows": 0, "errors": 0, "tickers": 0}
+
+    due, reason = intraday_refresh_due(now=now)
+    if not force and not due:
+        app.state_set("intraday_refresh_status", f"SKIP_{reason}")
+        return {"status": f"SKIP_{reason}", "ok": 0, "rows": 0, "errors": 0, "tickers": 0}
+
+    tickers = _intraday_candidate_tickers(res, now=now)
+    if not tickers:
+        app.state_set("intraday_refresh_status", "SKIP_NO_CANDIDATES")
+        return {"status": "SKIP_NO_CANDIDATES", "ok": 0, "rows": 0, "errors": 0, "tickers": 0}
+
+    company_map = {}
+    if res is not None and not res.empty and "ticker" in res.columns:
+        for _, row in res.iterrows():
+            company_map[str(row.get("ticker") or "").upper().replace(".JK", "")] = str(row.get("company") or "")
+
+    attempt_at = datetime.now(timezone.utc).isoformat()
+    app.state_set("last_intraday_attempt", attempt_at)
+    mark_engine_progress("INTRADAY_REFRESH_START", f"tickers={len(tickers)} reason={reason}")
+    log("INTRADAY", "START", f"tickers={len(tickers)} reason={reason}")
+
+    workers = max(1, min(4, int(CFG.get("collector_workers", 6)), len(tickers)))
+    ok = 0
+    rows = 0
+    errors = []
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(_fetch_intraday_candidate, ticker, company_map.get(ticker, "")): ticker
+            for ticker in tickers
+        }
+        for future in as_completed(futures):
+            ticker = futures[future]
+            try:
+                _, df, err = future.result()
+                if err:
+                    errors.append(f"{ticker}: {err}")
+                    continue
+                if df is None or df.empty:
+                    errors.append(f"{ticker}: empty intraday result")
+                    continue
+                saved = int(app.save_intraday(df, ticker) or 0)
+                rows += saved
+                ok += 1
+            except Exception as exc:
+                errors.append(f"{ticker}: {str(exc)[:300]}")
+
+    market_date = str(session.get("market_date") or "")
+    app.state_set("last_intraday_market_date", market_date)
+    app.state_set("last_intraday_ok", ok)
+    app.state_set("last_intraday_rows", rows)
+    app.state_set("last_intraday_errors", len(errors))
+    app.state_set("last_intraday_tickers", len(tickers))
+    if ok > 0:
+        completed_at = datetime.now(timezone.utc).isoformat()
+        app.state_set("last_intraday_collection", completed_at)
+        status = "READY" if ok == len(tickers) else "PARTIAL"
+    else:
+        status = "ERROR"
+    app.state_set("intraday_refresh_status", status)
+    if errors:
+        app.state_set("intraday_refresh_error_sample", " | ".join(errors[:5])[:1500])
+    mark_engine_progress("INTRADAY_REFRESH_DONE", f"ok={ok}/{len(tickers)} rows={rows} errors={len(errors)}")
+    log("INTRADAY", status, f"ok={ok}/{len(tickers)} rows={rows} errors={len(errors)}")
+    return {"status": status, "ok": ok, "rows": rows, "errors": len(errors), "tickers": len(tickers)}
+
 def full_collection_status(universe_count):
     """Return (due, reason) while preserving the last broad quality sample."""
     total = max(1, int(universe_count or 0))
@@ -1076,6 +1267,19 @@ def analyze_and_publish(
             "READY",
             f"collection={quality['collection_ratio']:.1%} ready={quality['ready_ratio']:.1%} rows={quality['price_rows']}",
         )
+
+    if str(source).lower() == "full-universe":
+        try:
+            intraday_result = refresh_intraday_candidates(res)
+            log(
+                "INTRADAY",
+                "CYCLE",
+                f"status={intraday_result.get('status')} ok={intraday_result.get('ok',0)}/{intraday_result.get('tickers',0)} rows={intraday_result.get('rows',0)}",
+            )
+        except Exception:
+            app.state_set("intraday_refresh_status", "ERROR")
+            app.state_set("intraday_refresh_error", traceback.format_exc()[-900:])
+            log("INTRADAY", "ERROR", traceback.format_exc()[-1800:])
 
     saved = save_opportunities(
         res,

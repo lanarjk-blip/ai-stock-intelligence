@@ -59,20 +59,106 @@ def read_current():
         return pd.DataFrame()
 
 
+def _latest_intraday_live_price(ticker, now=None):
+    """Return only a same-market-date, sufficiently fresh live bar."""
+    session = market_session.session_status(CFG, now=now)
+    live = bool(session.get("live"))
+    market_date = str(session.get("market_date") or "")
+    result = {
+        "live_required": live,
+        "fresh": False,
+        "price": None,
+        "ts": "",
+        "age_minutes": None,
+        "market_date": market_date,
+    }
+    if not live:
+        return result
+    try:
+        con = dbcon()
+        d = pd.read_sql_query(
+            "SELECT ts,close FROM intraday WHERE ticker=? ORDER BY ts DESC LIMIT 20",
+            con,
+            params=(str(ticker).upper().replace('.JK',''),),
+        )
+        con.close()
+        if d.empty:
+            return result
+        d['ts'] = pd.to_datetime(d['ts'], utc=True, errors='coerce')
+        d = d.dropna(subset=['ts','close'])
+        if d.empty:
+            return result
+        d['wib'] = d['ts'].dt.tz_convert('Asia/Jakarta')
+        d = d[d['wib'].dt.date.astype(str) == market_date]
+        if d.empty:
+            return result
+        row = d.sort_values('ts').iloc[-1]
+        local_now = pd.Timestamp(session.get('wib'))
+        if local_now.tzinfo is None:
+            local_now = local_now.tz_localize('Asia/Jakarta')
+        age_minutes = max(0.0, (local_now.tz_convert('UTC') - row['ts']).total_seconds() / 60.0)
+        stale_limit = max(
+            45,
+            int(CFG.get('intraday_live_stale_minutes', 45)),
+            int(CFG.get('intraday_refresh_minutes', 30)) + 10,
+        )
+        result.update({
+            "fresh": age_minutes <= stale_limit,
+            "price": float(row['close']),
+            "ts": row['ts'].isoformat(),
+            "age_minutes": age_minutes,
+        })
+        return result
+    except Exception:
+        try:
+            con.close()
+        except Exception:
+            pass
+        return result
+
+
 def _cached_time_signal(ticker):
-    """Use the existing V1.8.20.1 time model, but only for a small candidate set."""
+    """Use time intelligence only when live intraday evidence is actually fresh."""
+    live_bar = _latest_intraday_live_price(str(ticker))
+    if live_bar.get('live_required') and not live_bar.get('fresh'):
+        return {
+            'edge': 0.0,
+            'confidence': 0.0,
+            'horizon': 'EOD',
+            'entry_status': 'NEUTRAL',
+            'live_required': True,
+            'intraday_fresh': False,
+            'intraday_at': str(live_bar.get('ts') or ''),
+            'price_source': 'DAILY_FALLBACK_STALE_INTRADAY',
+        }
     try:
         tp=app.intraday_prediction(str(ticker))
         if tp is None or tp.empty:
-            return {'edge':0.0,'confidence':0.0,'horizon':'EOD','entry_status':'NEUTRAL'}
-        # Prefer EOD for next-session / broad opportunity selection.
+            return {
+                'edge':0.0,'confidence':0.0,'horizon':'EOD','entry_status':'NEUTRAL',
+                'live_required':bool(live_bar.get('live_required')),
+                'intraday_fresh':bool(live_bar.get('fresh')),
+                'intraday_at':str(live_bar.get('ts') or ''),
+                'price_source':'LIVE_INTRADAY' if live_bar.get('fresh') else 'HISTORICAL_INTRADAY',
+            }
         row=tp[tp.horizon.astype(str)=='EOD']
         if row.empty: row=tp.iloc[[0]]
         r=row.iloc[0]
-        return {'edge':float(r.edge),'confidence':float(r.confidence),'horizon':str(r.horizon),'entry_status':str(r.entry_status)}
+        return {
+            'edge':float(r.edge),'confidence':float(r.confidence),'horizon':str(r.horizon),'entry_status':str(r.entry_status),
+            'live_required':bool(live_bar.get('live_required')),
+            'intraday_fresh':bool(live_bar.get('fresh')),
+            'intraday_at':str(live_bar.get('ts') or ''),
+            'price_source':'LIVE_INTRADAY' if live_bar.get('fresh') else 'HISTORICAL_INTRADAY',
+        }
     except Exception:
-        return {'edge':0.0,'confidence':0.0,'horizon':'EOD','entry_status':'NEUTRAL'}
-
+        return {
+            'edge':0.0,'confidence':0.0,'horizon':'EOD','entry_status':'NEUTRAL',
+            'live_required':bool(live_bar.get('live_required')),
+            'intraday_fresh':bool(live_bar.get('fresh')),
+            'intraday_at':str(live_bar.get('ts') or ''),
+            'price_source':'LIVE_INTRADAY' if live_bar.get('fresh') else 'HISTORICAL_INTRADAY',
+        }
 
 def _market_context(row):
     """Return a small, transparent IHSG regime signal for opportunity scoring."""
@@ -110,6 +196,7 @@ def _state(row, ts, score):
     es=str(ts.get('entry_status','NEUTRAL')).upper().strip()
     mode=str(getattr(row,'candidate_mode','') or '').upper()
     if mode=='MONITOR_FALLBACK': return 'MONITOR'
+    if bool(ts.get('live_required')) and not bool(ts.get('intraday_fresh')): return 'MONITOR'
     blocked={'SELL','SELL/AVOID','AVOID','STRONG_SELL','EXIT'}
     if es=='ACTIVE' and score>=65 and decision not in blocked: return 'ENTRY READY'
     if es=='DEVELOPING' and score>=60 and decision not in blocked: return 'DEVELOPING'
@@ -400,6 +487,10 @@ def update(res, phase='CLOSED'):
 
     rows=[]
     for _,r in c.iterrows():
+        r=r.copy()
+        live_bar=_latest_intraday_live_price(r.ticker)
+        if live_bar.get('fresh') and live_bar.get('price') is not None:
+            r['close']=float(live_bar['price'])
         ts=_cached_time_signal(r.ticker)
         score=_score(r,ts)
         lo,hi=_dynamic_entry(r,ts)
@@ -422,7 +513,10 @@ def update(res, phase='CLOSED'):
             'relative_rank_score':float(r.relative_rank_score) if pd.notna(r.relative_rank_score) else np.nan,
             'decision':str(r.decision),'decision_reason':str(r.decision_reason),
             'market_regime':market_regime,'market_score':market_score,'ihsg_alignment':ihsg_alignment,'regime_adjustment':regime_adjustment,
-            'prev_rank':prev_rank,'prev_score':prev_score,'stable':stable,'candidate_mode':candidate_mode
+            'prev_rank':prev_rank,'prev_score':prev_score,'stable':stable,'candidate_mode':candidate_mode,
+            'price_source':str(ts.get('price_source') or ('LIVE_INTRADAY' if live_bar.get('fresh') else 'DAILY')),
+            'intraday_fresh':bool(ts.get('intraday_fresh')),
+            'intraday_at':str(ts.get('intraday_at') or live_bar.get('ts') or '')
         })
 
     cand=pd.DataFrame(rows).sort_values('score',ascending=False).reset_index(drop=True)
@@ -472,19 +566,21 @@ def update(res, phase='CLOSED'):
         rank=i+1; ts=rr.time
         state=_state(rr,ts,float(rr.score))
         mode_note='monitor fallback; no signal upgraded; ' if str(rr.candidate_mode)=='MONITOR_FALLBACK' else ''
-        reason=f"{mode_note}score {rr.score:.1f}; IHSG {rr.market_regime} {rr.market_score:.1f}; alignment {rr.ihsg_alignment:.1f}; regime adj {rr.regime_adjustment:+.1f}; relative {rr.relative_percentile*100:.1f}%; time edge {ts.get('edge',0)*100:+.1f}%; {rr.decision}"
+        intraday_note=(f"intraday FRESH {rr.intraday_at}" if bool(rr.intraday_fresh) else ("intraday STALE; live action blocked" if bool(ts.get('live_required')) else "intraday historical/off-market"))
+        reason=f"{mode_note}score {rr.score:.1f}; IHSG {rr.market_regime} {rr.market_score:.1f}; alignment {rr.ihsg_alignment:.1f}; regime adj {rr.regime_adjustment:+.1f}; relative {rr.relative_percentile*100:.1f}%; time edge {ts.get('edge',0)*100:+.1f}%; {intraday_note}; {rr.decision}"
         prev_rank=rr.prev_rank
         prev_rank_missing = prev_rank is None or pd.isna(prev_rank)
         replacement='NEW' if prev_rank_missing else ('RETAINED' if int(prev_rank)==rank else f'RANK_CHANGED {int(prev_rank)}→{rank}')
         vals=(rr.ticker,rr.company,now,rank,float(rr.score),state,str(ts.get('entry_status','NEUTRAL')),str(ts.get('horizon','EOD')),str(rr.decision),str(rr.candidate_mode),rr.close,rr.entry_low,rr.entry_high,rr.stop_loss,rr.target_1,rr.target_2,rr.risk_reward,rr.risk,rr.ai_score,rr.p_up,rr.p_down,rr.confidence,rr.relative_percentile,rr.relative_rank_score,float(ts.get('edge',0.0)),float(ts.get('confidence',0.0)),reason,replacement,int(rr.stable),(None if prev_rank_missing else int(prev_rank)),rr.prev_score,rr.market_regime,rr.market_score,rr.ihsg_alignment,rr.regime_adjustment)
         con.execute('''INSERT OR REPLACE INTO dynamic_opportunities (ticker,company,generated_at,rank,opportunity_score,state,entry_status,horizon,decision,candidate_mode,close,entry_low,entry_high,stop_loss,target_1,target_2,risk_reward,risk,ai_score,p_up,p_down,confidence,relative_percentile,relative_rank_score,time_edge,time_confidence,reason,replacement_reason,stable_cycles,previous_rank,previous_score,market_regime,market_score,ihsg_alignment,regime_adjustment) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',vals)
         con.execute('INSERT INTO dynamic_opportunity_history(generated_at,ticker,rank,opportunity_score,state,entry_status,close,entry_low,entry_high,stop_loss,target_1,risk_reward,risk,decision,relative_percentile,time_edge) VALUES('+','.join(['?']*16)+')',(now,rr.ticker,rank,float(rr.score),state,str(ts.get('entry_status','NEUTRAL')),rr.close,rr.entry_low,rr.entry_high,rr.stop_loss,rr.target_1,rr.risk_reward,rr.risk,rr.decision,rr.relative_percentile,float(ts.get('edge',0.0))))
-        out.append({'rank':rank,'ticker':rr.ticker,'company':rr.company,'opportunity_score':rr.score,'state':state,'entry_status':str(ts.get('entry_status','NEUTRAL')),'horizon':str(ts.get('horizon','EOD')),'decision':rr.decision,'close':rr.close,'entry_low':rr.entry_low,'entry_high':rr.entry_high,'stop_loss':rr.stop_loss,'target_1':rr.target_1,'target_2':rr.target_2,'risk_reward':rr.risk_reward,'risk':rr.risk,'ai_score':rr.ai_score,'p_up':rr.p_up,'p_down':rr.p_down,'confidence':rr.confidence,'relative_percentile':rr.relative_percentile,'time_edge':float(ts.get('edge',0.0)),'time_confidence':float(ts.get('confidence',0.0)),'reason':reason,'replacement_reason':replacement,'stable_cycles':int(rr.stable),'market_regime':rr.market_regime,'market_score':rr.market_score,'ihsg_alignment':rr.ihsg_alignment,'regime_adjustment':rr.regime_adjustment,'candidate_mode':rr.candidate_mode})
+        out.append({'rank':rank,'ticker':rr.ticker,'company':rr.company,'opportunity_score':rr.score,'state':state,'entry_status':str(ts.get('entry_status','NEUTRAL')),'horizon':str(ts.get('horizon','EOD')),'decision':rr.decision,'close':rr.close,'entry_low':rr.entry_low,'entry_high':rr.entry_high,'stop_loss':rr.stop_loss,'target_1':rr.target_1,'target_2':rr.target_2,'risk_reward':rr.risk_reward,'risk':rr.risk,'ai_score':rr.ai_score,'p_up':rr.p_up,'p_down':rr.p_down,'confidence':rr.confidence,'relative_percentile':rr.relative_percentile,'time_edge':float(ts.get('edge',0.0)),'time_confidence':float(ts.get('confidence',0.0)),'reason':reason,'replacement_reason':replacement,'stable_cycles':int(rr.stable),'market_regime':rr.market_regime,'market_score':rr.market_score,'ihsg_alignment':rr.ihsg_alignment,'regime_adjustment':rr.regime_adjustment,'candidate_mode':rr.candidate_mode,'price_source':rr.price_source,'intraday_fresh':bool(rr.intraday_fresh),'intraday_at':rr.intraday_at})
     con.commit(); con.close()
     app.state_set('dynamic_opportunity_at',datetime.now().isoformat())
     app.state_set('dynamic_opportunity_phase',phase)
     app.state_set('dynamic_opportunity_count',len(out))
     app.state_set('dynamic_candidate_mode',candidate_mode)
+    app.state_set('dynamic_intraday_fresh_count',sum(1 for item in out if item.get('intraday_fresh')))
 
     # Stage 3: only evaluates today's immutable Pre-Market list.
     # It never mutates the locked picks themselves.
