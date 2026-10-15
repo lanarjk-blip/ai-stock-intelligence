@@ -29,7 +29,6 @@ def test_market_session_respects_verified_long_holiday_gap():
     assert status["live"] is False
     assert status["calendar_verified"] is True
 
-    # 23 Dec after close must skip 24-25 Dec plus weekend and target Monday 28 Dec.
     after_close = datetime(2026, 12, 23, 16, 10, tzinfo=wib)
     assert market_session.next_trading_date(now=after_close, after_close=True) == "2026-12-28"
 
@@ -44,7 +43,7 @@ def test_premarket_scheduler_uses_configured_verified_holidays():
     assert premarket_scheduler._target_market_date(holiday_morning) == "2026-12-28"
 
 
-def _write_remote_state(db, heartbeat):
+def _write_remote_state(db, heartbeat, *, engine_last_run=None, engine_status=None, engine_progress_at=None):
     con = sqlite3.connect(db)
     con.execute("CREATE TABLE state (key TEXT PRIMARY KEY,value TEXT)")
     rows = {
@@ -54,19 +53,36 @@ def _write_remote_state(db, heartbeat):
         "remote_worker_heartbeat_at": heartbeat,
         "remote_worker_bridge_version": "unit",
     }
+    if engine_last_run is not None:
+        rows["engine_last_run"] = engine_last_run
+    if engine_status is not None:
+        rows["engine_cycle_status"] = engine_status
+    if engine_progress_at is not None:
+        rows["engine_progress_at"] = engine_progress_at
+        rows["engine_progress_stage"] = "CYCLE_DONE" if engine_status == "IDLE" else "COLLECT_PROGRESS"
     con.executemany("INSERT INTO state(key,value) VALUES(?,?)", rows.items())
     con.commit()
     con.close()
 
 
-def test_external_runtime_fresh_heartbeat_is_actionable(tmp_path, monkeypatch):
+def test_external_runtime_fresh_heartbeat_and_engine_result_are_actionable(tmp_path, monkeypatch):
     import runtime_health
 
     db = tmp_path / "market.db"
-    _write_remote_state(db, "2026-10-15T00:00:00+00:00")
+    _write_remote_state(
+        db,
+        "2026-10-15T00:00:00+00:00",
+        engine_last_run="2026-10-15T00:01:00+00:00",
+        engine_status="IDLE",
+        engine_progress_at="2026-10-15T00:01:00+00:00",
+    )
     monkeypatch.setattr(runtime_health, "DB", str(db))
     monkeypatch.setattr(runtime_health, "external_runtime_expected", lambda: True)
-    monkeypatch.setattr(runtime_health, "_config", lambda: {"runtime_heartbeat_max_age_seconds": 180})
+    monkeypatch.setattr(runtime_health, "_config", lambda: {
+        "runtime_heartbeat_max_age_seconds": 180,
+        "engine_progress_max_age_seconds": 1200,
+        "engine_result_max_age_minutes": 90,
+    })
 
     now = datetime(2026, 10, 15, 0, 2, tzinfo=timezone.utc)
     health = runtime_health.remote_runtime_health(now=now)
@@ -74,6 +90,25 @@ def test_external_runtime_fresh_heartbeat_is_actionable(tmp_path, monkeypatch):
     assert health["ready"] is True
     assert health["status"] == "RUNTIME_READY"
     assert health["age_seconds"] == 120
+    assert health["engine_last_run_age_seconds"] == 60
+
+
+def test_external_runtime_fresh_heartbeat_without_engine_result_is_warming(tmp_path, monkeypatch):
+    import runtime_health
+
+    db = tmp_path / "market.db"
+    _write_remote_state(db, "2026-10-15T00:00:00+00:00")
+    monkeypatch.setattr(runtime_health, "DB", str(db))
+    monkeypatch.setattr(runtime_health, "external_runtime_expected", lambda: True)
+    monkeypatch.setattr(runtime_health, "_config", lambda: {
+        "runtime_heartbeat_max_age_seconds": 180,
+        "engine_progress_max_age_seconds": 1200,
+        "engine_result_max_age_minutes": 90,
+    })
+    now = datetime(2026, 10, 15, 0, 2, tzinfo=timezone.utc)
+    health = runtime_health.remote_runtime_health(now=now)
+    assert health["ready"] is False
+    assert health["status"] == "RUNTIME_ENGINE_WARMING"
 
 
 def test_external_runtime_stale_or_missing_heartbeat_blocks_actionable(tmp_path, monkeypatch):

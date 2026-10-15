@@ -44,7 +44,9 @@ def _remote_state():
         rows = con.execute(
             "SELECT key,value FROM state WHERE key IN "
             "('remote_worker_runtime_build','remote_worker_generation',"
-            "'remote_worker_pid','remote_worker_heartbeat_at','remote_worker_bridge_version')"
+            "'remote_worker_pid','remote_worker_heartbeat_at','remote_worker_bridge_version',"
+            "'engine_last_run','engine_cycle_started_at','engine_cycle_completed_at',"
+            "'engine_cycle_status','engine_progress_at','engine_progress_stage','engine_cycle_error_at')"
         ).fetchall()
         con.close()
         return {str(k): str(v or "") for k, v in rows}
@@ -116,20 +118,25 @@ def remote_runtime_health(now=None, max_age_seconds=None):
             "reason": "remote worker heartbeat timestamp is invalid",
         }
 
-    ready = age <= float(limit)
+    heartbeat_ready = age <= float(limit)
     try:
         pid = int(state.get("remote_worker_pid") or 0)
     except Exception:
         pid = 0
-    return {
+    common = {
         "required": True,
-        "ready": ready,
-        "status": "RUNTIME_READY" if ready else "RUNTIME_STALE",
         "age_seconds": age,
         "max_age_seconds": limit,
         "heartbeat_at": heartbeat,
         "build": state.get("remote_worker_runtime_build", ""),
         "generation": state.get("remote_worker_generation", ""),
         "pid": pid,
-        "reason": "" if ready else f"remote worker heartbeat age {age:.0f}s > {limit}s",
     }
+    if not heartbeat_ready:
+        return {**common, "ready": False, "status": "RUNTIME_STALE", "reason": f"remote worker heartbeat age {age:.0f}s > {limit}s"}
+    try:
+        import local_runtime_health
+        engine = local_runtime_health.engine_progress_health(state, now=now, cfg=cfg, status_prefix="RUNTIME_")
+    except Exception as exc:
+        return {**common, "ready": False, "status": "RUNTIME_ENGINE_INVALID", "reason": f"engine progress guard failed: {exc}"}
+    return {**common, **engine}

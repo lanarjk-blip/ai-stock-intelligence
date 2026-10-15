@@ -525,6 +525,20 @@ def _validate_sqlite_file(path):
         return False
 
 
+def _remove_sqlite_sidecars(path=None):
+    """Remove stale WAL/SHM sidecars before replacing a cold SQLite database."""
+    base = path or LOCAL_DB
+    removed = []
+    for suffix in ("-wal", "-shm"):
+        sidecar = base + suffix
+        try:
+            os.remove(sidecar)
+            removed.append(sidecar)
+        except FileNotFoundError:
+            pass
+    return removed
+
+
 def _restore_sqlite_blob(sqlite_gzip, expected_sha):
     if sqlite_gzip is None:
         return False
@@ -541,7 +555,9 @@ def _restore_sqlite_blob(sqlite_gzip, expected_sha):
             os.fsync(fh.fileno())
         if not _validate_sqlite_file(temp_path):
             raise ValueError("worker checkpoint SQLite quick_check failed")
+        _remove_sqlite_sidecars(LOCAL_DB)
         os.replace(temp_path, LOCAL_DB)
+        _remove_sqlite_sidecars(LOCAL_DB)
         temp_path = ""
         return True
     finally:

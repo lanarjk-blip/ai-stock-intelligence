@@ -136,6 +136,17 @@ def stale(key, hours):
         return True
 
 
+def mark_engine_progress(stage, detail=""):
+    """Persist evidence that the main engine loop is actively advancing."""
+    now = datetime.now(timezone.utc).isoformat()
+    app.state_set("engine_progress_at", now)
+    app.state_set("engine_progress_stage", str(stage or "UNKNOWN"))
+    app.state_set("engine_cycle_status", "RUNNING")
+    if detail:
+        app.state_set("engine_progress_detail", str(detail)[:500])
+    return now
+
+
 # ============================================================
 # DATA COLLECTION
 # ============================================================
@@ -199,6 +210,9 @@ def collect_fast(universe):
     ok = 0
     rows = 0
     errors = []
+    completed = 0
+    last_progress = time.monotonic()
+    mark_engine_progress("COLLECT_START", f"symbols={len(tickers)}")
 
     requested_workers = int(
         CFG.get("collector_workers", 6)
@@ -229,11 +243,32 @@ def collect_fast(universe):
                     errors.append(
                         f"{ticker}: {err}"
                     )
+                completed += 1
+                current_progress = time.monotonic()
+                if (
+                    completed == len(tickers)
+                    or completed % 25 == 0
+                    or current_progress - last_progress >= 30
+                ):
+                    mark_engine_progress(
+                        "COLLECT_PROGRESS",
+                        f"completed={completed}/{len(tickers)} ok={ok} rows={rows}",
+                    )
+                    last_progress = current_progress
 
             except Exception as exc:
+                completed += 1
                 errors.append(str(exc)[:300])
+                current_progress = time.monotonic()
+                if completed % 25 == 0 or current_progress - last_progress >= 30:
+                    mark_engine_progress(
+                        "COLLECT_PROGRESS",
+                        f"completed={completed}/{len(tickers)} ok={ok} rows={rows}",
+                    )
+                    last_progress = current_progress
 
     now = datetime.now(timezone.utc).isoformat()
+    mark_engine_progress("COLLECT_DONE", f"completed={completed}/{len(tickers)} ok={ok} rows={rows}")
 
     app.state_set("last_collection", now)
     app.state_set("last_collection_ok", ok)
@@ -1384,6 +1419,11 @@ def _refresh_closing_overnight(res, now=None):
 
 def cycle():
     ensure_tables()
+    cycle_started = datetime.now(timezone.utc).isoformat()
+    app.state_set("engine_cycle_started_at", cycle_started)
+    app.state_set("engine_cycle_status", "RUNNING")
+    app.state_set("engine_cycle_error", "")
+    mark_engine_progress("CYCLE_START")
     try:
         evaluate_locked_premarket()
     except Exception:
@@ -1478,12 +1518,15 @@ def cycle():
     # MARKET DATA + EARLY MODEL ATTEMPT
     # ========================================================
 
+    mark_engine_progress("BOOTSTRAP_MARKET_DATA")
     refresh_market_data()
 
+    mark_engine_progress("BOOTSTRAP_MODEL_TRAIN")
     maybe_train(
         bootstrap,
         force=False,
     )
+    mark_engine_progress("BOOTSTRAP_MODEL_DONE")
 
     model = load_model()
 
@@ -1539,23 +1582,28 @@ def cycle():
     # FINAL MODEL TRAINING
     # ========================================================
 
+    mark_engine_progress("FULL_MARKET_DATA")
     refresh_market_data()
 
     # Force another attempt because the full collection may
     # have supplied the data that bootstrap did not have.
+    mark_engine_progress("FULL_MODEL_TRAIN")
     maybe_train(
         universe,
         force=True,
     )
+    mark_engine_progress("FULL_MODEL_DONE")
 
     model = load_model()
 
     # Walk-forward only makes sense after a model exists.
     if model is not None:
+        mark_engine_progress("WALK_FORWARD")
         maybe_walk_forward(
             universe,
             force=False,
         )
+        mark_engine_progress("WALK_FORWARD_DONE")
     else:
         log(
             "MODEL",
@@ -1571,11 +1619,13 @@ def cycle():
     # FULL V1.8 SNAPSHOT
     # ========================================================
 
+    mark_engine_progress("FULL_ANALYSIS")
     result = analyze_and_publish(
         universe,
         "full-universe",
         model=model,
     )
+    mark_engine_progress("FULL_ANALYSIS_DONE", f"results={len(result)}")
 
     now = datetime.now(
         timezone.utc
@@ -1585,6 +1635,10 @@ def cycle():
         "engine_last_run",
         now,
     )
+    app.state_set("engine_cycle_completed_at", now)
+    app.state_set("engine_cycle_status", "IDLE")
+    app.state_set("engine_progress_at", now)
+    app.state_set("engine_progress_stage", "CYCLE_DONE")
 
     app.state_set(
         "engine_version",
@@ -1655,6 +1709,12 @@ def run_forever():
             )
 
             try:
+                failed_at = datetime.now(timezone.utc).isoformat()
+                app.state_set("engine_cycle_status", "ERROR")
+                app.state_set("engine_cycle_error_at", failed_at)
+                app.state_set("engine_cycle_error", detail[-900:])
+                app.state_set("engine_progress_at", failed_at)
+                app.state_set("engine_progress_stage", "CYCLE_ERROR")
                 log(
                     "ENGINE",
                     "ERROR",

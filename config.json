@@ -61,6 +61,8 @@
   "data_quality_min_price_rows": 5000,
   "data_quality_max_age_hours": 8,
   "runtime_heartbeat_max_age_seconds": 180,
+  "engine_progress_max_age_seconds": 1200,
+  "engine_result_max_age_minutes": 90,
   "market_calendar_source": "PT KSEI PENG-0002/DIR/KSEI/0126 following IDX 2026 exchange-holiday calendar",
   "market_calendar_verified_years": [2026],
   "market_holidays": [

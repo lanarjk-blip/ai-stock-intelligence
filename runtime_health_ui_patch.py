@@ -63,9 +63,10 @@ def install():
             if health.get("required") and not health.get("ready"):
                 age = health.get("age_seconds")
                 age_text = "belum ada heartbeat" if age is None else f"heartbeat terakhir {age:.0f} detik lalu"
+                reason = str(health.get("reason") or age_text)
                 st.warning(
                     "🛡️ **RUNTIME TIDAK SEGAR • Pre-Market dibekukan sebagai data lama.** "
-                    f"{age_text}. Sistem tidak membuat atau meng-upgrade kandidat sampai worker Render kembali sehat."
+                    f"{reason}. Sistem tidak membuat atau meng-upgrade kandidat sampai worker kembali sehat."
                 )
         return rendered
 
