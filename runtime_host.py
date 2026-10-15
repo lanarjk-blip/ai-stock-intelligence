@@ -16,7 +16,7 @@ import sys
 import time
 from typing import Dict, List
 
-HOST_VERSION = "RUNTIME-HOST-R1"
+HOST_VERSION = "RUNTIME-HOST-R2"
 _STOP_REQUESTED = False
 _CHILDREN: List[subprocess.Popen] = []
 
@@ -48,7 +48,7 @@ def child_commands(port: str) -> Dict[str, List[str]]:
             python,
             "-m",
             "uvicorn",
-            "runtime_api:app",
+            "runtime_host_api:app",
             "--host",
             "0.0.0.0",
             "--port",
