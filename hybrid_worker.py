@@ -98,6 +98,16 @@ def child_environment(device: str, base_env=None) -> dict:
     env["ASI_HYBRID_WORKER"] = "1"
     env["ASI_WORKER_DEVICE"] = device
     env["ASI_DEVICE_PROFILE"] = "HP_FAST" if device == "hp" else "FULL"
+    # Ensure the project root is available during Python startup so
+    # sitecustomize.py is imported on Windows too. Without this, worker_base.py
+    # can start before runtime_supervisor/hybrid lease protection is installed.
+    existing_pythonpath = str(env.get("PYTHONPATH") or "").strip()
+    project_root = str(BASE)
+    env["PYTHONPATH"] = (
+        project_root
+        if not existing_pythonpath
+        else project_root + os.pathsep + existing_pythonpath
+    )
     # Keep numerical libraries from spawning a desktop-sized thread farm on a
     # phone. Network collection remains controlled by the engine itself.
     if device == "hp":
