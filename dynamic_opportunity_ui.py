@@ -16,7 +16,7 @@ from urllib.parse import quote
 import pandas as pd
 import streamlit as st
 
-RUNTIME_BUILD_MARKER = 'V1.8.52-20261015-R20'
+RUNTIME_BUILD_MARKER = 'V1.8.52'
 
 
 def _install_runtime_version_patch():

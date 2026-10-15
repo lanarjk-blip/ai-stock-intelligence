@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 
 import app
+import market_session
 
 CFG = app.CFGD
 DB_DIR = app.DB_DIR
@@ -18,6 +19,7 @@ def ensure_tables():
     con.execute("""CREATE TABLE IF NOT EXISTS dynamic_opportunities (
         ticker TEXT PRIMARY KEY, company TEXT, generated_at TEXT, rank INTEGER,
         opportunity_score REAL, state TEXT, entry_status TEXT, horizon TEXT,
+        decision TEXT, candidate_mode TEXT,
         close REAL, entry_low REAL, entry_high REAL, stop_loss REAL,
         target_1 REAL, target_2 REAL, risk_reward REAL, risk TEXT,
         ai_score REAL, p_up REAL, p_down REAL, confidence REAL,
@@ -35,14 +37,17 @@ def ensure_tables():
     con.execute("""CREATE TABLE IF NOT EXISTS dynamic_opportunity_pool (
         ticker TEXT PRIMARY KEY, company TEXT, generated_at TEXT, rank INTEGER,
         opportunity_score REAL, state TEXT, entry_status TEXT, horizon TEXT,
-        close REAL, risk TEXT, ai_score REAL, p_up REAL, p_down REAL, confidence REAL,
+        candidate_mode TEXT, close REAL, risk TEXT, ai_score REAL, p_up REAL, p_down REAL, confidence REAL,
         relative_percentile REAL, relative_rank_score REAL, time_edge REAL, time_confidence REAL,
         decision TEXT
     )""")
     # Migrate tables created by V1.8.21/V1.8.22.1 without breaking the user's DB.
     existing={str(r[1]) for r in con.execute('PRAGMA table_info(dynamic_opportunities)').fetchall()}
-    for col,typ in [('market_regime','TEXT'),('market_score','REAL'),('ihsg_alignment','REAL'),('regime_adjustment','REAL')]:
+    for col,typ in [('market_regime','TEXT'),('market_score','REAL'),('ihsg_alignment','REAL'),('regime_adjustment','REAL'),('decision','TEXT'),('candidate_mode','TEXT')]:
         if col not in existing: con.execute(f'ALTER TABLE dynamic_opportunities ADD COLUMN {col} {typ}')
+    pool_existing={str(r[1]) for r in con.execute('PRAGMA table_info(dynamic_opportunity_pool)').fetchall()}
+    if 'candidate_mode' not in pool_existing:
+        con.execute('ALTER TABLE dynamic_opportunity_pool ADD COLUMN candidate_mode TEXT')
     con.commit(); con.close()
     _ensure_opening_tables()
 
@@ -103,6 +108,8 @@ def _score(row, ts):
 def _state(row, ts, score):
     decision=str(row.decision)
     es=str(ts.get('entry_status','NEUTRAL'))
+    mode=str(getattr(row,'candidate_mode','') or '').upper()
+    if mode=='MONITOR_FALLBACK': return 'MONITOR'
     if es=='ACTIVE' and score>=65 and decision not in ('SELL/AVOID',): return 'ENTRY READY'
     if es=='DEVELOPING' and score>=60 and decision not in ('SELL/AVOID',): return 'DEVELOPING'
     if decision in ('BUY','NEAR ENTRY'): return 'DEVELOPING'
@@ -144,6 +151,7 @@ def _ensure_opening_tables():
                 generated_at TEXT NOT NULL,
                 premarket_rank INTEGER,
                 company TEXT,
+                premarket_decision TEXT,
                 reference_price REAL,
                 open_price REAL,
                 current_price REAL,
@@ -155,18 +163,20 @@ def _ensure_opening_tables():
                 PRIMARY KEY(market_date,ticker)
             )
         """)
+        existing={str(r[1]) for r in con.execute('PRAGMA table_info(opening_confirmation)').fetchall()}
+        if 'premarket_decision' not in existing:
+            con.execute('ALTER TABLE opening_confirmation ADD COLUMN premarket_decision TEXT')
         con.commit()
     finally:
         con.close()
 
 
-def _market_date_wib():
-    now = datetime.now(timezone.utc) + pd.Timedelta(hours=7)
-    return now.date().isoformat()
+def _market_date_wib(now=None):
+    return str(market_session.session_status(CFG, now=now).get('market_date') or '')
 
 
-def _latest_intraday_open(ticker):
-    """Return today's first intraday price when available."""
+def _latest_intraday_open(ticker, market_date=None):
+    """Return the target market day's first intraday price when available."""
     try:
         con=dbcon()
         d=pd.read_sql_query(
@@ -184,8 +194,8 @@ def _latest_intraday_open(ticker):
         if d.empty:
             return None,None
         d['wib']=d['ts'].dt.tz_convert('Asia/Jakarta')
-        today=(datetime.now(timezone.utc)+pd.Timedelta(hours=7)).date()
-        d=d[d['wib'].dt.date==today]
+        target=str(market_date or _market_date_wib())
+        d=d[d['wib'].dt.date.astype(str)==target]
         if d.empty:
             return None,None
         first=d.iloc[0]
@@ -197,48 +207,52 @@ def _latest_intraday_open(ticker):
         return None,None
 
 
-def _daily_open_fallback(ticker):
-    """Fallback to latest daily candle when intraday opening data is unavailable."""
+def _daily_open_fallback(ticker, market_date=None):
+    """Fallback only to a daily candle from the same market date."""
     try:
         con=dbcon()
         row=con.execute(
-            """SELECT open,close FROM prices
+            """SELECT date,open,close FROM prices
                WHERE ticker=?
                ORDER BY date DESC LIMIT 1""",
             (str(ticker).upper(),)
         ).fetchone()
         con.close()
-        if not row:
+        if not row or str(row[0]) != str(market_date or _market_date_wib()):
             return None,None
-        op=float(row[0]) if row[0] is not None else None
-        cur=float(row[1]) if row[1] is not None else op
+        op=float(row[1]) if row[1] is not None else None
+        cur=float(row[2]) if row[2] is not None else op
         return op,cur
     except Exception:
         return None,None
 
 
-def update_opening_confirmation():
-    """
-    Evaluate the immutable Pre-Market picks against the actual opening/current price.
-    Does not rewrite the Pre-Market list.
-    """
+def update_opening_confirmation(now=None):
+    """Evaluate only immutable H-10 picks against the actual same-day open."""
     _ensure_opening_tables()
-    market_date=_market_date_wib()
+    session=market_session.session_status(CFG, now=now)
+    session_status=str(session.get('status') or '').upper()
+    market_date=str(session.get('market_date') or _market_date_wib(now))
+    if session_status in {'PRE_MARKET','WEEKEND','HOLIDAY'}:
+        app.state_set('opening_confirmation_status',f'BLOCKED_{session_status}')
+        return pd.DataFrame()
 
     con=dbcon()
     try:
+        run=con.execute('SELECT status,note FROM premarket_runs WHERE market_date=?',(market_date,)).fetchone()
+        if not run or str(run[0]).upper()!='LOCKED' or not str(run[1] or '').startswith('H10_FINAL'):
+            app.state_set('opening_confirmation_status','BLOCKED_NO_H10_FINAL')
+            return pd.DataFrame()
         picks=pd.read_sql_query(
-            """SELECT market_date,rank,ticker,company,reference_price,
+            """SELECT market_date,rank,ticker,company,decision,reference_price,
                       entry_low,entry_high,stop_loss,target_1,target_2
                FROM premarket_picks
                WHERE market_date=?
                ORDER BY rank""",
             con, params=(market_date,)
         )
-    except Exception:
+    finally:
         con.close()
-        return pd.DataFrame()
-    con.close()
 
     if picks.empty:
         return pd.DataFrame()
@@ -251,9 +265,11 @@ def update_opening_confirmation():
 
     for _,r in picks.iterrows():
         ticker=str(r.ticker)
-        op,cur=_latest_intraday_open(ticker)
+        original_decision=str(r.decision or 'MONITOR').upper().strip()
+        actionable=original_decision in {'BUY','STRONG_BUY'}
+        op,cur=_latest_intraday_open(ticker,market_date)
         if op is None:
-            op,cur=_daily_open_fallback(ticker)
+            op,cur=_daily_open_fallback(ticker,market_date)
         if op is None:
             status='WAIT'
             reason='Opening price belum tersedia.'
@@ -281,11 +297,16 @@ def update_opening_confirmation():
                     status='WAIT'
                     reason=f'Open sedikit di atas entry zone; tunggu pullback/konfirmasi.'
             elif lo <= op <= hi:
-                status='BUY'
-                reason=f'Open {op:,.2f} masih di dalam entry zone {lo:,.2f}-{hi:,.2f}.'
+                if actionable:
+                    status='BUY'
+                    reason=f'Open {op:,.2f} masih di dalam entry zone {lo:,.2f}-{hi:,.2f} dan H-10 decision BUY.'
+                else:
+                    status='WAIT'
+                    reason=f'Open masuk entry zone, tetapi H-10 decision {original_decision}; tidak di-upgrade menjadi BUY.'
             else:
-                status='STILL STRONG'
-                reason=f'Open {op:,.2f} masih dekat setup; pantau konfirmasi sebelum entry.'
+                status='STILL STRONG' if actionable else 'WAIT'
+                reason=(f'Open {op:,.2f} masih dekat setup; pantau konfirmasi sebelum entry.' if actionable
+                        else f'H-10 decision {original_decision}; tetap WAIT meski harga dekat setup.')
 
         rows.append({
             'market_date':market_date,
@@ -293,6 +314,7 @@ def update_opening_confirmation():
             'generated_at':now,
             'premarket_rank':int(r['rank']) if pd.notna(r['rank']) else None,
             'company':str(r['company']),
+            'premarket_decision':original_decision,
             'reference_price':float(r['reference_price']) if pd.notna(r['reference_price']) else None,
             'open_price':op,
             'current_price':cur,
@@ -309,14 +331,14 @@ def update_opening_confirmation():
         for _,r in out.iterrows():
             con.execute("""
                 INSERT OR REPLACE INTO opening_confirmation
-                (market_date,ticker,generated_at,premarket_rank,company,
+                (market_date,ticker,generated_at,premarket_rank,company,premarket_decision,
                  reference_price,open_price,current_price,entry_low,entry_high,
                  gap_pct,status,reason)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,(
                 r.market_date,r.ticker,r.generated_at,
                 int(r.premarket_rank) if pd.notna(r.premarket_rank) else None,
-                r.company,r.reference_price,r.open_price,r.current_price,
+                r.company,r.premarket_decision,r.reference_price,r.open_price,r.current_price,
                 r.entry_low,r.entry_high,r.gap_pct,r.status,r.reason
             ))
         con.commit()
@@ -326,6 +348,7 @@ def update_opening_confirmation():
     try:
         app.state_set('opening_confirmation_at',now)
         app.state_set('opening_confirmation_count',len(out))
+        app.state_set('opening_confirmation_status','READY')
     except Exception:
         pass
     return out
@@ -419,10 +442,10 @@ def update(res, phase='CLOSED'):
         pts=pr.time
         pool_state=_state(pr,pts,float(pr.score))
         con.execute('''INSERT OR REPLACE INTO dynamic_opportunity_pool
-            (ticker,company,generated_at,rank,opportunity_score,state,entry_status,horizon,close,risk,ai_score,p_up,p_down,confidence,relative_percentile,relative_rank_score,time_edge,time_confidence,decision)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            (ticker,company,generated_at,rank,opportunity_score,state,entry_status,horizon,candidate_mode,close,risk,ai_score,p_up,p_down,confidence,relative_percentile,relative_rank_score,time_edge,time_confidence,decision)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
             (str(pr.ticker),str(pr.company),now,int(pool_rank)+1,float(pr.score),pool_state,
-             str(pts.get('entry_status','NEUTRAL')),str(pts.get('horizon','EOD')),float(pr.close),str(pr.risk),
+             str(pts.get('entry_status','NEUTRAL')),str(pts.get('horizon','EOD')),str(pr.candidate_mode),float(pr.close),str(pr.risk),
              float(pr.ai_score),float(pr.p_up) if pd.notna(pr.p_up) else None,float(pr.p_down) if pd.notna(pr.p_down) else None,
              float(pr.confidence) if pd.notna(pr.confidence) else None,
              float(pr.relative_percentile) if pd.notna(pr.relative_percentile) else None,
@@ -437,10 +460,10 @@ def update(res, phase='CLOSED'):
         prev_rank=rr.prev_rank
         prev_rank_missing = prev_rank is None or pd.isna(prev_rank)
         replacement='NEW' if prev_rank_missing else ('RETAINED' if int(prev_rank)==rank else f'RANK_CHANGED {int(prev_rank)}→{rank}')
-        vals=(rr.ticker,rr.company,now,rank,float(rr.score),state,str(ts.get('entry_status','NEUTRAL')),str(ts.get('horizon','EOD')),rr.close,rr.entry_low,rr.entry_high,rr.stop_loss,rr.target_1,rr.target_2,rr.risk_reward,rr.risk,rr.ai_score,rr.p_up,rr.p_down,rr.confidence,rr.relative_percentile,rr.relative_rank_score,float(ts.get('edge',0.0)),float(ts.get('confidence',0.0)),reason,replacement,int(rr.stable),(None if prev_rank_missing else int(prev_rank)),rr.prev_score,rr.market_regime,rr.market_score,rr.ihsg_alignment,rr.regime_adjustment)
-        con.execute('''INSERT OR REPLACE INTO dynamic_opportunities (ticker,company,generated_at,rank,opportunity_score,state,entry_status,horizon,close,entry_low,entry_high,stop_loss,target_1,target_2,risk_reward,risk,ai_score,p_up,p_down,confidence,relative_percentile,relative_rank_score,time_edge,time_confidence,reason,replacement_reason,stable_cycles,previous_rank,previous_score,market_regime,market_score,ihsg_alignment,regime_adjustment) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',vals)
+        vals=(rr.ticker,rr.company,now,rank,float(rr.score),state,str(ts.get('entry_status','NEUTRAL')),str(ts.get('horizon','EOD')),str(rr.decision),str(rr.candidate_mode),rr.close,rr.entry_low,rr.entry_high,rr.stop_loss,rr.target_1,rr.target_2,rr.risk_reward,rr.risk,rr.ai_score,rr.p_up,rr.p_down,rr.confidence,rr.relative_percentile,rr.relative_rank_score,float(ts.get('edge',0.0)),float(ts.get('confidence',0.0)),reason,replacement,int(rr.stable),(None if prev_rank_missing else int(prev_rank)),rr.prev_score,rr.market_regime,rr.market_score,rr.ihsg_alignment,rr.regime_adjustment)
+        con.execute('''INSERT OR REPLACE INTO dynamic_opportunities (ticker,company,generated_at,rank,opportunity_score,state,entry_status,horizon,decision,candidate_mode,close,entry_low,entry_high,stop_loss,target_1,target_2,risk_reward,risk,ai_score,p_up,p_down,confidence,relative_percentile,relative_rank_score,time_edge,time_confidence,reason,replacement_reason,stable_cycles,previous_rank,previous_score,market_regime,market_score,ihsg_alignment,regime_adjustment) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',vals)
         con.execute('INSERT INTO dynamic_opportunity_history(generated_at,ticker,rank,opportunity_score,state,entry_status,close,entry_low,entry_high,stop_loss,target_1,risk_reward,risk,decision,relative_percentile,time_edge) VALUES('+','.join(['?']*16)+')',(now,rr.ticker,rank,float(rr.score),state,str(ts.get('entry_status','NEUTRAL')),rr.close,rr.entry_low,rr.entry_high,rr.stop_loss,rr.target_1,rr.risk_reward,rr.risk,rr.decision,rr.relative_percentile,float(ts.get('edge',0.0))))
-        out.append({'rank':rank,'ticker':rr.ticker,'company':rr.company,'opportunity_score':rr.score,'state':state,'entry_status':str(ts.get('entry_status','NEUTRAL')),'horizon':str(ts.get('horizon','EOD')),'close':rr.close,'entry_low':rr.entry_low,'entry_high':rr.entry_high,'stop_loss':rr.stop_loss,'target_1':rr.target_1,'target_2':rr.target_2,'risk_reward':rr.risk_reward,'risk':rr.risk,'ai_score':rr.ai_score,'p_up':rr.p_up,'p_down':rr.p_down,'confidence':rr.confidence,'relative_percentile':rr.relative_percentile,'time_edge':float(ts.get('edge',0.0)),'time_confidence':float(ts.get('confidence',0.0)),'reason':reason,'replacement_reason':replacement,'stable_cycles':int(rr.stable),'market_regime':rr.market_regime,'market_score':rr.market_score,'ihsg_alignment':rr.ihsg_alignment,'regime_adjustment':rr.regime_adjustment,'candidate_mode':rr.candidate_mode})
+        out.append({'rank':rank,'ticker':rr.ticker,'company':rr.company,'opportunity_score':rr.score,'state':state,'entry_status':str(ts.get('entry_status','NEUTRAL')),'horizon':str(ts.get('horizon','EOD')),'decision':rr.decision,'close':rr.close,'entry_low':rr.entry_low,'entry_high':rr.entry_high,'stop_loss':rr.stop_loss,'target_1':rr.target_1,'target_2':rr.target_2,'risk_reward':rr.risk_reward,'risk':rr.risk,'ai_score':rr.ai_score,'p_up':rr.p_up,'p_down':rr.p_down,'confidence':rr.confidence,'relative_percentile':rr.relative_percentile,'time_edge':float(ts.get('edge',0.0)),'time_confidence':float(ts.get('confidence',0.0)),'reason':reason,'replacement_reason':replacement,'stable_cycles':int(rr.stable),'market_regime':rr.market_regime,'market_score':rr.market_score,'ihsg_alignment':rr.ihsg_alignment,'regime_adjustment':rr.regime_adjustment,'candidate_mode':rr.candidate_mode})
     con.commit(); con.close()
     app.state_set('dynamic_opportunity_at',datetime.now().isoformat())
     app.state_set('dynamic_opportunity_phase',phase)
@@ -451,7 +474,8 @@ def update(res, phase='CLOSED'):
     # It never mutates the locked picks themselves.
     try:
         update_opening_confirmation()
-    except Exception:
-        pass
+    except Exception as exc:
+        app.state_set('opening_confirmation_status','ERROR')
+        app.state_set('opening_confirmation_error',str(exc)[:500])
 
     return pd.DataFrame(out)

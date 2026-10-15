@@ -92,7 +92,8 @@ def _sync_action_state(con, dynamic, utc_iso, create_events, old_top5, new_top5,
             continue
         state = str(_row_value(row, 'state', '') or '').strip().upper()
         entry = str(_row_value(row, 'entry_status', '') or '').strip().upper()
-        ready = int(state == 'ENTRY READY' and entry == 'ACTIVE')
+        mode = str(_row_value(row, 'candidate_mode', '') or '').strip().upper()
+        ready = int(mode != 'MONITOR_FALLBACK' and state == 'ENTRY READY' and entry == 'ACTIVE')
         previous = con.execute('SELECT is_entry_ready FROM live_action_state WHERE ticker=?', (ticker,)).fetchone()
         was_ready = int(previous[0]) if previous else 0
 
@@ -167,8 +168,15 @@ def record_top5(db_path, dynamic, source_phase='full-universe', config=None):
         events = []
         entered = [t for t in new if t not in old]
         exited = [t for t in old if t not in new]
+        actionable_tickers = set()
+        if dynamic is not None and not dynamic.empty:
+            for _, item in dynamic.iterrows():
+                if str(_row_value(item, 'candidate_mode', '') or '').upper() != 'MONITOR_FALLBACK':
+                    actionable_tickers.add(str(_row_value(item, 'ticker', '') or '').strip().upper())
         if old != new:
             for i, ticker in enumerate(entered):
+                if ticker not in actionable_tickers:
+                    continue
                 replaced = exited[i] if i < len(exited) else ''
                 events.append(('ENTRY', ticker, old.index(ticker)+1 if ticker in old else None,
                                new.index(ticker)+1, replaced, '',

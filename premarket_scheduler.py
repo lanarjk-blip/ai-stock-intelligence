@@ -68,8 +68,7 @@ def _now_wib(now=None) -> datetime:
 
 
 def _is_trading_day(local: datetime) -> bool:
-    holidays = {str(x) for x in (CFG.get("market_holidays") or [])}
-    return local.weekday() < 5 and local.date().isoformat() not in holidays
+    return market_session.is_trading_date(local.date(), CFG)
 
 
 def window_state(now=None) -> str:
@@ -141,6 +140,7 @@ def _ensure_tables():
         market_date TEXT NOT NULL, generated_at TEXT NOT NULL,
         rank INTEGER, ticker TEXT, company TEXT, decision TEXT,
         confidence REAL, ai_score REAL, risk TEXT,
+        reference_price REAL,
         entry_low REAL, entry_high REAL, stop_loss REAL,
         target_1 REAL, target_2 REAL, ihsg_regime TEXT,
         reason TEXT, source_phase TEXT,
@@ -148,6 +148,9 @@ def _ensure_tables():
     con.execute("""CREATE TABLE IF NOT EXISTS premarket_runs (
         market_date TEXT PRIMARY KEY, generated_at TEXT NOT NULL,
         status TEXT NOT NULL, pick_count INTEGER NOT NULL, note TEXT)""")
+    existing = {str(r[1]) for r in con.execute("PRAGMA table_info(premarket_picks)").fetchall()}
+    if "reference_price" not in existing:
+        con.execute("ALTER TABLE premarket_picks ADD COLUMN reference_price REAL")
     con.commit()
     con.close()
 
@@ -308,6 +311,7 @@ def _record_from_row(row, market_date, generated_at, rank, mode, reason):
         "confidence": _confidence(row),
         "ai_score": _number(row.get("ai_score")),
         "risk": str(row.get("risk") or ""),
+        "reference_price": close,
         "entry_low": lo,
         "entry_high": hi,
         "stop_loss": _number(row.get("stop_loss")),
@@ -430,14 +434,15 @@ def finalize_h10(now=None):
             con.execute(
                 """INSERT INTO premarket_picks
                 (market_date,generated_at,rank,ticker,company,decision,confidence,
-                 ai_score,risk,entry_low,entry_high,stop_loss,target_1,target_2,
+                 ai_score,risk,reference_price,entry_low,entry_high,stop_loss,target_1,target_2,
                  ihsg_regime,reason,source_phase)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     market_date, generated_at, i, str(item.get("ticker") or ""),
                     str(item.get("company") or ""), str(item.get("decision") or "MONITOR"),
                     _number(item.get("confidence")), _number(item.get("ai_score")),
-                    str(item.get("risk") or ""), _number(item.get("entry_low")),
+                    str(item.get("risk") or ""), _number(item.get("reference_price")),
+                    _number(item.get("entry_low")),
                     _number(item.get("entry_high")), _number(item.get("stop_loss")),
                     _number(item.get("target_1")), _number(item.get("target_2")),
                     str(item.get("ihsg_regime") or ""), str(item.get("reason") or ""),

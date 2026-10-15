@@ -14,7 +14,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 
-_BASE_BUILD = "V1.8.52-20261015-R21-SINGLETON"
+_BASE_BUILD = "V1.8.52-SINGLETON"
 _DEPLOY_SHA = str(
     os.environ.get("RENDER_GIT_COMMIT")
     or os.environ.get("GITHUB_SHA")

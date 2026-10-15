@@ -64,6 +64,7 @@ def ensure_tables(db_path):
             company TEXT,
             rank INTEGER,
             recommendation TEXT,
+            candidate_mode TEXT,
             opportunity_state TEXT,
             entry_status TEXT,
             opportunity_score REAL,
@@ -117,6 +118,9 @@ def ensure_tables(db_path):
             ambiguity_note TEXT
         )"""
     )
+    existing = {str(r[1]) for r in con.execute("PRAGMA table_info(recommendation_history)").fetchall()}
+    if "candidate_mode" not in existing:
+        con.execute("ALTER TABLE recommendation_history ADD COLUMN candidate_mode TEXT")
     con.execute("CREATE INDEX IF NOT EXISTS idx_rec_hist_ticker_date ON recommendation_history(ticker, market_date)")
     con.execute("CREATE INDEX IF NOT EXISTS idx_shadow_status_ticker ON shadow_positions(status, ticker)")
     con.commit()
@@ -173,9 +177,10 @@ def record_snapshot(db_path, dynamic_df, cfg=None, source_phase="full-universe")
             if not ticker:
                 continue
             recommendation = _s(row.get("decision", row.get("state", "WATCH")), "WATCH")
+            candidate_mode = _s(row.get("candidate_mode"), "STRICT").upper()
             vals = (
                 run_id, generated_at, mdate, ticker, _s(row.get("company")), rank,
-                recommendation, _s(row.get("state")), _s(row.get("entry_status")),
+                recommendation, candidate_mode, _s(row.get("state")), _s(row.get("entry_status")),
                 _f(row.get("opportunity_score")), _f(row.get("ai_score")),
                 _f(row.get("p_up")), _f(row.get("p_down")), _f(row.get("confidence")),
                 _f(row.get("close")), _f(row.get("entry_low")), _f(row.get("entry_high")),
@@ -185,17 +190,24 @@ def record_snapshot(db_path, dynamic_df, cfg=None, source_phase="full-universe")
             )
             cur = con.execute(
                 """INSERT OR IGNORE INTO recommendation_history(
-                    run_id,generated_at,market_date,ticker,company,rank,recommendation,
+                    run_id,generated_at,market_date,ticker,company,rank,recommendation,candidate_mode,
                     opportunity_state,entry_status,opportunity_score,ai_score,p_up,p_down,confidence,
                     reference_price,entry_low,entry_high,stop_loss,target_1,target_2,risk_reward,risk,
                     market_regime,reason
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 vals,
             )
             if cur.rowcount <= 0:
                 continue
             inserted += 1
             rec_id = int(cur.lastrowid)
+
+            actionable = (
+                candidate_mode != "MONITOR_FALLBACK"
+                and recommendation.upper() in {"BUY", "STRONG_BUY"}
+            )
+            if not actionable:
+                continue
 
             # One live paper position per ticker. New recommendations remain in
             # history, but do not pyramid the same ticker automatically.
