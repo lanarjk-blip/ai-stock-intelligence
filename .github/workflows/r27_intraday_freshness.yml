@@ -1,0 +1,61 @@
+name: R27 Intraday Freshness
+on:
+  push:
+    branches: [fix-intraday-freshness-r27]
+    paths:
+      - 'tools/apply_r27_intraday_freshness.py'
+      - 'tests/test_intraday_freshness_r27.py'
+      - '.github/workflows/r27_intraday_freshness.yml'
+permissions:
+  contents: write
+jobs:
+  intraday:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-intraday-freshness-r27
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply R27 patch
+        run: python tools/apply_r27_intraday_freshness.py
+      - name: Compile changed production modules
+        run: python -m py_compile app.py dynamic_engine.py
+      - name: Install dependencies
+        run: python -m pip install -q -r requirements.txt pytest
+      - name: R27 targeted behavior tests
+        env:
+          AI_ENGINE_WORKER: '1'
+        run: python -m pytest -q tests/test_intraday_freshness_r27.py
+      - name: Full regression suite
+        run: python -m pytest -q
+      - name: Static R27 contract
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          cfg=json.loads(Path('config.json').read_text(encoding='utf-8'))
+          app=Path('app.py').read_text(encoding='utf-8')
+          dyn=Path('dynamic_engine.py').read_text(encoding='utf-8')
+          assert cfg['intraday_refresh_minutes']==30
+          assert cfg['intraday_refresh_grace_minutes']==15
+          assert cfg['intraday_live_price_max_age_minutes']==75
+          assert 'def _intraday_refresh_plan' in app
+          assert 'def _refresh_intraday_if_needed' in app
+          assert 'def latest_intraday_quote' in app
+          assert "mode=='FULL_HISTORY'" in app and 'else 2' in app
+          assert "live_price=ts.get('current_price')" in dyn
+          assert "'close':market_price" in dyn
+          assert "price_source" in dyn and "price_at" in dyn
+          print('R27 intraday freshness contract passed')
+          PY
+      - name: Commit production patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add config.json app.py dynamic_engine.py
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Refresh stale intraday data and use same-day live prices'
+          git pull --rebase origin fix-intraday-freshness-r27
+          git push origin HEAD:fix-intraday-freshness-r27
