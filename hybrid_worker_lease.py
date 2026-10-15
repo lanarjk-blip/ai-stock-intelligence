@@ -1,12 +1,12 @@
 """Distributed worker lease for laptop/HP/Render failover.
 
-Only one market worker may publish at a time across devices.  The local
+Only one market worker may publish at a time across devices. The local
 runtime_supervisor still prevents duplicate processes on one machine; this
 module adds a Neon-backed lease across machines.
 
 The lease is intentionally sticky: a healthy current holder is never preempted
-mid-cycle merely because a higher-priority device appears.  Device priority is
-used as a startup bias (Render -> laptop -> HP).  This avoids split-brain writes
+mid-cycle merely because a higher-priority device appears. Device priority is
+used as a startup bias (Render -> laptop -> HP). This avoids split-brain writes
 while still making laptop the usual primary and HP the standby.
 """
 from __future__ import annotations
@@ -16,7 +16,6 @@ import os
 import socket
 import threading
 import time
-from datetime import datetime, timezone
 
 LEASE_VERSION = "HYBRID-LEASE-R1"
 LEASE_TTL_SECONDS = max(90, int(os.environ.get("ASI_HYBRID_LEASE_TTL_SECONDS", "180")))
@@ -204,8 +203,6 @@ def acquire_or_wait(runtime_identity=None) -> dict:
         except SystemExit:
             raise
         except Exception as exc:
-            # Do not fall through into an unleased worker. A temporary Neon
-            # outage is a standby condition, not permission to become primary.
             now = time.monotonic()
             if now - last_report >= 60:
                 print(
@@ -261,6 +258,15 @@ def renew(runtime_identity=None) -> bool:
 
 
 def release(runtime_identity=None) -> bool:
+    # Cleanup is only meaningful after this process actually became PRIMARY.
+    # Importing the module in CI/UI must never trigger a database connection.
+    if runtime_identity is None and _ACTIVE_IDENTITY is None:
+        return False
+    if not enabled():
+        return False
+    url = database_url()
+    if not (url.startswith("postgres://") or url.startswith("postgresql://")):
+        return False
     ident = _identity(runtime_identity or _ACTIVE_IDENTITY)
     try:
         con = _pg_connect()
@@ -278,7 +284,7 @@ def release(runtime_identity=None) -> bool:
             return True
         finally:
             con.close()
-    except Exception:
+    except BaseException:
         return False
 
 
@@ -318,6 +324,8 @@ def start_renewal(runtime_identity=None):
 
 def stop_and_release(runtime_identity=None):
     _STOP.set()
+    if runtime_identity is None and _ACTIVE_IDENTITY is None:
+        return False
     return release(runtime_identity)
 
 
