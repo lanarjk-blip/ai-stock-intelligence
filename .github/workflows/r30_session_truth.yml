@@ -1,0 +1,55 @@
+name: R30 Session Truth Unification
+on:
+  push:
+    branches: [fix-session-truth-r30]
+    paths:
+      - 'tools/apply_r30_session_truth.py'
+      - 'tests/test_session_truth_r30.py'
+      - '.github/workflows/r30_session_truth.yml'
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-session-truth-r30
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply R30 patch
+        run: python tools/apply_r30_session_truth.py
+      - name: Compile app and market session
+        run: python -m py_compile app.py market_session.py
+      - name: Install dependencies
+        run: python -m pip install -q -r requirements.txt pytest
+      - name: R30 targeted tests
+        env:
+          AI_ENGINE_WORKER: '1'
+        run: python -m pytest -q tests/test_session_truth_r30.py
+      - name: Full regression suite
+        env:
+          AI_ENGINE_WORKER: '1'
+        run: python -m pytest -q
+      - name: Static session contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          a=Path('app.py').read_text(encoding='utf-8')
+          assert 'import market_session' in a
+          assert 'market_session.session_status(CFGD,now=now)' in a
+          assert "market_open=session_name in ['SESI I','SESI II']" in a
+          assert 'PRE-CLOSING' not in a[a.index('def intraday_checkpoint_status'):a.index('def stock_search_panel')]
+          assert 'POST-TRADING' not in a[a.index('def intraday_checkpoint_status'):a.index('def stock_search_panel')]
+          print('R30 session truth contract OK')
+          PY
+      - name: Commit production patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app.py
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Unify UI market sessions with authoritative IDX guard'
+          git pull --rebase origin fix-session-truth-r30
+          git push origin HEAD:fix-session-truth-r30
