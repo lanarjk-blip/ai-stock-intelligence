@@ -1,5 +1,7 @@
 from pathlib import Path
 
+# Re-run from the current branch head so the validated persistence change can
+# land after concurrent actionability/test commits.
 p=Path('persistent_bridge.py')
 s=p.read_text(encoding='utf-8')
 
