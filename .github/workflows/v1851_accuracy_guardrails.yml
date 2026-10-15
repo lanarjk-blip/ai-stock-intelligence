@@ -227,3 +227,4 @@ jobs:
           tests/test_ui_replica_v1853.py
           tests/test_market_safety_v1853.py
           tests/test_worker_efficiency_r26.py
+          tests/test_runtime_api_health_r28.py
