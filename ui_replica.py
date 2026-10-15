@@ -152,6 +152,21 @@ def sync_to_remote(con, db_path, db_dir, bridge_version):
     replica = read_local(db_path, db_dir)
     ensure_remote_schema(con)
     with con.cursor() as cur:
+        present_tables = set(replica["tables"])
+        for table in TABLE_SPECS:
+            if table not in present_tables:
+                cur.execute(
+                    "DELETE FROM asi_ui_table_snapshots WHERE table_name=%s",
+                    (table,),
+                )
+        present_files = set(replica["files"])
+        for name in SAFE_JSON_FILES:
+            if name not in present_files:
+                cur.execute(
+                    "DELETE FROM asi_ui_files WHERE file_name=%s",
+                    (name,),
+                )
+
         for table, payload in replica["tables"].items():
             cur.execute(
                 """INSERT INTO asi_ui_table_snapshots
@@ -214,6 +229,16 @@ def write_local(replica, db_path, db_dir):
     written_tables = 0
     table_errors = {}
     try:
+        incoming_tables = {str(name) for name in tables if str(name) in TABLE_SPECS}
+        for table in TABLE_SPECS:
+            if table in incoming_tables:
+                continue
+            try:
+                if _table_exists(con, table):
+                    con.execute(f'DELETE FROM "{table}"')
+            except Exception as exc:
+                table_errors[table] = f"{type(exc).__name__}: {exc}"[:300]
+
         for table, payload in tables.items():
             if table not in TABLE_SPECS:
                 continue
@@ -224,6 +249,9 @@ def write_local(replica, db_path, db_dir):
                 if not columns and rows:
                     columns = list(rows[0].keys())
                 if not columns:
+                    if _table_exists(con, table):
+                        con.execute(f'DELETE FROM "{table}"')
+                    written_tables += 1
                     continue
                 frame = pd.DataFrame(rows, columns=columns)
                 frame.to_sql(table, con, if_exists="replace", index=False)
@@ -236,6 +264,17 @@ def write_local(replica, db_path, db_dir):
 
     written_files = 0
     os.makedirs(db_dir, exist_ok=True)
+    incoming_files = {str(name) for name in files if str(name) in SAFE_JSON_FILES}
+    for name in SAFE_JSON_FILES:
+        if name in incoming_files:
+            continue
+        target = os.path.join(db_dir, name)
+        try:
+            if os.path.exists(target):
+                os.remove(target)
+        except OSError:
+            pass
+
     for name, payload in files.items():
         if name not in SAFE_JSON_FILES:
             continue
