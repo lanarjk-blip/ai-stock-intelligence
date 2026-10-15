@@ -1,8 +1,8 @@
 """Post-close evaluation for locked Pre-Market Intelligence picks.
 
-V1.8.43 foundation: evaluate what actually happened without rewriting the
-original morning recommendation. The evaluator is deliberately deterministic
-so later calibration can learn from auditable outcomes instead of hindsight.
+Evaluate what actually happened without rewriting the original morning decision.
+Actionable BUY decisions and monitor-only candidates are deliberately separated so
+calibration cannot count a WAIT/MONITOR candidate as a trading win.
 """
 from __future__ import annotations
 
@@ -22,14 +22,17 @@ def _num(value: Any) -> Optional[float]:
 def evaluate_pick(pick: Dict[str, Any], market: Dict[str, Any]) -> Dict[str, Any]:
     """Evaluate one immutable morning pick against the completed session.
 
-    `market` may contain open/high/low/close. Entry uses entry_low/entry_high
-    when available, otherwise the morning reference close. Ambiguous sessions
-    where target and stop are both touched are explicitly marked AMBIGUOUS
-    rather than quietly counted as a win.
+    BUY/STRONG_BUY rows are evaluated as trades. WAIT/MONITOR rows remain useful
+    audit observations but receive REVIEW/MONITOR_ONLY, so they do not inflate
+    trading hit-rate merely because price later crossed a target.
     """
+    decision = str(pick.get("decision") or "").upper().strip()
+    actionable = decision in {"BUY", "STRONG_BUY"}
     entry_low = _num(pick.get("entry_low"))
     entry_high = _num(pick.get("entry_high"))
-    reference = _num(pick.get("close"))
+    reference = _num(pick.get("reference_price"))
+    if reference is None:
+        reference = _num(pick.get("close"))
     stop = _num(pick.get("stop_loss"))
     target1 = _num(pick.get("target_1"))
     target2 = _num(pick.get("target_2"))
@@ -54,7 +57,10 @@ def evaluate_pick(pick: Dict[str, Any], market: Dict[str, Any]) -> Dict[str, Any
     t1_hit = bool(entry_touched and target1 is not None and day_high is not None and day_high >= target1)
     t2_hit = bool(entry_touched and target2 is not None and day_high is not None and day_high >= target2)
 
-    if not entry_touched:
+    if not actionable:
+        outcome = "MONITOR_ONLY"
+        verdict = "REVIEW"
+    elif not entry_touched:
         outcome = "NOT_TRIGGERED"
         verdict = "SESUAI"
     elif stop_hit and (t1_hit or t2_hit):
@@ -80,7 +86,8 @@ def evaluate_pick(pick: Dict[str, Any], market: Dict[str, Any]) -> Dict[str, Any
 
     return {
         "ticker": str(pick.get("ticker", "")),
-        "decision": str(pick.get("decision", "")),
+        "decision": decision,
+        "actionable": actionable,
         "entry_touched": entry_touched,
         "stop_hit": stop_hit,
         "target_1_hit": t1_hit,
@@ -96,7 +103,10 @@ def evaluate_pick(pick: Dict[str, Any], market: Dict[str, Any]) -> Dict[str, Any
 
 
 def summarize(evaluations: pd.DataFrame) -> Dict[str, Any]:
-    """Return compact daily calibration statistics."""
+    """Return compact daily calibration statistics.
+
+    REVIEW rows, including MONITOR_ONLY candidates, are excluded from hit-rate.
+    """
     e = pd.DataFrame() if evaluations is None else evaluations.copy()
     if e.empty:
         return {"count": 0, "sesuai": 0, "tidak_sesuai": 0, "review": 0, "hit_rate": None}
