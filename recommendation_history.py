@@ -121,15 +121,6 @@ def ensure_tables(db_path):
     existing = {str(r[1]) for r in con.execute("PRAGMA table_info(recommendation_history)").fetchall()}
     if "candidate_mode" not in existing:
         con.execute("ALTER TABLE recommendation_history ADD COLUMN candidate_mode TEXT")
-    existing = {str(r[1]) for r in con.execute("PRAGMA table_info(recommendation_history)").fetchall()}
-    if "candidate_mode" not in existing:
-        con.execute("ALTER TABLE recommendation_history ADD COLUMN candidate_mode TEXT")
-    existing = {str(r[1]) for r in con.execute("PRAGMA table_info(recommendation_history)").fetchall()}
-    if "candidate_mode" not in existing:
-        con.execute("ALTER TABLE recommendation_history ADD COLUMN candidate_mode TEXT")
-    existing = {str(r[1]) for r in con.execute("PRAGMA table_info(recommendation_history)").fetchall()}
-    if "candidate_mode" not in existing:
-        con.execute("ALTER TABLE recommendation_history ADD COLUMN candidate_mode TEXT")
     con.execute("CREATE INDEX IF NOT EXISTS idx_rec_hist_ticker_date ON recommendation_history(ticker, market_date)")
     con.execute("CREATE INDEX IF NOT EXISTS idx_shadow_status_ticker ON shadow_positions(status, ticker)")
     con.commit()
