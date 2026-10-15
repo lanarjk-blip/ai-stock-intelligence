@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import deployment_preflight as dp
 
 
@@ -79,3 +81,10 @@ def test_preflight_blocks_missing_database_url(monkeypatch):
     assert result["ok"] is False
     assert result["host"]["ok"] is False
     assert result["database"]["status"] == "DATABASE_URL_MISSING"
+
+
+def test_single_host_render_runs_preflight_before_runtime_host():
+    source = Path("render.single.yaml").read_text(encoding="utf-8")
+    line = next(x.strip() for x in source.splitlines() if x.strip().startswith("startCommand:"))
+    assert line == "startCommand: python deployment_preflight.py && python runtime_host.py"
+    assert "healthCheckPath: /ready" in source
