@@ -54,6 +54,6 @@ jobs:
       - name: Compile hybrid runtime
         run: python -m py_compile hybrid_worker.py hybrid_worker_lease.py runtime_supervisor.py
       - name: Hybrid regression tests
-        run: python -m pytest -q tests/test_hybrid_worker_r39.py tests/test_hybrid_worker_lease_r39.py tests/test_runtime_supervisor_r26.py tests/test_runtime_supervisor_r25.py 2>/dev/null || python -m pytest -q tests/test_hybrid_worker_r39.py tests/test_hybrid_worker_lease_r39.py
+        run: python -m pytest -q tests/test_hybrid_worker_r39.py tests/test_hybrid_worker_lease_r39.py
       - name: Full regression suite
         run: python -m pytest -q
