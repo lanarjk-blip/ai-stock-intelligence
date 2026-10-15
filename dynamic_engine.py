@@ -5,8 +5,6 @@ import pandas as pd
 
 import app
 import market_session
-import market_session
-import market_session
 
 CFG = app.CFGD
 DB_DIR = app.DB_DIR
@@ -108,17 +106,14 @@ def _score(row, ts):
 
 
 def _state(row, ts, score):
-    decision=str(row.decision)
-    es=str(ts.get('entry_status','NEUTRAL'))
+    decision=str(row.decision or '').upper().strip()
+    es=str(ts.get('entry_status','NEUTRAL')).upper().strip()
     mode=str(getattr(row,'candidate_mode','') or '').upper()
     if mode=='MONITOR_FALLBACK': return 'MONITOR'
-    mode=str(getattr(row,'candidate_mode','') or '').upper()
-    if mode=='MONITOR_FALLBACK': return 'MONITOR'
-    mode=str(getattr(row,'candidate_mode','') or '').upper()
-    if mode=='MONITOR_FALLBACK': return 'MONITOR'
-    if es=='ACTIVE' and score>=65 and decision not in ('SELL/AVOID',): return 'ENTRY READY'
-    if es=='DEVELOPING' and score>=60 and decision not in ('SELL/AVOID',): return 'DEVELOPING'
-    if decision in ('BUY','NEAR ENTRY'): return 'DEVELOPING'
+    blocked={'SELL','SELL/AVOID','AVOID','STRONG_SELL','EXIT'}
+    if es=='ACTIVE' and score>=65 and decision not in blocked: return 'ENTRY READY'
+    if es=='DEVELOPING' and score>=60 and decision not in blocked: return 'DEVELOPING'
+    if decision in ('BUY','STRONG_BUY','NEAR ENTRY'): return 'DEVELOPING'
     if decision=='WATCH': return 'WATCH'
     return 'MONITOR'
 
@@ -354,6 +349,7 @@ def update_opening_confirmation(now=None):
     try:
         app.state_set('opening_confirmation_at',now)
         app.state_set('opening_confirmation_count',len(out))
+        app.state_set('opening_confirmation_status','READY')
         app.state_set('opening_confirmation_status','READY')
         app.state_set('opening_confirmation_status','READY')
         app.state_set('opening_confirmation_status','READY')
