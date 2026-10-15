@@ -29,7 +29,6 @@ def test_market_session_respects_verified_long_holiday_gap():
     assert status["live"] is False
     assert status["calendar_verified"] is True
 
-    # 23 Dec after close must skip 24-25 Dec plus weekend and target Monday 28 Dec.
     after_close = datetime(2026, 12, 23, 16, 10, tzinfo=wib)
     assert market_session.next_trading_date(now=after_close, after_close=True) == "2026-12-28"
 
@@ -89,7 +88,7 @@ def test_external_runtime_fresh_heartbeat_and_engine_result_are_actionable(tmp_p
     health = runtime_health.remote_runtime_health(now=now)
     assert health["required"] is True
     assert health["ready"] is True
-    assert health["status"] == "RUNTIME_RUNTIME_READY"
+    assert health["status"] == "RUNTIME_READY"
     assert health["age_seconds"] == 120
     assert health["engine_last_run_age_seconds"] == 60
 
