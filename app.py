@@ -8,6 +8,7 @@ import streamlit as st
 from dynamic_opportunity_ui import render_actionable_dynamic
 import recommendation_history
 import ai_stock_ask
+import market_session
 
 BASE=os.path.dirname(os.path.abspath(__file__))
 WORKER_MODE=os.environ.get('AI_ENGINE_WORKER')=='1'
@@ -1317,37 +1318,75 @@ def render_smart_dataframe(df, width='stretch', hide_index=True, round_digits=No
             except Exception: pass
         st.dataframe(d,width=width,hide_index=hide_index)
 
-def intraday_checkpoint_status():
-    """Return current IDX regular-session checkpoint in WIB."""
-    now=datetime.now(ZoneInfo('Asia/Jakarta')).replace(tzinfo=None)
-    wd=now.weekday(); hm=now.hour*60+now.minute
-    if wd>=5:
-        return 'WEEKEND','—','Tidak ada sesi reguler'
-    morning_end=11*60+30 if wd==4 else 12*60
-    afternoon_start=14*60 if wd==4 else 13*60+30
-    if hm < 9*60:
-        return 'PRE-MARKET','09:00','Menunggu pembukaan'
-    if hm <= morning_end:
-        slots=[9*60,9*60+30,10*60,10*60+30,11*60,11*60+30] if wd==4 else [9*60,9*60+30,10*60,10*60+30,11*60,11*60+30,12*60]
-        prev=max([x for x in slots if x<=hm],default=9*60)
-        nxt=next((x for x in slots if x>hm),None)
-        label=f'{prev//60:02d}:{prev%60:02d}'
-        next_label=f'{nxt//60:02d}:{nxt%60:02d}' if nxt is not None else ('14:00' if wd==4 else '13:30')
-        return 'SESI I',next_label,f'Checkpoint aktif {label}'
-    if hm < afternoon_start:
-        return 'BREAK',f'{afternoon_start//60:02d}:{afternoon_start%60:02d}','Istirahat pasar'
-    if hm < 15*60+50:
-        slots=[14*60,14*60+30,15*60,15*60+30] if wd==4 else [13*60+30,14*60,14*60+30,15*60,15*60+30]
-        prev=max([x for x in slots if x<=hm],default=afternoon_start)
-        nxt=next((x for x in slots if x>hm),None)
-        label=f'{prev//60:02d}:{prev%60:02d}'
-        next_label=f'{nxt//60:02d}:{nxt%60:02d}' if nxt is not None else '15:50'
-        return 'SESI II',next_label,f'Checkpoint aktif {label}'
-    if hm <= 16*60:
-        return 'PRE-CLOSING', '16:00', 'Menjelang penutupan'
-    if hm <= 16*60+15:
-        return 'POST-TRADING','—','Post-trading'
-    return 'AFTER-MARKET','09:00', 'Menunggu sesi berikutnya'
+def intraday_checkpoint_status(now=None):
+    """Return the UI checkpoint from the same authoritative IDX session guard as the engine."""
+    session=market_session.session_status(CFGD,now=now)
+    status=str(session.get('status') or 'CLOSED').upper()
+    try:
+        local=datetime.fromisoformat(str(session.get('wib')))
+    except Exception:
+        local=datetime.now(ZoneInfo('Asia/Jakarta'))
+    hm=local.hour*60+local.minute
+    wd=local.weekday()
+
+    def hhmm(minutes):
+        return f'{int(minutes)//60:02d}:{int(minutes)%60:02d}'
+
+    def configured_minutes(key, fallback):
+        raw=str(CFGD.get(key) or fallback)
+        try:
+            h,m=raw.split(':',1)
+            return int(h)*60+int(m)
+        except Exception:
+            h,m=fallback.split(':',1)
+            return int(h)*60+int(m)
+
+    if status=='WEEKEND':
+        next_day=market_session.next_trading_date(CFGD,now=local,after_close=True)
+        return 'WEEKEND',f'{next_day} 09:00','Tidak ada sesi reguler'
+    if status=='HOLIDAY':
+        next_day=market_session.next_trading_date(CFGD,now=local,after_close=True)
+        return 'HOLIDAY',f'{next_day} 09:00','Libur bursa IDX'
+    if status=='PRE_MARKET':
+        return 'PRE-MARKET','09:00','Menunggu pembukaan sesi reguler'
+    if status=='BREAK':
+        start_key='idx_fri_session2_open' if wd==4 else 'idx_session2_open'
+        start_fallback='14:00' if wd==4 else '13:30'
+        return 'BREAK',hhmm(configured_minutes(start_key,start_fallback)),'Istirahat pasar reguler'
+    if status=='SESSION_1':
+        close_key='idx_fri_session1_close' if wd==4 else 'idx_session1_close'
+        close_fallback='11:30' if wd==4 else '12:00'
+        close_min=configured_minutes(close_key,close_fallback)
+        checkpoints=[9*60,9*60+30,10*60,10*60+30,11*60]
+        if close_min>=11*60+30:
+            checkpoints.append(11*60+30)
+        if close_min>=12*60:
+            checkpoints.append(12*60)
+        prev=max([x for x in checkpoints if x<=hm],default=9*60)
+        nxt=next((x for x in checkpoints if x>hm),close_min)
+        return 'SESI I',hhmm(nxt),f'Checkpoint aktif {hhmm(prev)}'
+    if status=='SESSION_2':
+        open_key='idx_fri_session2_open' if wd==4 else 'idx_session2_open'
+        open_fallback='14:00' if wd==4 else '13:30'
+        close_key='idx_fri_session2_close' if wd==4 else 'idx_session2_close'
+        close_fallback='15:50'
+        open_min=configured_minutes(open_key,open_fallback)
+        close_min=configured_minutes(close_key,close_fallback)
+        checkpoints=[open_min]
+        cursor=((open_min+29)//30)*30
+        while cursor<close_min:
+            if cursor not in checkpoints:
+                checkpoints.append(cursor)
+            cursor+=30
+        checkpoints=sorted(set(checkpoints))
+        prev=max([x for x in checkpoints if x<=hm],default=open_min)
+        nxt=next((x for x in checkpoints if x>hm),close_min)
+        return 'SESI II',hhmm(nxt),f'Checkpoint aktif {hhmm(prev)}'
+
+    # Authoritative regular market is closed. Do not label auction/post-trading
+    # periods as a live regular session because the actionable engine is closed.
+    next_day=market_session.next_trading_date(CFGD,now=local,after_close=True)
+    return 'AFTER-MARKET',f'{next_day} 09:00','Sesi reguler sudah tutup'
 
 def stock_search_panel(universe, res, forced_ticker=None):
     """V1.8.18 Search & On-Demand Deep Analysis.
@@ -1567,7 +1606,7 @@ def stock_search_panel(universe, res, forced_ticker=None):
     st.markdown('### 📈 Market Chart')
     session_name,next_checkpoint,session_note=intraday_checkpoint_status()
     now_wib=datetime.now(ZoneInfo('Asia/Jakarta'))
-    market_open=session_name in ['SESI I','SESI II','PRE-CLOSING','POST-TRADING']
+    market_open=session_name in ['SESI I','SESI II']
     market_icon='🟢' if market_open else ('🟡' if session_name in ['PRE-MARKET','BREAK'] else '⚫')
     st.caption(f'{market_icon} {session_name} • {now_wib.strftime("%H:%M WIB")} • {session_note}')
     period=st.radio('Periode',['1D','1W','1M','3M','YTD','1Y','3Y','5Y'],index=0,horizontal=True,key=f'chart_period_{selected_ticker}',label_visibility='collapsed')
