@@ -4,7 +4,9 @@ on:
     branches: [fix-engine-progress-r25]
     paths:
       - 'tools/apply_r25_engine_progress.py'
+      - 'tools/r25_status_cleanup.py'
       - 'tests/test_engine_progress_r25.py'
+      - 'tests/test_market_safety_v1853.py'
       - '.github/workflows/r25_engine_progress.yml'
 permissions:
   contents: write
@@ -19,7 +21,9 @@ jobs:
         with:
           python-version: '3.11'
       - name: Apply R25 patch
-        run: python tools/apply_r25_engine_progress.py
+        run: |
+          python tools/apply_r25_engine_progress.py
+          python tools/r25_status_cleanup.py
       - name: Compile changed production modules
         run: >-
           python -m py_compile worker_base.py local_runtime_health.py runtime_health.py
@@ -27,7 +31,7 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -q -r requirements.txt pytest
       - name: R25 targeted behavior tests
-        run: python -m pytest -q tests/test_engine_progress_r25.py
+        run: python -m pytest -q tests/test_engine_progress_r25.py tests/test_market_safety_v1853.py
       - name: Full regression suite
         run: python -m pytest -q
       - name: Static R25 contract
@@ -46,7 +50,10 @@ jobs:
           assert 'def mark_engine_progress' in worker and 'COLLECT_PROGRESS' in worker
           assert 'engine_cycle_status' in worker and 'CYCLE_ERROR' in worker
           assert 'def engine_progress_health' in local
+          assert 'LOCAL_RUNTIME_READY_REFRESHING' in local
+          assert 'RUNTIME_READY_REFRESHING' in local
           assert 'ENGINE_STALLED' in local and 'ENGINE_WARMING' in local
+          assert 'RUNTIME_RUNTIME_READY' not in local
           assert 'engine_progress_at' in remote and 'engine_progress_health' in remote
           assert 'def _remove_sqlite_sidecars' in bridge
           assert '_remove_sqlite_sidecars(LOCAL_DB)' in bridge
