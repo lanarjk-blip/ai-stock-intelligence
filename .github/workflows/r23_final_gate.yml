@@ -46,7 +46,9 @@ jobs:
 
           assert 'AI Stock Intelligence V1.8.48' not in app
           assert 'mobile_ui_version' in app and 'expected_fingerprint' in app
-          assert 'candidate_mode TEXT' in dyn and "candidate_mode=='MONITOR_FALLBACK'" in dyn.replace(' ', '')
+          compact=dyn.replace(' ', '')
+          assert 'candidate_modeTEXT' in compact
+          assert "mode=='MONITOR_FALLBACK':return'MONITOR'" in compact
           assert 'reference_price REAL' in h10 and '_sanitize_payload_for_quality' in h10
           assert 'QUALITY_MONITOR' in h10 and 'reference_price' in prelim
           assert hist.count('if "candidate_mode" not in existing:') == 1
