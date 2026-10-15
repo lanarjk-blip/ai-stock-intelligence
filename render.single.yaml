@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: ai-stock-intelligence-runtime-host
+    runtime: python
+    region: singapore
+    numInstances: 1
+    buildCommand: pip install -r requirements.txt
+    startCommand: python runtime_host.py
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.17"
+      - key: ASI_PERSIST_SYNC_SECONDS
+        value: "30"
+      - key: ASI_UI_REPLICA_SECONDS
+        value: "60"
+      - key: ASI_CHECKPOINT_SECONDS
+        value: "900"
+      - key: ASI_CHECKPOINT_WARM_PRICE_ROWS
+        value: "1000"
+      - key: DATABASE_URL
+        sync: false
