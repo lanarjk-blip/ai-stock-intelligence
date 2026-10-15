@@ -60,18 +60,32 @@ def read_current():
 
 
 def _cached_time_signal(ticker):
-    """Use the existing V1.8.20.1 time model, but only for a small candidate set."""
+    """Time edge plus a same-day intraday quote when one is genuinely fresh."""
+    base={'edge':0.0,'confidence':0.0,'horizon':'EOD','entry_status':'NEUTRAL',
+          'current_price':None,'price_at':'','price_source':'DAILY_FALLBACK'}
     try:
         tp=app.intraday_prediction(str(ticker))
+        try:
+            quote=app.latest_intraday_quote(str(ticker))
+        except Exception:
+            quote=None
+        if quote:
+            base.update({
+                'current_price':float(quote.get('price')),
+                'price_at':str(quote.get('ts') or ''),
+                'price_source':str(quote.get('source') or 'INTRADAY_TODAY'),
+            })
         if tp is None or tp.empty:
-            return {'edge':0.0,'confidence':0.0,'horizon':'EOD','entry_status':'NEUTRAL'}
+            return base
         # Prefer EOD for next-session / broad opportunity selection.
         row=tp[tp.horizon.astype(str)=='EOD']
         if row.empty: row=tp.iloc[[0]]
         r=row.iloc[0]
-        return {'edge':float(r.edge),'confidence':float(r.confidence),'horizon':str(r.horizon),'entry_status':str(r.entry_status)}
+        base.update({'edge':float(r.edge),'confidence':float(r.confidence),
+                     'horizon':str(r.horizon),'entry_status':str(r.entry_status)})
+        return base
     except Exception:
-        return {'edge':0.0,'confidence':0.0,'horizon':'EOD','entry_status':'NEUTRAL'}
+        return base
 
 
 def _market_context(row):
@@ -119,7 +133,8 @@ def _state(row, ts, score):
 
 
 def _dynamic_entry(row, ts):
-    close=float(row.close)
+    live=ts.get('current_price')
+    close=float(live) if live is not None and pd.notna(live) else float(row.close)
     lo=float(row.entry_low) if pd.notna(row.entry_low) else close
     hi=float(row.entry_high) if pd.notna(row.entry_high) else close
     edge=float(ts.get('edge',0.0))
@@ -403,6 +418,8 @@ def update(res, phase='CLOSED'):
         ts=_cached_time_signal(r.ticker)
         score=_score(r,ts)
         lo,hi=_dynamic_entry(r,ts)
+        live_price=ts.get('current_price')
+        market_price=(float(live_price) if live_price is not None and pd.notna(live_price) else float(r.close))
         market_regime,market_score,ihsg_alignment,regime_adjustment=_market_context(r)
         prev_r=prev_map.get(str(r.ticker))
         prev_rank=int(prev_r['rank']) if prev_r is not None and pd.notna(prev_r['rank']) else None
@@ -410,7 +427,7 @@ def update(res, phase='CLOSED'):
         stable=int(prev_r['stable_cycles'])+1 if prev_r is not None and abs(score-(prev_score or score))<3.0 else 1
         rows.append({
             'ticker':str(r.ticker),'company':str(r.company),'score':score,'time':ts,
-            'close':float(r.close),'entry_low':lo,'entry_high':hi,
+            'close':market_price,'entry_low':lo,'entry_high':hi,
             'stop_loss':float(r.stop_loss) if pd.notna(r.stop_loss) else np.nan,
             'target_1':float(r.target_1) if pd.notna(r.target_1) else np.nan,
             'target_2':float(r.target_2) if pd.notna(r.target_2) else np.nan,
@@ -421,6 +438,7 @@ def update(res, phase='CLOSED'):
             'relative_percentile':float(r.relative_percentile) if pd.notna(r.relative_percentile) else np.nan,
             'relative_rank_score':float(r.relative_rank_score) if pd.notna(r.relative_rank_score) else np.nan,
             'decision':str(r.decision),'decision_reason':str(r.decision_reason),
+            'price_source':str(ts.get('price_source') or 'DAILY_FALLBACK'),'price_at':str(ts.get('price_at') or ''),
             'market_regime':market_regime,'market_score':market_score,'ihsg_alignment':ihsg_alignment,'regime_adjustment':regime_adjustment,
             'prev_rank':prev_rank,'prev_score':prev_score,'stable':stable,'candidate_mode':candidate_mode
         })
@@ -472,7 +490,8 @@ def update(res, phase='CLOSED'):
         rank=i+1; ts=rr.time
         state=_state(rr,ts,float(rr.score))
         mode_note='monitor fallback; no signal upgraded; ' if str(rr.candidate_mode)=='MONITOR_FALLBACK' else ''
-        reason=f"{mode_note}score {rr.score:.1f}; IHSG {rr.market_regime} {rr.market_score:.1f}; alignment {rr.ihsg_alignment:.1f}; regime adj {rr.regime_adjustment:+.1f}; relative {rr.relative_percentile*100:.1f}%; time edge {ts.get('edge',0)*100:+.1f}%; {rr.decision}"
+        price_note=(f"price {rr.price_source} {str(rr.price_at)[:19]}; " if hasattr(rr,'price_source') else '')
+        reason=f"{mode_note}{price_note}score {rr.score:.1f}; IHSG {rr.market_regime} {rr.market_score:.1f}; alignment {rr.ihsg_alignment:.1f}; regime adj {rr.regime_adjustment:+.1f}; relative {rr.relative_percentile*100:.1f}%; time edge {ts.get('edge',0)*100:+.1f}%; {rr.decision}"
         prev_rank=rr.prev_rank
         prev_rank_missing = prev_rank is None or pd.isna(prev_rank)
         replacement='NEW' if prev_rank_missing else ('RETAINED' if int(prev_rank)==rank else f'RANK_CHANGED {int(prev_rank)}→{rank}')

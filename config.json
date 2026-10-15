@@ -95,6 +95,8 @@
   "resolver_min_company_similarity": 0.72,
   "universe_registry_version": "1.8.14",
   "intraday_refresh_minutes": 30,
+  "intraday_refresh_grace_minutes": 15,
+  "intraday_live_price_max_age_minutes": 75,
   "intraday_symbols_per_cycle": 60,
   "time_intelligence_version": "1.8.20.1",
   "confidence_calibration_version": "1.8.20.1",

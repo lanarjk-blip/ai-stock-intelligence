@@ -8,6 +8,7 @@ import streamlit as st
 from dynamic_opportunity_ui import render_actionable_dynamic
 import recommendation_history
 import ai_stock_ask
+import market_session
 
 BASE=os.path.dirname(os.path.abspath(__file__))
 WORKER_MODE=os.environ.get('AI_ENGINE_WORKER')=='1'
@@ -824,6 +825,112 @@ def _intraday_load(ticker):
         df['ts']=pd.to_datetime(df.ts,utc=True)
     return df
 
+
+def _utc_timestamp(now=None):
+    if now is None:
+        return pd.Timestamp.now(tz='UTC')
+    ts=pd.Timestamp(now)
+    if ts.tzinfo is None:
+        return ts.tz_localize('UTC')
+    return ts.tz_convert('UTC')
+
+
+def _intraday_refresh_plan(df, now=None):
+    """Return NONE, FULL_HISTORY, or LIGHT_REFRESH based on history and bar age."""
+    if df is None or len(df)<60:
+        return 'FULL_HISTORY', 'history_lt_60'
+    session=market_session.session_status(CFGD,now=now)
+    status=str(session.get('status') or '').upper()
+    if not (bool(session.get('live')) or status=='BREAK'):
+        return 'NONE', f'session_{status or "UNKNOWN"}'
+    try:
+        latest=pd.to_datetime(df['ts'],utc=True,errors='coerce').dropna().max()
+        if pd.isna(latest):
+            return 'LIGHT_REFRESH','latest_bar_invalid'
+        age_minutes=max(0.0,(_utc_timestamp(now)-latest).total_seconds()/60.0)
+    except Exception:
+        return 'LIGHT_REFRESH','latest_bar_invalid'
+    refresh=float(CFGD.get('intraday_refresh_minutes',30))
+    grace=float(CFGD.get('intraday_refresh_grace_minutes',15))
+    limit=max(refresh,refresh+grace)
+    if age_minutes>limit:
+        return 'LIGHT_REFRESH',f'bar_age_{age_minutes:.1f}m'
+    return 'NONE',f'bar_age_{age_minutes:.1f}m'
+
+
+def _intraday_attempt_due(ticker, now=None):
+    key='intraday_refresh_attempt_'+str(ticker).upper().replace('.JK','')
+    raw=state_get(key)
+    if not raw:
+        return True,key
+    try:
+        dt=pd.Timestamp(str(raw))
+        if dt.tzinfo is None: dt=dt.tz_localize('UTC')
+        else: dt=dt.tz_convert('UTC')
+        age=(_utc_timestamp(now)-dt).total_seconds()/60.0
+        return age>=float(CFGD.get('intraday_refresh_minutes',30)),key
+    except Exception:
+        return True,key
+
+
+def _refresh_intraday_if_needed(ticker, df=None, now=None):
+    ticker=str(ticker).upper().replace('.JK','')
+    df=_intraday_load(ticker) if df is None else df
+    mode,reason=_intraday_refresh_plan(df,now=now)
+    if mode=='NONE':
+        return df,{'mode':'CACHE','reason':reason,'attempted':False,'updated':False}
+    due,key=_intraday_attempt_due(ticker,now=now)
+    if not due:
+        return df,{'mode':'THROTTLED','reason':reason,'attempted':False,'updated':False}
+    stamp=_utc_timestamp(now).isoformat()
+    state_set(key,stamp)
+    period=(CFGD.get('intraday_period_days',60) if mode=='FULL_HISTORY' else 2)
+    try:
+        fresh=fetch_chart(ticker,period,CFGD.get('intraday_interval','30m'))
+        if fresh is not None and not fresh.empty:
+            save_intraday(fresh,ticker)
+            df=_intraday_load(ticker)
+            state_set('intraday_refresh_success_'+ticker,stamp)
+            return df,{'mode':mode,'reason':reason,'attempted':True,'updated':True}
+        return df,{'mode':mode,'reason':reason,'attempted':True,'updated':False}
+    except Exception as exc:
+        state_set('intraday_refresh_error_'+ticker,str(exc)[:300])
+        return df,{'mode':mode,'reason':reason,'attempted':True,'updated':False}
+
+
+def latest_intraday_quote(ticker, now=None):
+    """Return a same-market-day price, never an old bar disguised as live."""
+    ticker=str(ticker).upper().replace('.JK','')
+    df=_intraday_load(ticker)
+    if df.empty:
+        return None
+    session=market_session.session_status(CFGD,now=now)
+    status=str(session.get('status') or '').upper()
+    if status in {'PRE_MARKET','WEEKEND','HOLIDAY'}:
+        return None
+    target=str(session.get('market_date') or '')
+    d=df.copy()
+    d['ts']=pd.to_datetime(d['ts'],utc=True,errors='coerce')
+    d=d.dropna(subset=['ts','close'])
+    if d.empty:
+        return None
+    d['wib_date']=d['ts'].dt.tz_convert('Asia/Jakarta').dt.date.astype(str)
+    d=d[d['wib_date']==target]
+    if d.empty:
+        return None
+    row=d.iloc[-1]
+    bar_ts=pd.Timestamp(row['ts'])
+    if bool(session.get('live')) or status=='BREAK':
+        age_minutes=max(0.0,(_utc_timestamp(now)-bar_ts).total_seconds()/60.0)
+        if age_minutes>float(CFGD.get('intraday_live_price_max_age_minutes',75)):
+            return None
+    return {
+        'price':float(row['close']),
+        'ts':bar_ts.isoformat(),
+        'source':'INTRADAY_TODAY',
+        'market_date':target,
+    }
+
 def _time_bucket(tod):
     tod=float(tod)
     if tod < 10*60: return 'OPENING'
@@ -832,16 +939,11 @@ def _time_bucket(tod):
     if tod < 15*60+30: return 'AFTERNOON'
     return 'CLOSING'
 
-def intraday_prediction(ticker):
+def intraday_prediction(ticker, now=None):
     df=_intraday_load(ticker)
-    # V1.8.20: keep on-demand collection, but require enough history for robust time conditioning.
-    if len(df)<60:
-        try:
-            fresh=fetch_chart(ticker,CFGD.get('intraday_period_days',60),CFGD.get('intraday_interval','30m'))
-            if not fresh.empty:
-                save_intraday(fresh,ticker); df=_intraday_load(ticker)
-        except Exception:
-            pass
+    # History size alone is not freshness. Keep a robust historical sample, then
+    # refresh a lightweight recent window when the latest live/break bar is stale.
+    df,_refresh_meta=_refresh_intraday_if_needed(ticker,df,now=now)
     if len(df)<60:return pd.DataFrame()
     x=df.copy(); x['wib_hour']=(x.ts.dt.hour+7)%24; x['wib_min']=x.ts.dt.minute; x['tod']=x.wib_hour*60+x.wib_min
     x['ret1']=x.close.pct_change(fill_method=None); x['vol20']=x.volume.rolling(20).mean(); x['vol_ratio']=x.volume/x.vol20.replace(0,np.nan)
