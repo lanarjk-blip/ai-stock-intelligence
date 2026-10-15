@@ -5,7 +5,7 @@ services:
     region: singapore
     numInstances: 1
     buildCommand: pip install -r requirements.txt
-    startCommand: python runtime_host.py
+    startCommand: python deployment_preflight.py && python runtime_host.py
     healthCheckPath: /ready
     envVars:
       - key: PYTHON_VERSION
