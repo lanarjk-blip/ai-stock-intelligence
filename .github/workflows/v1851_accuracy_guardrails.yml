@@ -145,11 +145,20 @@ jobs:
           AI_ENGINE_WORKER: '1'
         run: |
           python - <<'PY'
+          import time
           import app
-          d=app.fetch_ihsg()
-          print('IHSG rows=', 0 if d is None else len(d))
-          assert d is not None and not d.empty, 'IHSG provider returned no usable rows'
+          d=None
+          for attempt in range(1, 4):
+              d=app.fetch_ihsg()
+              rows=0 if d is None else len(d)
+              print(f'IHSG attempt={attempt} rows={rows}')
+              if d is not None and not d.empty and 'close' in d.columns and not d['close'].dropna().empty:
+                  break
+              if attempt < 3:
+                  time.sleep(3)
+          assert d is not None and not d.empty, 'IHSG provider returned no usable rows after 3 attempts'
           assert 'close' in d.columns
+          assert not d['close'].dropna().empty
           assert float(d['close'].dropna().iloc[-1]) > 0
           PY
       - name: Live JST end-to-end training smoke test
@@ -157,11 +166,21 @@ jobs:
           AI_ENGINE_WORKER: '1'
         run: |
           python - <<'PY'
+          import time
           import pandas as pd
           import app
           tickers=['BBCA','BBRI','BMRI','TLKM','ASII','ANTM','INDF','ICBP','ADRO','UNTR','PGAS','KLBF']
           universe=pd.DataFrame({'ticker':tickers,'company':tickers})
-          ih=app.fetch_ihsg(); assert ih is not None and not ih.empty
+          ih=None
+          for attempt in range(1, 4):
+              ih=app.fetch_ihsg()
+              rows=0 if ih is None else len(ih)
+              print(f'JST IHSG attempt={attempt} rows={rows}')
+              if ih is not None and not ih.empty:
+                  break
+              if attempt < 3:
+                  time.sleep(3)
+          assert ih is not None and not ih.empty, 'IHSG unavailable for JST smoke after 3 attempts'
           app.save_ihsg(ih)
           ok=0
           for ticker in tickers:
@@ -207,3 +226,4 @@ jobs:
           tests/test_runtime_stabilization_v1853.py
           tests/test_ui_replica_v1853.py
           tests/test_market_safety_v1853.py
+          tests/test_worker_efficiency_r26.py
