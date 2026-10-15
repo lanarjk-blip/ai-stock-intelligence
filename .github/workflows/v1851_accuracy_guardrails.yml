@@ -22,7 +22,10 @@ on:
       - 'replica_runtime.py'
       - 'external_runtime_guard.py'
       - 'runtime_api.py'
+      - 'runtime_host.py'
+      - 'runtime_host_api.py'
       - 'render.yaml'
+      - 'render.single.yaml'
       - 'config.json'
       - 'requirements.txt'
       - 'tests/**'
@@ -49,7 +52,10 @@ on:
       - 'replica_runtime.py'
       - 'external_runtime_guard.py'
       - 'runtime_api.py'
+      - 'runtime_host.py'
+      - 'runtime_host_api.py'
       - 'render.yaml'
+      - 'render.single.yaml'
       - 'config.json'
       - 'requirements.txt'
       - 'tests/**'
@@ -112,6 +118,12 @@ jobs:
           assert 'worker_base.py' in external and 'subprocess.Popen = guarded_popen' in external
           api=Path('runtime_api.py').read_text(encoding='utf-8')
           assert '/health' in api and '/bootstrap' in api and 'ui_replica' in api
+          host=Path('runtime_host.py').read_text(encoding='utf-8')
+          host_api=Path('runtime_host_api.py').read_text(encoding='utf-8')
+          single=Path('render.single.yaml').read_text(encoding='utf-8')
+          assert 'runtime_host_api:app' in host
+          assert '@app.get("/ready")' in host_api and 'startup_grace' in host_api
+          assert 'healthCheckPath: /ready' in single and 'ASI_RUNTIME_STARTUP_GRACE_SECONDS' in single
           preliminary=Path('premarket_preliminary.py').read_text(encoding='utf-8')
           assert 'ensure_on_open' in preliminary and 'PRELIMINARY_ON_OPEN' in preliminary
           blueprint=Path('render.yaml').read_text(encoding='utf-8')
@@ -126,7 +138,7 @@ jobs:
           premarket_scheduler.py premarket_preliminary.py premarket_ui_patch.py
           runtime_health.py runtime_health_ui_patch.py runtime_supervisor.py
           persistent_bridge.py ui_replica.py replica_runtime.py
-          external_runtime_guard.py runtime_api.py
+          external_runtime_guard.py runtime_api.py runtime_host.py runtime_host_api.py
       - name: Diagnose current production Streamlit endpoint
         run: |
           set +e
@@ -215,16 +227,5 @@ jobs:
           assert dynamic is not None and not dynamic.empty
           assert len(dynamic) <= int(app.CFGD.get('dynamic_opportunity_count',5))
           PY
-      - name: Regression tests
-        run: >-
-          python -m pytest -q
-          test_batch1_live_engine.py
-          test_mobile_ui_v1848.py
-          tests/test_accuracy_guardrails_v1852.py
-          tests/test_runtime_consistency_v1852.py
-          tests/test_ihsg_failover_v1852.py
-          tests/test_runtime_stabilization_v1853.py
-          tests/test_ui_replica_v1853.py
-          tests/test_market_safety_v1853.py
-          tests/test_worker_efficiency_r26.py
-          tests/test_runtime_api_health_r28.py
+      - name: Full regression suite
+        run: python -m pytest -q
