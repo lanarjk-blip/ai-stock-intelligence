@@ -17,8 +17,14 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 DB = os.path.join(BASE, "db", "market.db")
 FILES = (
     "app.py", "worker_base.py", "accuracy_guardrails.py", "dynamic_engine.py",
-    "dynamic_opportunity_ui.py", "market_session.py", "premarket_scheduler.py",
-    "premarket_preliminary.py", "runtime_supervisor.py", "sitecustomize.py",
+    "dynamic_opportunity_ui.py", "top5_timeline.py", "recommendation_history.py",
+    "market_session.py", "premarket_scheduler.py", "premarket_preliminary.py",
+    "premarket_intelligence.py", "premarket_evaluation.py", "premarket_explain.py",
+    "closing_overnight.py", "hold_engine.py", "ai_stock_ask.py", "fcm_adapter.py",
+    "runtime_supervisor.py", "runtime_health.py", "runtime_health_ui_patch.py",
+    "persistent_bridge.py", "ui_replica.py", "replica_runtime.py",
+    "external_runtime_guard.py", "runtime_api.py", "sitecustomize.py", "config.json",
+    "data/idx_holidays.json",
 )
 
 
