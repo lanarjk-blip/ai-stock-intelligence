@@ -24,6 +24,7 @@ on:
       - 'runtime_api.py'
       - 'runtime_host.py'
       - 'runtime_host_api.py'
+      - 'deployment_preflight.py'
       - 'render.yaml'
       - 'render.single.yaml'
       - 'config.json'
@@ -54,6 +55,7 @@ on:
       - 'runtime_api.py'
       - 'runtime_host.py'
       - 'runtime_host_api.py'
+      - 'deployment_preflight.py'
       - 'render.yaml'
       - 'render.single.yaml'
       - 'config.json'
@@ -120,9 +122,12 @@ jobs:
           assert '/health' in api and '/bootstrap' in api and 'ui_replica' in api
           host=Path('runtime_host.py').read_text(encoding='utf-8')
           host_api=Path('runtime_host_api.py').read_text(encoding='utf-8')
+          preflight=Path('deployment_preflight.py').read_text(encoding='utf-8')
           single=Path('render.single.yaml').read_text(encoding='utf-8')
           assert 'runtime_host_api:app' in host
           assert '@app.get("/ready")' in host_api and 'startup_grace' in host_api
+          assert 'DATABASE_URL_MISSING' in preflight and '--require-live-runtime' in preflight
+          assert 'super-secret-password' not in preflight
           assert 'healthCheckPath: /ready' in single and 'ASI_RUNTIME_STARTUP_GRACE_SECONDS' in single
           preliminary=Path('premarket_preliminary.py').read_text(encoding='utf-8')
           assert 'ensure_on_open' in preliminary and 'PRELIMINARY_ON_OPEN' in preliminary
@@ -139,6 +144,7 @@ jobs:
           runtime_health.py runtime_health_ui_patch.py runtime_supervisor.py
           persistent_bridge.py ui_replica.py replica_runtime.py
           external_runtime_guard.py runtime_api.py runtime_host.py runtime_host_api.py
+          deployment_preflight.py
       - name: Diagnose current production Streamlit endpoint
         run: |
           set +e
