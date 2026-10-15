@@ -3,7 +3,11 @@
 Streamlit can restart while a detached worker process survives. A new UI server
 can then spawn another worker, leaving two generations writing contradictory
 state to the same database. This module makes the worker process itself own the
-singleton lock and retires stale sibling workers.
+local singleton lock and retires stale sibling workers.
+
+R39 extends that protection across devices. When ASI_HYBRID_WORKER=1, the local
+winner must also acquire the Neon distributed lease before sitecustomize is
+allowed to continue into persistence restore, schedulers, or worker_base.
 """
 from __future__ import annotations
 
@@ -21,7 +25,7 @@ _DEPLOY_SHA = str(
     or ""
 ).strip()[:12]
 RUNTIME_BUILD = f"{_BASE_BUILD}+{_DEPLOY_SHA}" if _DEPLOY_SHA else _BASE_BUILD
-SUPERVISOR_VERSION = "RUNTIME-SUPERVISOR-R1"
+SUPERVISOR_VERSION = "RUNTIME-SUPERVISOR-R2-HYBRID"
 LOCK_PATH = "/tmp/ai_stock_intelligence_worker.singleton.lock"
 LOCK_HANDLE = None
 GENERATION = uuid.uuid4().hex[:12]
@@ -226,4 +230,40 @@ def claim_singleton_or_exit():
     }
 
 
+def _claim_hybrid_lease_or_exit(identity):
+    if not identity.get("claimed") or os.environ.get("ASI_HYBRID_WORKER") != "1":
+        return None
+    try:
+        import hybrid_worker_lease
+        lease = hybrid_worker_lease.acquire_or_wait(identity)
+        if not lease.get("acquired"):
+            raise SystemExit("Hybrid worker failed to acquire required distributed lease")
+        hybrid_worker_lease.start_renewal(identity)
+        print(
+            f"[RUNTIME_SUPERVISOR] HYBRID_PRIMARY device={hybrid_worker_lease.detect_device_type()} "
+            f"lease_version={hybrid_worker_lease.LEASE_VERSION}",
+            flush=True,
+        )
+        return lease
+    except SystemExit:
+        raise
+    except Exception as exc:
+        # Fail closed. sitecustomize explicitly re-raises SystemExit while it
+        # only logs ordinary exceptions; therefore convert any lease bootstrap
+        # failure into SystemExit so an unleased worker can never continue.
+        print(
+            f"[RUNTIME_SUPERVISOR] HYBRID_FATAL error_type={type(exc).__name__}",
+            flush=True,
+        )
+        raise SystemExit(78)
+
+
 CLAIM = claim_singleton_or_exit()
+_HYBRID_LEASE = _claim_hybrid_lease_or_exit(CLAIM)
+if _HYBRID_LEASE:
+    CLAIM["hybrid_lease"] = {
+        "acquired": True,
+        "device_type": _HYBRID_LEASE.get("device_type"),
+        "priority": _HYBRID_LEASE.get("priority"),
+        "lease_until": str(_HYBRID_LEASE.get("lease_until") or ""),
+    }
