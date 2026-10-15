@@ -36,11 +36,13 @@ jobs:
           a=Path('runtime_api.py').read_text(encoding='utf-8')
           assert 'PERSIST-BRIDGE-R4-EXACT-MIRROR' in p
           assert 'DELETE FROM asi_premarket_picks WHERE market_date=%s' in p
-          assert 'protected_final_dates' in p
+          assert 'remote_final_dates' in p
+          assert 'local_run_dates' in p
           assert 'DELETE FROM asi_opportunity_snapshot WHERE singleton=1' in p
           assert 'snapshot_generated_at' in p
           assert p.count('WHERE p.rank BETWEEN 1 AND r.pick_count') >= 1
           assert 'WHERE p.rank BETWEEN 1 AND r.pick_count' in a
+          assert 'protected_final_dates' not in p
           print('R24 exact-mirror contract passed')
           PY
       - name: Commit production patch
