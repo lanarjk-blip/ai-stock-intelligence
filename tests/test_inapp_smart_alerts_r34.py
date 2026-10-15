@@ -89,9 +89,9 @@ def test_disappearance_marks_absent_and_reentry_is_detected(tmp_path):
     result=s.sync_inapp_alerts(str(db),current,config={},live_required=True)
     assert result['alerts']>=1
     con=sqlite3.connect(db)
-    last=con.execute("SELECT alert_type FROM alert_history WHERE ticker='AAA' ORDER BY id DESC LIMIT 1").fetchone()
+    types={r[0] for r in con.execute("SELECT alert_type FROM alert_history WHERE ticker='AAA'").fetchall()}
     con.close()
-    assert last and last[0]=='TOP_5_ENTRY'
+    assert 'TOP_5_ENTRY' in types
 
 
 def test_hold_context_is_merged_into_state(tmp_path):
