@@ -1,0 +1,63 @@
+name: R34 In-App Smart Alerts
+on:
+  push:
+    branches: [fix-inapp-smart-alerts-r34]
+    paths:
+      - 'tools/apply_r34_inapp_alerts.py'
+      - 'tests/test_inapp_smart_alerts_r34.py'
+      - '.github/workflows/r34_inapp_alerts.yml'
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-inapp-smart-alerts-r34
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply R34 patch
+        run: python tools/apply_r34_inapp_alerts.py
+      - name: Compile
+        run: python -m py_compile smart_alerts.py worker_base.py
+      - name: Install dependencies
+        run: python -m pip install -q -r requirements.txt pytest
+      - name: R34 targeted tests
+        run: python -m pytest -q tests/test_inapp_smart_alerts_r34.py
+      - name: Existing Smart Alert simulators
+        run: python -m pytest -q test_smart_alerts.py test_notification_engine.py || python - <<'PY'
+          import smart_alerts
+          rows=smart_alerts.run_simulator()
+          assert all(r['Result']=='PASS' for r in rows), rows
+          print(rows)
+          PY
+      - name: Full regression suite
+        run: python -m pytest -q
+      - name: Static in-app-only contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('smart_alerts.py').read_text(encoding='utf-8')
+          w=Path('worker_base.py').read_text(encoding='utf-8')
+          assert 'def sync_inapp_alerts' in s
+          assert 'CREATE TABLE IF NOT EXISTS smart_alert_state' in s
+          assert 'CREATE TABLE IF NOT EXISTS alert_history' in s
+          assert 'cur_actionable = _live_actionable(cur)' in s
+          assert "cur_entry != 'ACTIVE' or cur_actionable" in s
+          assert 'import smart_alerts' in w
+          assert 'smart_alerts.sync_inapp_alerts' in w
+          assert 'notification_engine' not in w
+          assert 'send_whatsapp' not in w
+          print('R34 in-app Smart Alert contract OK')
+          PY
+      - name: Commit production patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add smart_alerts.py worker_base.py
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Wire Smart Alerts into the worker as in-app history'
+          git pull --rebase origin fix-inapp-smart-alerts-r34
+          git push origin HEAD:fix-inapp-smart-alerts-r34
