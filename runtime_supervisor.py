@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import signal
 import sys
+import tempfile
 import time
 import uuid
 from datetime import datetime, timezone
@@ -26,7 +27,7 @@ _DEPLOY_SHA = str(
 ).strip()[:12]
 RUNTIME_BUILD = f"{_BASE_BUILD}+{_DEPLOY_SHA}" if _DEPLOY_SHA else _BASE_BUILD
 SUPERVISOR_VERSION = "RUNTIME-SUPERVISOR-R2-HYBRID"
-LOCK_PATH = "/tmp/ai_stock_intelligence_worker.singleton.lock"
+LOCK_PATH = os.path.join(tempfile.gettempdir(), "ai_stock_intelligence_worker.singleton.lock")
 LOCK_HANDLE = None
 GENERATION = uuid.uuid4().hex[:12]
 STARTED_AT = datetime.now(timezone.utc).isoformat()
