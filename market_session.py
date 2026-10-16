@@ -150,3 +150,43 @@ def session_status(config=None, now=None):
 
 def is_live_market_session(config=None, now=None):
     return bool(session_status(config=config, now=now).get("live"))
+
+
+def _install_direct_refresh_status_ui():
+    """Guarantee the refresh/status strip is wired on every dashboard import.
+
+    Some hosted Streamlit runtimes can bypass the optional sitecustomize UI
+    patch path. app.py always imports market_session, so this lightweight hook
+    provides a deterministic fallback without changing trading logic. If the
+    primary runtime_health_ui_patch already wrapped st.title, this does nothing
+    to avoid duplicate controls.
+    """
+    if os.environ.get("AI_ENGINE_WORKER") == "1":
+        return
+    try:
+        import streamlit as st
+
+        if getattr(st.title, "_asi_refresh_status_patch", False):
+            return
+        if getattr(st.title, "_asi_direct_refresh_status_patch", False):
+            return
+
+        original_title = st.title
+
+        def title(body, *args, **kwargs):
+            rendered = original_title(body, *args, **kwargs)
+            if str(body).startswith("📈 AI Stock Intelligence V"):
+                try:
+                    import runtime_health_ui_patch
+                    runtime_health_ui_patch._render_refresh_status(st)
+                except Exception:
+                    pass
+            return rendered
+
+        title._asi_direct_refresh_status_patch = True
+        st.title = title
+    except Exception:
+        pass
+
+
+_install_direct_refresh_status_ui()
