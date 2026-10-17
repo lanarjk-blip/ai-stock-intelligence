@@ -3,6 +3,8 @@ package id.asi.stockintelligence;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Context;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.net.ConnectivityManager;
 import android.net.Network;
@@ -28,7 +30,6 @@ import android.widget.Toast;
 
 public class MainActivity extends Activity {
     private static final String HOME_URL = "https://ai-stock-intelligence-zijcl2pi2kjweeappbkjiy.streamlit.app";
-    private static final String APP_VERSION = "1.8.54";
 
     private WebView webView;
     private ProgressBar progress;
@@ -36,10 +37,25 @@ public class MainActivity extends Activity {
     private ConnectivityManager connectivityManager;
     private ConnectivityManager.NetworkCallback networkCallback;
     private boolean mainFrameFailed = false;
+    private String appVersion = "unknown";
+
+    private String resolveAppVersion() {
+        try {
+            PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
+            return info.versionName == null ? "unknown" : info.versionName;
+        } catch (PackageManager.NameNotFoundException ignored) {
+            return "unknown";
+        }
+    }
+
+    private String appTitle() {
+        return "AI Stock Intelligence V" + appVersion;
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        appVersion = resolveAppVersion();
         buildUi();
         configureWebView();
         registerNetworkRecovery();
@@ -67,7 +83,7 @@ public class MainActivity extends Activity {
         top.setPadding(p, p / 2, p, p / 2);
 
         status = new TextView(this);
-        status.setText("AI Stock Intelligence");
+        status.setText(appTitle());
         status.setTextSize(14f);
         status.setSingleLine(true);
         top.addView(status, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
@@ -118,7 +134,8 @@ public class MainActivity extends Activity {
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
         settings.setSupportZoom(false);
-        settings.setUserAgentString(settings.getUserAgentString() + " AIStockIntelligenceAPK/" + APP_VERSION);
+        settings.setCacheMode(WebSettings.LOAD_DEFAULT);
+        settings.setUserAgentString(settings.getUserAgentString() + " AIStockIntelligenceAPK/" + appVersion);
 
         CookieManager cookies = CookieManager.getInstance();
         cookies.setAcceptCookie(true);
@@ -135,13 +152,13 @@ public class MainActivity extends Activity {
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
-                status.setText("Memuat...");
+                status.setText("Memuat " + appTitle() + "...");
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
                 mainFrameFailed = false;
-                status.setText("AI Stock Intelligence");
+                status.setText(appTitle());
                 CookieManager.getInstance().flush();
             }
 
@@ -160,7 +177,7 @@ public class MainActivity extends Activity {
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (request.isForMainFrame()) {
                     mainFrameFailed = true;
-                    status.setText("Koneksi bermasalah");
+                    status.setText("Koneksi bermasalah • " + appTitle());
                     Toast.makeText(MainActivity.this, "Internet terputus. Aplikasi akan mencoba pulih otomatis saat jaringan kembali.", Toast.LENGTH_LONG).show();
                 }
             }
@@ -194,7 +211,7 @@ public class MainActivity extends Activity {
 
             @Override
             public void onLost(Network network) {
-                runOnUiThread(() -> status.setText("Menunggu jaringan..."));
+                runOnUiThread(() -> status.setText("Menunggu jaringan • " + appTitle()));
             }
         };
 
