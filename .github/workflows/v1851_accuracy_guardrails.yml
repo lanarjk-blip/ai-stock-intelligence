@@ -82,7 +82,7 @@ jobs:
           from pathlib import Path
           cfg=json.loads(Path('config.json').read_text(encoding='utf-8'))
           assert cfg['engine_version']=='1.8.52', cfg['engine_version']
-          assert cfg['mobile_ui_version']=='1.8.52', cfg['mobile_ui_version']
+          assert cfg['mobile_ui_version']=='1.8.54', cfg['mobile_ui_version']
           assert cfg['data_quality_gate_enabled'] is True
           assert cfg['runtime_heartbeat_max_age_seconds']==180
           calendar=json.loads(Path('data/idx_holidays.json').read_text(encoding='utf-8'))

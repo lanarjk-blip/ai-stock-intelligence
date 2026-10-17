@@ -168,7 +168,7 @@
   "overnight_block_bearish_ihsg": true,
   "ai_stock_ask_version": "1.8.45",
   "ai_stock_ask_enabled": true,
-  "production_stabilization_version": "1.8.52",
-  "mobile_ui_version": "1.8.52",
+  "production_stabilization_version": "1.8.54",
+  "mobile_ui_version": "1.8.54",
   "chart_ui_version": "1.8.48"
 }
