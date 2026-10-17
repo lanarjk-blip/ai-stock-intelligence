@@ -3,6 +3,8 @@ package id.asi.stockintelligence;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Context;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.net.ConnectivityManager;
 import android.net.Network;
@@ -28,7 +30,6 @@ import android.widget.Toast;
 
 public class MainActivity extends Activity {
     private static final String HOME_URL = "https://ai-stock-intelligence-zijcl2pi2kjweeappbkjiy.streamlit.app";
-    private static final String APP_VERSION = BuildConfig.VERSION_NAME;
 
     private WebView webView;
     private ProgressBar progress;
@@ -36,14 +37,25 @@ public class MainActivity extends Activity {
     private ConnectivityManager connectivityManager;
     private ConnectivityManager.NetworkCallback networkCallback;
     private boolean mainFrameFailed = false;
+    private String appVersion = "unknown";
+
+    private String resolveAppVersion() {
+        try {
+            PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
+            return info.versionName == null ? "unknown" : info.versionName;
+        } catch (PackageManager.NameNotFoundException ignored) {
+            return "unknown";
+        }
+    }
 
     private String appTitle() {
-        return "AI Stock Intelligence V" + APP_VERSION;
+        return "AI Stock Intelligence V" + appVersion;
     }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        appVersion = resolveAppVersion();
         buildUi();
         configureWebView();
         registerNetworkRecovery();
@@ -123,7 +135,7 @@ public class MainActivity extends Activity {
         settings.setDisplayZoomControls(false);
         settings.setSupportZoom(false);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-        settings.setUserAgentString(settings.getUserAgentString() + " AIStockIntelligenceAPK/" + APP_VERSION);
+        settings.setUserAgentString(settings.getUserAgentString() + " AIStockIntelligenceAPK/" + appVersion);
 
         CookieManager cookies = CookieManager.getInstance();
         cookies.setAcceptCookie(true);
