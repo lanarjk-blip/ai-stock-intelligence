@@ -1,6 +1,12 @@
+import groovy.json.JsonSlurper
+
 plugins {
     id 'com.android.application'
 }
+
+def appConfig = new JsonSlurper().parse(file('../../config.json'))
+def appVersion = appConfig.mobile_ui_version.toString()
+def appVersionCode = appVersion.replace('.', '').toInteger()
 
 android {
     namespace 'id.asi.stockintelligence'
@@ -10,8 +16,8 @@ android {
         applicationId 'id.asi.stockintelligence'
         minSdk 26
         targetSdk 35
-        versionCode 1854
-        versionName '1.8.54'
+        versionCode appVersionCode
+        versionName appVersion
     }
 
     buildTypes {
