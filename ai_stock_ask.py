@@ -9,6 +9,16 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 import math
 
+# Shared semantic UI patch is installed from an import path already loaded by
+# app.py. It performs no Streamlit rendering at import time, so page_config
+# remains the first rendering command while dataframe/metric/title behavior is
+# normalized for the rest of the session.
+try:
+    import ui_theme_patch
+    ui_theme_patch.install()
+except Exception:
+    pass
+
 
 def _num(v: Any) -> Optional[float]:
     try:
@@ -68,9 +78,6 @@ def answer_stock(snapshot: Optional[Dict[str, Any]], horizon: str = "TODAY") -> 
     if horizon in {"TOMORROW", "NEXT_SESSION", "OVERNIGHT"} and regime == "BEARISH":
         blocked = True
 
-    # TODAY is deliberately stricter than next-session outlook. A daily BUY is
-    # a candidate, not permission to enter. Live BUY needs the authoritative
-    # Dynamic state plus current-session intraday evidence.
     today_entry_ready = opportunity_state == "ENTRY READY" and entry in {"ACTIVE", "ENTRY READY", "READY", "IN_ZONE"}
     live_blocked = today and (not live_required or not intraday_fresh)
 
