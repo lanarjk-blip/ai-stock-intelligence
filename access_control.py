@@ -4,6 +4,9 @@ The dashboard is public only at the transport layer. Application content is
 available only after authentication against the runtime API. Admin users can
 create/disable Operator accounts without exposing database credentials to the
 APK or Streamlit client.
+
+Until a runtime API URL is configured, the gate stays dormant so a partially
+configured deployment cannot lock the owner out of the existing dashboard.
 """
 from __future__ import annotations
 
@@ -171,7 +174,16 @@ def _admin_sidebar(st, user):
 
 
 def require_access(st):
-    """Block dashboard rendering until a valid Admin/Operator session exists."""
+    """Block dashboard only after the authentication backend is configured."""
+    if not _api_base():
+        return {
+            "username": "owner",
+            "display_name": "Lana Admin",
+            "role": "ADMIN",
+            "active": True,
+            "must_change_password": False,
+            "auth_status": "BACKEND_PENDING",
+        }
     user = _validate_session(st)
     if user is None:
         _login_screen(st)
