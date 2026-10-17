@@ -20,5 +20,11 @@ services:
         value: "1000"
       - key: ASI_RUNTIME_STARTUP_GRACE_SECONDS
         value: "900"
+      - key: ASI_ADMIN_USERNAME
+        value: "admin"
+      - key: ASI_ADMIN_DISPLAY_NAME
+        value: "Lana Admin"
+      - key: ASI_ADMIN_PASSWORD
+        sync: false
       - key: DATABASE_URL
         sync: false
