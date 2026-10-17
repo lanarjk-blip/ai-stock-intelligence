@@ -3,7 +3,8 @@ from pathlib import Path
 
 def test_android_wrapper_uses_package_version_not_hardcoded_string():
     java = Path("android-app/app/src/main/java/id/asi/stockintelligence/MainActivity.java").read_text(encoding="utf-8")
-    assert "BuildConfig.VERSION_NAME" in java
+    assert "getPackageManager().getPackageInfo" in java
+    assert "info.versionName" in java
     assert 'APP_VERSION = "1.8.54"' not in java
     assert 'status.setText(appTitle())' in java
     assert 'AIStockIntelligenceAPK/' in java
