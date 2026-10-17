@@ -3,9 +3,9 @@
 Times are WIB (Asia/Jakarta). Defaults follow the regular equity-market schedule:
 Mon-Thu 09:00-12:00 and 13:30-15:50; Fri 09:00-11:30 and 14:00-15:50.
 
-Holiday handling is centralized here.  Bundled holidays come from the verified
+Holiday handling is centralized here. Bundled holidays come from the verified
 IDX/KSEI calendar in data/idx_holidays.json and are unioned with optional
-config ``market_holidays`` overrides.  Pre-Market and live-session logic must
+config ``market_holidays`` overrides. Pre-Market and live-session logic must
 use this module rather than maintaining independent holiday lists.
 """
 from __future__ import annotations
@@ -79,7 +79,6 @@ def is_trading_date(day, config=None):
 
 
 def _is_trading_date(day, config=None):
-    # Compatibility alias for earlier callers/tests.
     return is_trading_date(day, config)
 
 
@@ -153,29 +152,25 @@ def is_live_market_session(config=None, now=None):
 
 
 def _install_direct_refresh_status_ui():
-    """Guarantee the refresh/status strip is wired on every dashboard import.
-
-    Some hosted Streamlit runtimes can bypass the optional sitecustomize UI
-    patch path. app.py always imports market_session, so this lightweight hook
-    provides a deterministic fallback without changing trading logic. If the
-    primary runtime_health_ui_patch already wrapped st.title, this does nothing
-    to avoid duplicate controls.
-    """
+    """Install deterministic access control plus the R40 refresh/status strip."""
     if os.environ.get("AI_ENGINE_WORKER") == "1":
         return
     try:
         import streamlit as st
 
-        if getattr(st.title, "_asi_refresh_status_patch", False):
-            return
-        if getattr(st.title, "_asi_direct_refresh_status_patch", False):
+        if getattr(st.title, "_asi_access_control_patch", False):
             return
 
         original_title = st.title
+        refresh_already_installed = bool(getattr(original_title, "_asi_refresh_status_patch", False))
 
         def title(body, *args, **kwargs):
+            text = str(body)
+            if text.startswith("📈 AI Stock Intelligence V"):
+                import access_control
+                access_control.require_access(st)
             rendered = original_title(body, *args, **kwargs)
-            if str(body).startswith("📈 AI Stock Intelligence V"):
+            if text.startswith("📈 AI Stock Intelligence V") and not refresh_already_installed:
                 try:
                     import runtime_health_ui_patch
                     runtime_health_ui_patch._render_refresh_status(st)
@@ -183,6 +178,7 @@ def _install_direct_refresh_status_ui():
                     pass
             return rendered
 
+        title._asi_access_control_patch = True
         title._asi_direct_refresh_status_patch = True
         st.title = title
     except Exception:

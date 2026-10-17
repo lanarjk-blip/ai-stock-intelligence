@@ -28,10 +28,17 @@ services:
     region: singapore
     numInstances: 1
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn runtime_api:app --host 0.0.0.0 --port $PORT
+    # Compatibility contract: legacy deployment used `uvicorn runtime_api:app`.
+    startCommand: uvicorn runtime_api_entry:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.17"
+      - key: ASI_ADMIN_USERNAME
+        value: "admin"
+      - key: ASI_ADMIN_DISPLAY_NAME
+        value: "Lana Admin"
+      - key: ASI_ADMIN_PASSWORD
+        sync: false
       - key: DATABASE_URL
         sync: false
