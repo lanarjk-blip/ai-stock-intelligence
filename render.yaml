@@ -28,6 +28,7 @@ services:
     region: singapore
     numInstances: 1
     buildCommand: pip install -r requirements.txt
+    # Compatibility contract: legacy deployment used `uvicorn runtime_api:app`.
     startCommand: uvicorn runtime_api_entry:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
