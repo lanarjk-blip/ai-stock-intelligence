@@ -7,9 +7,9 @@ business records are never deleted by this module.
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 import json
 import os
-import shutil
 import sqlite3
 import time
 
@@ -17,6 +17,7 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 DB = os.path.join(BASE, "db", "market.db")
 CFG_PATH = os.path.join(BASE, "config.json")
 BACKUP_DIR = os.path.join(BASE, "db", "backups")
+WIB = ZoneInfo("Asia/Jakarta")
 
 PROTECTED_TABLES = {
     "prices", "market_index", "state", "universe_registry",
@@ -76,7 +77,9 @@ def storage_health():
     if last:
         try:
             dt = datetime.fromisoformat(str(last).replace("Z", "+00:00"))
-            label = dt.astimezone().strftime("%d-%m %H:%M")
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            label = dt.astimezone(WIB).strftime("%d-%m %H:%M WIB")
         except Exception:
             label = str(last)[:16]
     return {"status": status, "db_mb": mb, "last_cleanup": last, "last_cleanup_label": label}
