@@ -15,8 +15,12 @@ from typing import Any, Dict
 from fastapi import HTTPException
 
 import runtime_api
+import auth_api
+import auth_bootstrap
 
 app = runtime_api.app
+auth_bootstrap.bootstrap_from_env()
+auth_api.install(app)
 READY_VERSION = "RUNTIME-READY-R2"
 _STARTED_MONOTONIC = time.monotonic()
 
@@ -85,8 +89,6 @@ def ready():
     try:
         health = runtime_api.health()
     except Exception as exc:
-        # Cold database/API startup is allowed a bounded grace period. Do not
-        # expose connection strings or exception text in this public endpoint.
         if elapsed < grace:
             return {
                 "ready": False,
