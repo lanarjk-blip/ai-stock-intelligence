@@ -6,7 +6,7 @@ dataset.
 
 This module is imported directly by ``worker_base.py``. The production worker
 therefore uses it as a guaranteed bootstrap point for H-10, preliminary
-Pre-Market, and safe storage-housekeeping daemons.
+Pre-Market, guarded storage housekeeping, and a fast startup self-check.
 """
 from datetime import datetime, timezone
 import os
@@ -14,7 +14,7 @@ import sys
 import threading
 import time
 
-GUARDRAIL_REVISION = "usable-v1855-r1"
+GUARDRAIL_REVISION = "usable-v1855-r2"
 
 
 def _run_h10_daemon():
@@ -36,7 +36,6 @@ def _run_preliminary_daemon():
 
 
 def _run_housekeeping_daemon():
-    """Run guarded retention only inside the real production worker."""
     try:
         import storage_housekeeping
         storage_housekeeping.run_forever()
@@ -44,8 +43,17 @@ def _run_housekeeping_daemon():
         print(f"[HOUSEKEEPING] explicit worker bootstrap error: {exc!r}", flush=True)
 
 
+def _run_startup_selfcheck():
+    try:
+        import runtime_selfcheck
+        result = runtime_selfcheck.run()
+        print(f"[SELF_CHECK] {result}", flush=True)
+    except Exception as exc:
+        print(f"[SELF_CHECK] startup error: {exc!r}", flush=True)
+
+
 def _start_worker_premarket_daemons():
-    """Start production daemons exactly once in the real worker.
+    """Start production helpers exactly once in the real worker.
 
     CI smoke tests also set AI_ENGINE_WORKER=1, so the argv guard prevents
     background scheduling from leaking into inline validation processes.
@@ -55,6 +63,7 @@ def _start_worker_premarket_daemons():
     if os.path.basename(str(sys.argv[0] or "")) != "worker_base.py":
         return
 
+    _run_startup_selfcheck()
     live_names = {thread.name for thread in threading.enumerate()}
     if "asi-premarket-h10" not in live_names:
         threading.Thread(target=_run_h10_daemon, name="asi-premarket-h10", daemon=True).start()
