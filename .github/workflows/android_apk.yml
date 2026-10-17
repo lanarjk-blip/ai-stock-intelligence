@@ -38,12 +38,12 @@ jobs:
         run: test -f android-app/app/build/outputs/apk/debug/app-debug.apk
 
       - name: Rename APK
-        run: cp android-app/app/build/outputs/apk/debug/app-debug.apk AI-Stock-Intelligence-1.8.53.apk
+        run: cp android-app/app/build/outputs/apk/debug/app-debug.apk AI-Stock-Intelligence-1.8.54.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Stock-Intelligence-1.8.53
-          path: AI-Stock-Intelligence-1.8.53.apk
+          name: AI-Stock-Intelligence-1.8.54
+          path: AI-Stock-Intelligence-1.8.54.apk
           if-no-files-found: error
           retention-days: 30
