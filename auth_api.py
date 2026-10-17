@@ -149,10 +149,14 @@ def _require_admin(authorization: str | None):
 
 
 def install(app):
-    _ensure_schema()
+    """Register auth routes without requiring a DB connection at import time."""
+    if getattr(app.state, "asi_auth_installed", False):
+        return app
+    app.state.asi_auth_installed = True
 
     @app.post("/auth/login")
     def login(body: LoginBody, user_agent: str | None = Header(default=None)):
+        _ensure_schema()
         username = body.username.strip().lower()
         con = persistent_bridge._pg_connect()
         try:
@@ -192,6 +196,7 @@ def install(app):
 
     @app.post("/auth/logout")
     def logout(authorization: str | None = Header(default=None)):
+        _ensure_schema()
         token = _bearer(authorization)
         con = persistent_bridge._pg_connect()
         try:
