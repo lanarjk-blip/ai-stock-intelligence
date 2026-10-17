@@ -5,10 +5,12 @@ on:
     branches: [ main ]
     paths:
       - 'android-app/**'
+      - 'config.json'
       - '.github/workflows/android_apk.yml'
   pull_request:
     paths:
       - 'android-app/**'
+      - 'config.json'
       - '.github/workflows/android_apk.yml'
   workflow_dispatch:
 
@@ -18,6 +20,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Resolve app version
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(python - <<'PY'
+          import json
+          from pathlib import Path
+          print(json.loads(Path('config.json').read_text())['mobile_ui_version'])
+          PY
+          )
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -38,12 +52,12 @@ jobs:
         run: test -f android-app/app/build/outputs/apk/debug/app-debug.apk
 
       - name: Rename APK
-        run: cp android-app/app/build/outputs/apk/debug/app-debug.apk AI-Stock-Intelligence-1.8.54.apk
+        run: cp android-app/app/build/outputs/apk/debug/app-debug.apk "AI-Stock-Intelligence-${{ steps.version.outputs.version }}.apk"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Stock-Intelligence-1.8.54
-          path: AI-Stock-Intelligence-1.8.54.apk
+          name: AI-Stock-Intelligence-${{ steps.version.outputs.version }}
+          path: AI-Stock-Intelligence-${{ steps.version.outputs.version }}.apk
           if-no-files-found: error
           retention-days: 30
