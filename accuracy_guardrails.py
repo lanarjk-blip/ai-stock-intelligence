@@ -14,7 +14,9 @@ import sys
 import threading
 import time
 
-GUARDRAIL_REVISION = "usable-v1855-r2"
+# Keep the data-quality algorithm revision stable. R45 adds runtime/UI/storage
+# helpers but does not change the publication-gate mathematics.
+GUARDRAIL_REVISION = "usable-v1852-r2"
 
 
 def _run_h10_daemon():
