@@ -10,8 +10,8 @@ android {
         applicationId 'id.asi.stockintelligence'
         minSdk 26
         targetSdk 35
-        versionCode 1853
-        versionName '1.8.53'
+        versionCode 1854
+        versionName '1.8.54'
     }
 
     buildTypes {
