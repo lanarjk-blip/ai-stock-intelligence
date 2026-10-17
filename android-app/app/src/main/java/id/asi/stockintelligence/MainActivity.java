@@ -2,7 +2,12 @@ package id.asi.stockintelligence;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.Context;
 import android.graphics.Bitmap;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
@@ -23,19 +28,28 @@ import android.widget.Toast;
 
 public class MainActivity extends Activity {
     private static final String HOME_URL = "https://ai-stock-intelligence-zijcl2pi2kjweeappbkjiy.streamlit.app";
+    private static final String APP_VERSION = "1.8.54";
+
     private WebView webView;
     private ProgressBar progress;
     private TextView status;
+    private ConnectivityManager connectivityManager;
+    private ConnectivityManager.NetworkCallback networkCallback;
+    private boolean mainFrameFailed = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         buildUi();
         configureWebView();
-        if (savedInstanceState == null) {
+        registerNetworkRecovery();
+
+        boolean restored = false;
+        if (savedInstanceState != null) {
+            restored = webView.restoreState(savedInstanceState) != null;
+        }
+        if (!restored) {
             webView.loadUrl(HOME_URL);
-        } else {
-            webView.restoreState(savedInstanceState);
         }
     }
 
@@ -61,13 +75,19 @@ public class MainActivity extends Activity {
         Button home = new Button(this);
         home.setText("Home");
         home.setAllCaps(false);
-        home.setOnClickListener(v -> webView.loadUrl(HOME_URL));
+        home.setOnClickListener(v -> {
+            mainFrameFailed = false;
+            webView.loadUrl(HOME_URL);
+        });
         top.addView(home, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         Button refresh = new Button(this);
         refresh.setText("Refresh");
         refresh.setAllCaps(false);
-        refresh.setOnClickListener(v -> webView.reload());
+        refresh.setOnClickListener(v -> {
+            mainFrameFailed = false;
+            webView.reload();
+        });
         top.addView(refresh, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
@@ -98,7 +118,7 @@ public class MainActivity extends Activity {
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
         settings.setSupportZoom(false);
-        settings.setUserAgentString(settings.getUserAgentString() + " AIStockIntelligenceAPK/1.8.53");
+        settings.setUserAgentString(settings.getUserAgentString() + " AIStockIntelligenceAPK/" + APP_VERSION);
 
         CookieManager cookies = CookieManager.getInstance();
         cookies.setAcceptCookie(true);
@@ -120,6 +140,7 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageFinished(WebView view, String url) {
+                mainFrameFailed = false;
                 status.setText("AI Stock Intelligence");
                 CookieManager.getInstance().flush();
             }
@@ -128,24 +149,59 @@ public class MainActivity extends Activity {
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
                 String scheme = uri.getScheme();
-                return !("https".equalsIgnoreCase(scheme) || "http".equalsIgnoreCase(scheme));
+                if ("https".equalsIgnoreCase(scheme)) {
+                    return false;
+                }
+                Toast.makeText(MainActivity.this, "Tautan non-HTTPS diblokir demi keamanan.", Toast.LENGTH_SHORT).show();
+                return true;
             }
 
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (request.isForMainFrame()) {
+                    mainFrameFailed = true;
                     status.setText("Koneksi bermasalah");
-                    Toast.makeText(MainActivity.this, "Tidak dapat memuat dashboard. Periksa internet lalu tekan Refresh.", Toast.LENGTH_LONG).show();
+                    Toast.makeText(MainActivity.this, "Internet terputus. Aplikasi akan mencoba pulih otomatis saat jaringan kembali.", Toast.LENGTH_LONG).show();
                 }
             }
 
             @Override
             public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
-                Toast.makeText(MainActivity.this, "WebView dimulai ulang.", Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, "WebView dipulihkan otomatis.", Toast.LENGTH_SHORT).show();
                 recreate();
                 return true;
             }
         });
+    }
+
+    private void registerNetworkRecovery() {
+        connectivityManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (connectivityManager == null) {
+            return;
+        }
+
+        networkCallback = new ConnectivityManager.NetworkCallback() {
+            @Override
+            public void onAvailable(Network network) {
+                runOnUiThread(() -> {
+                    if (mainFrameFailed && webView != null) {
+                        status.setText("Jaringan kembali, memuat ulang...");
+                        mainFrameFailed = false;
+                        webView.reload();
+                    }
+                });
+            }
+
+            @Override
+            public void onLost(Network network) {
+                runOnUiThread(() -> status.setText("Menunggu jaringan..."));
+            }
+        };
+
+        NetworkRequest request = new NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build();
+        connectivityManager.registerNetworkCallback(request, networkCallback);
     }
 
     @Override
@@ -159,12 +215,38 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onSaveInstanceState(Bundle outState) {
-        webView.saveState(outState);
+        if (webView != null) {
+            webView.saveState(outState);
+        }
         super.onSaveInstanceState(outState);
     }
 
     @Override
+    protected void onPause() {
+        if (webView != null) {
+            webView.onPause();
+        }
+        CookieManager.getInstance().flush();
+        super.onPause();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (webView != null) {
+            webView.onResume();
+        }
+    }
+
+    @Override
     protected void onDestroy() {
+        if (connectivityManager != null && networkCallback != null) {
+            try {
+                connectivityManager.unregisterNetworkCallback(networkCallback);
+            } catch (IllegalArgumentException ignored) {
+                // Already unregistered by the system.
+            }
+        }
         if (webView != null) {
             webView.stopLoading();
             webView.setWebChromeClient(null);
