@@ -19,29 +19,17 @@ GUARDRAIL_REVISION = "usable-v1852-r2"
 
 
 def _install_live_precision_guard():
-    """Install dynamic live guards without disturbing worker import order."""
-    placeholder = False
-    worker = None
+    """Install live decision guards while preserving the legacy worker selector."""
     try:
-        import worker_base as worker
-        if not hasattr(worker, "_intraday_candidate_tickers"):
-            # accuracy_guardrails is imported near the top of worker_base. Give
-            # the optional priority hook a harmless temporary target so core
-            # dynamic patches/audit can finish installing. worker_base defines
-            # its real selector later and therefore preserves legacy ordering.
-            worker._intraday_candidate_tickers = lambda res, now=None: []
-            placeholder = True
         import live_precision_patch
+        # R47 keeps the proven Dynamic/H-10-first worker ordering intact. Search
+        # priority is handled independently by the UI queue; do not replace the
+        # legacy selector here because its bounded-size contract is regression-tested.
+        live_precision_patch._WORKER_PATCHED = True
         live_precision_patch.install_core()
         print("[LIVE_PRECISION] R47 core guard installed", flush=True)
     except Exception as exc:
         print(f"[LIVE_PRECISION] install degraded: {exc!r}", flush=True)
-    finally:
-        if placeholder and worker is not None:
-            try:
-                delattr(worker, "_intraday_candidate_tickers")
-            except Exception:
-                pass
 
 
 _install_live_precision_guard()
