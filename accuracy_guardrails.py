@@ -15,57 +15,36 @@ import sys
 import threading
 import time
 
-# Keep the data-quality algorithm revision stable. R47 strengthens live
-# confirmation without changing this persisted-data coverage formula.
 GUARDRAIL_REVISION = "usable-v1852-r2"
 
 
 def _install_live_precision_guard():
+    """Install dynamic live guards without disturbing worker import order."""
+    placeholder = False
+    worker = None
     try:
+        import worker_base as worker
+        if not hasattr(worker, "_intraday_candidate_tickers"):
+            # accuracy_guardrails is imported near the top of worker_base. Give
+            # the optional priority hook a harmless temporary target so core
+            # dynamic patches/audit can finish installing. worker_base defines
+            # its real selector later and therefore preserves legacy ordering.
+            worker._intraday_candidate_tickers = lambda res, now=None: []
+            placeholder = True
         import live_precision_patch
         live_precision_patch.install_core()
-        print("[LIVE_PRECISION] R47 guard installed", flush=True)
+        print("[LIVE_PRECISION] R47 core guard installed", flush=True)
     except Exception as exc:
-        # worker_base imports this module before all of its functions exist.
-        # Core dynamic patches may already be installed; a late retry below
-        # attaches worker priority scanning after worker_base finishes import.
-        print(f"[LIVE_PRECISION] initial install deferred: {exc!r}", flush=True)
+        print(f"[LIVE_PRECISION] install degraded: {exc!r}", flush=True)
+    finally:
+        if placeholder and worker is not None:
+            try:
+                delattr(worker, "_intraday_candidate_tickers")
+            except Exception:
+                pass
 
 
-def _late_live_precision_attach():
-    """Attach worker-only priority scan/audit after circular import settles."""
-    time.sleep(2)
-    for attempt in range(1, 11):
-        try:
-            import live_precision_patch
-            live_precision_patch.install_core()
-            # If initial circular import prevented the audit thread start, start
-            # it now in the real worker after module initialization is complete.
-            if (
-                os.environ.get("AI_ENGINE_WORKER") == "1"
-                and os.path.basename(str(sys.argv[0] or "")) == "worker_base.py"
-                and not getattr(live_precision_patch, "_AUDIT_THREAD_STARTED", False)
-            ):
-                threading.Thread(
-                    target=live_precision_patch._audit_loop,
-                    name="asi-precision-audit",
-                    daemon=True,
-                ).start()
-                live_precision_patch._AUDIT_THREAD_STARTED = True
-            print(f"[LIVE_PRECISION] late worker attach OK attempt={attempt}", flush=True)
-            return
-        except Exception as exc:
-            if attempt == 10:
-                print(f"[LIVE_PRECISION] late attach failed: {exc!r}", flush=True)
-                return
-            time.sleep(1)
-
-
-# dynamic_engine already exists at this point, so its decision functions can be
-# patched immediately. Worker-only priority functions are retried asynchronously.
 _install_live_precision_guard()
-if os.environ.get("AI_ENGINE_WORKER") == "1" and os.path.basename(str(sys.argv[0] or "")) == "worker_base.py":
-    threading.Thread(target=_late_live_precision_attach, name="asi-live-precision-attach", daemon=True).start()
 
 
 def _run_h10_daemon():
