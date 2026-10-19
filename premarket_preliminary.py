@@ -6,6 +6,8 @@ candidates are final recommendations.
 
 Rules:
 - Before 08:50 on a trading day, publish up to five PRELIMINARY candidates.
+- During 08:50-08:59, opening the UI may safely finalize H-10 if the worker
+  missed the exact deadline; after 09:00 it refuses late hindsight finalization.
 - After market close, publish PRELIMINARY candidates for the next trading day.
 - On weekends/holidays, keep next-session PRELIMINARY candidates visible.
 - During the live market, preserve today's H-10 locked snapshot.
@@ -26,7 +28,7 @@ import premarket_scheduler as h10
 import market_session
 
 CFG = h10.CFG
-VERSION = "PRELIM-R2"
+VERSION = "PRELIM-R3"
 
 
 def _state_get(key, default=""):
@@ -195,19 +197,34 @@ def publish_preliminary(now=None):
 
 
 def ensure_on_open(now=None):
-    """Self-heal Pre-Market when the UI opens without waiting for the daemon.
-
-    This is intentionally lightweight: it never fetches the universe or runs a
-    full analysis. If no opportunity snapshot exists yet, the UI returns
-    NO_SNAPSHOT and lets the worker warm the data instead of freezing the app.
-    """
+    """Self-heal Pre-Market without permitting post-open hindsight edits."""
     local = h10._now_wib(now)
-    allowed, refresh_seconds = _publish_window(local)
     target_date = h10._target_market_date(local)
-    if not allowed:
-        return {"status": "WINDOW_BLOCKED", "market_date": target_date}
+    window = h10.window_state(local)
+
     if h10._already_finalized(target_date):
         return {"status": "FINAL_EXISTS", "market_date": target_date}
+
+    # Safe catch-up: still before market open, so finalization has no hindsight.
+    if window == "FINALIZE":
+        result = h10.finalize_h10(local)
+        result["self_healed"] = True
+        return result
+
+    # Once the market opens, a missing H-10 must stay visibly missing. Never
+    # manufacture a "final" recommendation after seeing the open.
+    if window == "AFTER_OPEN":
+        session = market_session.session_status(CFG, now=local)
+        if str(session.get("status") or "").upper() != "CLOSED":
+            return {
+                "status": "MISSED_H10",
+                "market_date": str(session.get("market_date") or target_date),
+                "detail": "H-10 final tidak tersedia sebelum market open; BUY pre-market diblokir.",
+            }
+
+    allowed, refresh_seconds = _publish_window(local)
+    if not allowed:
+        return {"status": "WINDOW_BLOCKED", "market_date": target_date}
     if not _due(refresh_seconds):
         return {"status": "FRESH", "market_date": target_date}
 
