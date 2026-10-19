@@ -210,8 +210,8 @@ def _record_search(label, value):
             return
         ticker = str(value or "").upper().replace(".JK", "").strip()
         if re.fullmatch(r"[A-Z0-9]{2,6}", ticker):
-            import live_precision_patch
-            live_precision_patch.record_search_priority(ticker)
+            import search_priority_refresh
+            search_priority_refresh.request(ticker)
     except Exception:
         pass
 
