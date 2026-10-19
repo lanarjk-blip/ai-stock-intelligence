@@ -6,7 +6,8 @@ dataset.
 
 This module is imported directly by ``worker_base.py``. The production worker
 therefore uses it as a guaranteed bootstrap point for H-10, preliminary
-Pre-Market, guarded storage housekeeping, and a fast startup self-check.
+Pre-Market, guarded storage housekeeping, a fast startup self-check, and R47
+live-precision guardrails.
 """
 from datetime import datetime, timezone
 import os
@@ -14,9 +15,23 @@ import sys
 import threading
 import time
 
-# Keep the data-quality algorithm revision stable. R45 adds runtime/UI/storage
-# helpers but does not change the publication-gate mathematics.
+# Keep the data-quality algorithm revision stable. R47 strengthens live
+# confirmation without changing this persisted-data coverage formula.
 GUARDRAIL_REVISION = "usable-v1852-r2"
+
+
+def _install_live_precision_guard():
+    try:
+        import live_precision_patch
+        live_precision_patch.install_core()
+        print("[LIVE_PRECISION] R47 guard installed", flush=True)
+    except Exception as exc:
+        print(f"[LIVE_PRECISION] install degraded: {exc!r}", flush=True)
+
+
+# worker_base imports dynamic_engine before accuracy_guardrails, so installation
+# here patches the exact functions subsequently used by the engine loop.
+_install_live_precision_guard()
 
 
 def _run_h10_daemon():
