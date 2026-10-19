@@ -1,5 +1,4 @@
 from types import SimpleNamespace
-from unittest.mock import patch
 
 import pandas as pd
 
@@ -58,10 +57,10 @@ def test_stale_live_data_blocks_entry_ready():
     assert lp.guard_state(row, {"live_match": "MIXED"}, 90, "ENTRY READY", _metrics(1, 0.2, 1, fresh=False), {"defensive": False}) == "MONITOR"
 
 
-def test_priority_sort_prefers_live_relative_strength():
+def test_priority_sort_can_surface_strong_relative_winner_over_ai_only_name():
     frame = pd.DataFrame([
-        {"ticker": "RED", "rel_ret1": -0.03, "ret1": -0.02, "vol_ratio": 1.0, "relative_rank_score": 90, "ai_score": 90, "jst_p_up": 0.8},
-        {"ticker": "GREEN", "rel_ret1": 0.05, "ret1": 0.04, "vol_ratio": 1.8, "relative_rank_score": 75, "ai_score": 72, "jst_p_up": 0.66},
+        {"ticker": "RED", "rel_ret1": -0.08, "ret1": -0.05, "vol_ratio": 1.0, "relative_rank_score": 90, "ai_score": 90, "jst_p_up": 0.8},
+        {"ticker": "GREEN", "rel_ret1": 0.18, "ret1": 0.12, "vol_ratio": 2.2, "relative_rank_score": 75, "ai_score": 72, "jst_p_up": 0.66},
     ])
     ranked = lp.priority_sort_frame(frame)
     assert ranked.iloc[0]["ticker"] == "GREEN"
