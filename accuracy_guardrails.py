@@ -26,12 +26,46 @@ def _install_live_precision_guard():
         live_precision_patch.install_core()
         print("[LIVE_PRECISION] R47 guard installed", flush=True)
     except Exception as exc:
-        print(f"[LIVE_PRECISION] install degraded: {exc!r}", flush=True)
+        # worker_base imports this module before all of its functions exist.
+        # Core dynamic patches may already be installed; a late retry below
+        # attaches worker priority scanning after worker_base finishes import.
+        print(f"[LIVE_PRECISION] initial install deferred: {exc!r}", flush=True)
 
 
-# worker_base imports dynamic_engine before accuracy_guardrails, so installation
-# here patches the exact functions subsequently used by the engine loop.
+def _late_live_precision_attach():
+    """Attach worker-only priority scan/audit after circular import settles."""
+    time.sleep(2)
+    for attempt in range(1, 11):
+        try:
+            import live_precision_patch
+            live_precision_patch.install_core()
+            # If initial circular import prevented the audit thread start, start
+            # it now in the real worker after module initialization is complete.
+            if (
+                os.environ.get("AI_ENGINE_WORKER") == "1"
+                and os.path.basename(str(sys.argv[0] or "")) == "worker_base.py"
+                and not getattr(live_precision_patch, "_AUDIT_THREAD_STARTED", False)
+            ):
+                threading.Thread(
+                    target=live_precision_patch._audit_loop,
+                    name="asi-precision-audit",
+                    daemon=True,
+                ).start()
+                live_precision_patch._AUDIT_THREAD_STARTED = True
+            print(f"[LIVE_PRECISION] late worker attach OK attempt={attempt}", flush=True)
+            return
+        except Exception as exc:
+            if attempt == 10:
+                print(f"[LIVE_PRECISION] late attach failed: {exc!r}", flush=True)
+                return
+            time.sleep(1)
+
+
+# dynamic_engine already exists at this point, so its decision functions can be
+# patched immediately. Worker-only priority functions are retried asynchronously.
 _install_live_precision_guard()
+if os.environ.get("AI_ENGINE_WORKER") == "1" and os.path.basename(str(sys.argv[0] or "")) == "worker_base.py":
+    threading.Thread(target=_late_live_precision_attach, name="asi-live-precision-attach", daemon=True).start()
 
 
 def _run_h10_daemon():
