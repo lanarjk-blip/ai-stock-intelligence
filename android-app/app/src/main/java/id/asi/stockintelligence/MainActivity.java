@@ -1,8 +1,14 @@
 package id.asi.stockintelligence;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
@@ -11,6 +17,7 @@ import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.NetworkRequest;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
@@ -30,6 +37,10 @@ import android.widget.Toast;
 
 public class MainActivity extends Activity {
     private static final String HOME_URL = "https://ai-stock-intelligence-zijcl2pi2kjweeappbkjiy.streamlit.app";
+    private static final String NOTIFICATION_CHANNEL_ID = "stock_alerts";
+    private static final String NOTIFICATION_CHANNEL_NAME = "AI Stock Alerts";
+    private static final int NOTIFICATION_PERMISSION_REQUEST = 1001;
+    private static final int NOTIFICATION_TEST_ID = 1002;
 
     private WebView webView;
     private ProgressBar progress;
@@ -59,6 +70,8 @@ public class MainActivity extends Activity {
         buildUi();
         configureWebView();
         registerNetworkRecovery();
+        createNotificationChannel();
+        requestNotificationPermissionIfNeeded();
 
         boolean restored = false;
         if (savedInstanceState != null) {
@@ -67,6 +80,84 @@ public class MainActivity extends Activity {
         if (!restored) {
             webView.loadUrl(HOME_URL);
         }
+    }
+
+    private void createNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return;
+        }
+
+        NotificationChannel channel = new NotificationChannel(
+                NOTIFICATION_CHANNEL_ID,
+                NOTIFICATION_CHANNEL_NAME,
+                NotificationManager.IMPORTANCE_HIGH);
+        channel.setDescription("BUY WINDOW, Pre-Market, Dynamic Opportunity, dan alert penting AI Stock Intelligence.");
+        channel.enableVibration(true);
+
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        if (manager != null) {
+            manager.createNotificationChannel(channel);
+        }
+    }
+
+    private void requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(
+                    new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                    NOTIFICATION_PERMISSION_REQUEST);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != NOTIFICATION_PERMISSION_REQUEST) {
+            return;
+        }
+
+        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(this, "Notifikasi AI Stock Intelligence aktif.", Toast.LENGTH_SHORT).show();
+            showNotificationTest();
+        } else {
+            Toast.makeText(
+                    this,
+                    "Notifikasi belum diizinkan. Bisa diaktifkan nanti dari Info aplikasi > Pemberitahuan.",
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void showNotificationTest() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+
+        NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager == null) {
+            return;
+        }
+
+        Intent launchIntent = new Intent(this, MainActivity.class);
+        launchIntent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent contentIntent = PendingIntent.getActivity(
+                this,
+                0,
+                launchIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+        Notification notification = new Notification.Builder(this, NOTIFICATION_CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle("AI Stock Intelligence")
+                .setContentText("Notifikasi aktif. Alert penting akan muncul di sini.")
+                .setContentIntent(contentIntent)
+                .setAutoCancel(true)
+                .setCategory(Notification.CATEGORY_STATUS)
+                .build();
+
+        manager.notify(NOTIFICATION_TEST_ID, notification);
     }
 
     private void buildUi() {
