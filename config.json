@@ -163,7 +163,7 @@
   "time_map_live_match_enabled": true,
   "time_map_font_only_colors": true,
   "housekeeping_enabled": true,
-  "housekeeping_dry_run": false,
+  "housekeeping_dry_run": true,
   "housekeeping_interval_hours": 24,
   "housekeeping_intraday_retention_days": 45,
   "housekeeping_engine_log_retention_days": 21,
