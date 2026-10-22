@@ -5,8 +5,8 @@ import json
 
 def test_r45_config_and_single_source_android_versioning():
     cfg = json.loads(Path('config.json').read_text(encoding='utf-8'))
-    assert cfg['mobile_ui_version'] == '1.8.55'
-    assert cfg['production_stabilization_version'] == '1.8.56'
+    assert cfg['mobile_ui_version'] == '1.8.57'
+    assert cfg['production_stabilization_version'] == '1.8.57'
     assert cfg['housekeeping_enabled'] is True
     assert cfg['housekeeping_intraday_retention_days'] == 45
     assert cfg['housekeeping_engine_log_retention_days'] == 21

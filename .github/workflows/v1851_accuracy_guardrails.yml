@@ -7,6 +7,7 @@ on:
       - 'worker_base.py'
       - 'accuracy_guardrails.py'
       - 'research_feedback.py'
+      - 'ensemble_safety.py'
       - 'dynamic_engine.py'
       - 'dynamic_opportunity_ui.py'
       - 'ui_theme_patch.py'
@@ -42,6 +43,7 @@ on:
       - 'worker_base.py'
       - 'accuracy_guardrails.py'
       - 'research_feedback.py'
+      - 'ensemble_safety.py'
       - 'dynamic_engine.py'
       - 'dynamic_opportunity_ui.py'
       - 'ui_theme_patch.py'
@@ -89,9 +91,10 @@ jobs:
           import json
           from pathlib import Path
           cfg=json.loads(Path('config.json').read_text(encoding='utf-8'))
-          assert cfg['engine_version']=='1.8.56', cfg['engine_version']
-          assert cfg['mobile_ui_version']=='1.8.55', cfg['mobile_ui_version']
-          assert cfg['production_stabilization_version']=='1.8.56', cfg['production_stabilization_version']
+          assert cfg['engine_version']=='1.8.57', cfg['engine_version']
+          assert cfg['mobile_ui_version']=='1.8.57', cfg['mobile_ui_version']
+          assert cfg['production_stabilization_version']=='1.8.57', cfg['production_stabilization_version']
+          assert cfg['ensemble_safety_version']=='R55-R60-ADAPTIVE-ENSEMBLE-1'
           assert cfg['data_quality_gate_enabled'] is True
           assert cfg['runtime_heartbeat_max_age_seconds']==180
           assert cfg['housekeeping_enabled'] is True
@@ -105,7 +108,10 @@ jobs:
           guard=Path('accuracy_guardrails.py').read_text(encoding='utf-8')
           assert 'asi-premarket-h10' in guard and 'asi-premarket-preliminary' in guard
           assert 'asi-storage-housekeeping' in guard and 'runtime_selfcheck.run()' in guard
-          assert 'research_feedback' in guard
+          assert 'research_feedback' in guard and 'ensemble_safety' in guard
+          ensemble=Path('ensemble_safety.py').read_text(encoding='utf-8')
+          assert 'NumpyBoostedStumps' in ensemble and 'NO_TRADE_GUARD' in ensemble
+          assert '_never_promote' in ensemble and 'production_enabled' in ensemble
           housekeeping=Path('storage_housekeeping.py').read_text(encoding='utf-8')
           assert 'PROTECTED_TABLES' in housekeeping and 'DISPOSABLE_RULES' in housekeeping
           assert 'PRAGMA quick_check' in housekeeping and 'src.backup(dst)' in housekeeping
@@ -158,7 +164,7 @@ jobs:
       - name: Compile
         run: >-
           python -m py_compile app.py worker_base.py accuracy_guardrails.py research_feedback.py
-          dynamic_engine.py dynamic_opportunity_ui.py ui_theme_patch.py
+          ensemble_safety.py dynamic_engine.py dynamic_opportunity_ui.py ui_theme_patch.py
           storage_housekeeping.py runtime_selfcheck.py market_session.py sitecustomize.py
           premarket_scheduler.py premarket_preliminary.py premarket_ui_patch.py
           runtime_health.py runtime_health_ui_patch.py runtime_supervisor.py
