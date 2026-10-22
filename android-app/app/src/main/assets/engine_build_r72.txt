@@ -1,0 +1,3 @@
+AI Stock Intelligence engine audit build
+Revision: R68-R72-MATURITY-AUDIT-1
+Includes chronological OOS fix, disjoint walk-forward folds, stricter production promotion, downside-aware execution expected value, and runtime regime consistency.
