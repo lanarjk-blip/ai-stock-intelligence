@@ -91,12 +91,12 @@ jobs:
           cfg=json.loads(Path('config.json').read_text(encoding='utf-8'))
           assert cfg['engine_version']=='1.8.56', cfg['engine_version']
           assert cfg['mobile_ui_version']=='1.8.55', cfg['mobile_ui_version']
-          assert cfg['production_stabilization_version']=='1.8.55'
+          assert cfg['production_stabilization_version']=='1.8.56', cfg['production_stabilization_version']
           assert cfg['data_quality_gate_enabled'] is True
           assert cfg['runtime_heartbeat_max_age_seconds']==180
           assert cfg['housekeeping_enabled'] is True
-          assert cfg['housekeeping_intraday_retention_days']==60
-          assert cfg['housekeeping_engine_log_retention_days']==30
+          assert cfg['housekeeping_intraday_retention_days']==45
+          assert cfg['housekeeping_engine_log_retention_days']==21
           calendar=json.loads(Path('data/idx_holidays.json').read_text(encoding='utf-8'))
           assert set(calendar['holidays']['2026']) == set(cfg['market_holidays'])
           assert calendar['verified_years'] == [2026]
