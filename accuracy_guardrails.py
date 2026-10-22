@@ -7,7 +7,8 @@ dataset.
 This module is imported directly by ``worker_base.py``. The production worker
 therefore uses it as a guaranteed bootstrap point for H-10, preliminary
 Pre-Market, guarded storage housekeeping, a fast startup self-check, R47
-live-precision guardrails, and the R50 realised-performance feedback guard.
+live-precision guardrails, the R50 realised-performance feedback guard, and the
+R51 capital-preservation circuit breaker.
 """
 from datetime import datetime, timezone
 import os
@@ -22,9 +23,6 @@ def _install_live_precision_guard():
     """Install live decision guards while preserving the legacy worker selector."""
     try:
         import live_precision_patch
-        # R47 keeps the proven Dynamic/H-10-first worker ordering intact. Search
-        # priority is handled independently by the UI queue; do not replace the
-        # legacy selector here because its bounded-size contract is regression-tested.
         live_precision_patch._WORKER_PATCHED = True
         live_precision_patch.install_core()
         print("[LIVE_PRECISION] R47 core guard installed", flush=True)
@@ -42,8 +40,19 @@ def _install_research_feedback_guard():
         print(f"[RESEARCH_FEEDBACK] install degraded: {exc!r}", flush=True)
 
 
+def _install_capital_preservation_guard():
+    """Install loss-streak/drawdown circuit breaker after research feedback."""
+    try:
+        import capital_preservation
+        ok = bool(capital_preservation.install())
+        print(f"[CAPITAL_GUARD] R51 guard installed={ok}", flush=True)
+    except Exception as exc:
+        print(f"[CAPITAL_GUARD] install degraded: {exc!r}", flush=True)
+
+
 _install_live_precision_guard()
 _install_research_feedback_guard()
+_install_capital_preservation_guard()
 
 
 def _run_h10_daemon():
@@ -82,11 +91,7 @@ def _run_startup_selfcheck():
 
 
 def _start_worker_premarket_daemons():
-    """Start production helpers exactly once in the real worker.
-
-    CI smoke tests also set AI_ENGINE_WORKER=1, so the argv guard prevents
-    background scheduling from leaking into inline validation processes.
-    """
+    """Start production helpers exactly once in the real worker."""
     if os.environ.get("AI_ENGINE_WORKER") != "1":
         return
     if os.path.basename(str(sys.argv[0] or "")) != "worker_base.py":
@@ -118,11 +123,7 @@ def evaluate_data_quality(*, universe_count, collected_ok, ready_symbols,
                           min_ready_ratio=0.70,
                           min_price_rows=5000,
                           max_age_hours=8.0):
-    """Return publication gate plus diagnostics.
-
-    Fresh collection coverage is intentionally warning-only. Blocking criteria
-    are usable persisted-symbol coverage, row count and data freshness.
-    """
+    """Return publication gate plus diagnostics."""
     universe_count = max(int(universe_count or 0), 0)
     collected_ok = max(int(collected_ok or 0), 0)
     ready_symbols = max(int(ready_symbols or 0), 0)
