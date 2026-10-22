@@ -1,4 +1,4 @@
-"""Production accuracy guardrails for AI Stock Intelligence V1.8.55.
+"""Production accuracy guardrails for AI Stock Intelligence V1.8.57.
 
 Publication quality is based on usable persisted coverage. A partial provider
 refresh is diagnostic only and must never block an otherwise healthy persisted
@@ -7,8 +7,9 @@ dataset.
 This module is imported directly by ``worker_base.py``. The production worker
 therefore uses it as a guaranteed bootstrap point for H-10, preliminary
 Pre-Market, guarded storage housekeeping, a fast startup self-check, R47
-live-precision guardrails, the R50 realised-performance feedback guard, the R51
-capital-preservation circuit breaker, and R52-R54 portfolio/model hardening.
+live-precision guardrails, the R50 realised-performance feedback guard, R51
+capital-preservation circuit breaker, R52-R54 portfolio/model hardening, and the
+R55-R60 adaptive ensemble safety layer.
 """
 from datetime import datetime, timezone
 import os
@@ -16,7 +17,7 @@ import sys
 import threading
 import time
 
-GUARDRAIL_REVISION = "usable-v1852-r50"
+GUARDRAIL_REVISION = "usable-v1857-r60"
 
 
 def _install_live_precision_guard():
@@ -60,10 +61,21 @@ def _install_risk_hardening():
         print(f"[RISK_HARDENING] install degraded: {exc!r}", flush=True)
 
 
+def _install_ensemble_safety():
+    """Install calibrated challenger ensemble plus uncertainty/execution guards."""
+    try:
+        import ensemble_safety
+        ok = bool(ensemble_safety.install())
+        print(f"[ENSEMBLE_SAFETY] R55-R60 installed={ok}", flush=True)
+    except Exception as exc:
+        print(f"[ENSEMBLE_SAFETY] install degraded: {exc!r}", flush=True)
+
+
 _install_live_precision_guard()
 _install_research_feedback_guard()
 _install_capital_preservation_guard()
 _install_risk_hardening()
+_install_ensemble_safety()
 
 
 def _run_h10_daemon():
