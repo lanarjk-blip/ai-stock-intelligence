@@ -6,6 +6,7 @@ on:
       - 'app.py'
       - 'worker_base.py'
       - 'accuracy_guardrails.py'
+      - 'research_feedback.py'
       - 'dynamic_engine.py'
       - 'dynamic_opportunity_ui.py'
       - 'ui_theme_patch.py'
@@ -40,6 +41,7 @@ on:
       - 'app.py'
       - 'worker_base.py'
       - 'accuracy_guardrails.py'
+      - 'research_feedback.py'
       - 'dynamic_engine.py'
       - 'dynamic_opportunity_ui.py'
       - 'ui_theme_patch.py'
@@ -87,7 +89,7 @@ jobs:
           import json
           from pathlib import Path
           cfg=json.loads(Path('config.json').read_text(encoding='utf-8'))
-          assert cfg['engine_version']=='1.8.52', cfg['engine_version']
+          assert cfg['engine_version']=='1.8.56', cfg['engine_version']
           assert cfg['mobile_ui_version']=='1.8.55', cfg['mobile_ui_version']
           assert cfg['production_stabilization_version']=='1.8.55'
           assert cfg['data_quality_gate_enabled'] is True
@@ -103,6 +105,7 @@ jobs:
           guard=Path('accuracy_guardrails.py').read_text(encoding='utf-8')
           assert 'asi-premarket-h10' in guard and 'asi-premarket-preliminary' in guard
           assert 'asi-storage-housekeeping' in guard and 'runtime_selfcheck.run()' in guard
+          assert 'research_feedback' in guard
           housekeeping=Path('storage_housekeeping.py').read_text(encoding='utf-8')
           assert 'PROTECTED_TABLES' in housekeeping and 'DISPOSABLE_RULES' in housekeeping
           assert 'PRAGMA quick_check' in housekeeping and 'src.backup(dst)' in housekeeping
@@ -154,7 +157,7 @@ jobs:
           PY
       - name: Compile
         run: >-
-          python -m py_compile app.py worker_base.py accuracy_guardrails.py
+          python -m py_compile app.py worker_base.py accuracy_guardrails.py research_feedback.py
           dynamic_engine.py dynamic_opportunity_ui.py ui_theme_patch.py
           storage_housekeeping.py runtime_selfcheck.py market_session.py sitecustomize.py
           premarket_scheduler.py premarket_preliminary.py premarket_ui_patch.py
