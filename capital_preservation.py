@@ -16,7 +16,7 @@ import pandas as pd
 _INSTALLED = False
 _ORIGINAL_SCORE = None
 _ORIGINAL_STATE = None
-_CACHE = {"at": 0.0, "metrics": None}
+_CACHE = {"at": 0.0, "metrics": None, "db_key": None}
 
 
 def _num(value, default=None):
@@ -35,6 +35,14 @@ def _cfg():
         return {}
 
 
+def _db_identity():
+    try:
+        import app
+        return str(getattr(app, "DB", ""))
+    except Exception:
+        return ""
+
+
 def _dbcon():
     import app
     return app.dbcon()
@@ -44,7 +52,13 @@ def _recent_returns(force=False):
     cfg = _cfg()
     ttl = max(60, int(cfg.get("capital_guard_cache_seconds", 300)))
     now = time.monotonic()
-    if not force and _CACHE.get("metrics") is not None and now - float(_CACHE.get("at") or 0) < ttl:
+    db_key = _db_identity()
+    if (
+        not force
+        and _CACHE.get("metrics") is not None
+        and _CACHE.get("db_key") == db_key
+        and now - float(_CACHE.get("at") or 0) < ttl
+    ):
         return dict(_CACHE["metrics"])
 
     window = max(6, int(cfg.get("capital_guard_window", 20)))
@@ -72,7 +86,7 @@ def _recent_returns(force=False):
 
     if d.empty:
         metrics = {"samples": 0, "loss_streak": 0, "recent_avg": None, "max_drawdown": None, "ready": False}
-        _CACHE.update({"at": now, "metrics": metrics})
+        _CACHE.update({"at": now, "metrics": metrics, "db_key": db_key})
         return dict(metrics)
 
     d["return_pct"] = pd.to_numeric(d["return_pct"], errors="coerce")
@@ -99,7 +113,7 @@ def _recent_returns(force=False):
         "max_drawdown": max_dd,
         "ready": len(recent) >= min_samples,
     }
-    _CACHE.update({"at": now, "metrics": metrics})
+    _CACHE.update({"at": now, "metrics": metrics, "db_key": db_key})
     return dict(metrics)
 
 
