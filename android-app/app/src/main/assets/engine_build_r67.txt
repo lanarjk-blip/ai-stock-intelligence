@@ -1,0 +1,2 @@
+AI Stock Intelligence backend contract: R61-R67-FINAL-7OF7-1
+APK shell remains compatible with the existing Streamlit runtime and consumes the hardened backend decisions.
