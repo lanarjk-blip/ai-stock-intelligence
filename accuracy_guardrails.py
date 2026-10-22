@@ -7,8 +7,8 @@ dataset.
 This module is imported directly by ``worker_base.py``. The production worker
 therefore uses it as a guaranteed bootstrap point for H-10, preliminary
 Pre-Market, guarded storage housekeeping, a fast startup self-check, R47
-live-precision guardrails, the R50 realised-performance feedback guard, and the
-R51 capital-preservation circuit breaker.
+live-precision guardrails, the R50 realised-performance feedback guard, the R51
+capital-preservation circuit breaker, and R52-R54 portfolio/model hardening.
 """
 from datetime import datetime, timezone
 import os
@@ -50,9 +50,20 @@ def _install_capital_preservation_guard():
         print(f"[CAPITAL_GUARD] install degraded: {exc!r}", flush=True)
 
 
+def _install_risk_hardening():
+    """Install correlation, adaptive sizing and validation-degradation hardening."""
+    try:
+        import risk_hardening
+        ok = bool(risk_hardening.install())
+        print(f"[RISK_HARDENING] R52-R54 installed={ok}", flush=True)
+    except Exception as exc:
+        print(f"[RISK_HARDENING] install degraded: {exc!r}", flush=True)
+
+
 _install_live_precision_guard()
 _install_research_feedback_guard()
 _install_capital_preservation_guard()
+_install_risk_hardening()
 
 
 def _run_h10_daemon():
