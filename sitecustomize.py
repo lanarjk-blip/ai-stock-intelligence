@@ -19,6 +19,38 @@ _IS_RUNTIME_API = (
     or "runtime_api:app" in _ARGV_TEXT
 )
 
+# V1.8.54 Time Map live-reconciliation bootstrap. The production app keeps the
+# historical map implementation in app.py; this idempotent source patch routes
+# its result through time_map_live_guard before app.py is imported/rendered.
+def _install_time_map_live_guard():
+    path = os.path.join(_BASE, "app.py")
+    marker = "reconcile_time_map_live(str(ticker)"
+    old = "    return pd.DataFrame(rows)\n\ndef read_universe_registry(limit=200):"
+    new = (
+        "    _tm = pd.DataFrame(rows)\n"
+        "    try:\n"
+        "        from time_map_live_guard import reconcile_time_map_live\n"
+        "        return reconcile_time_map_live(str(ticker), _tm, _intraday_load(str(ticker)), market_session.session_status(CFGD))\n"
+        "    except Exception:\n"
+        "        return _tm\n\n"
+        "def read_universe_registry(limit=200):"
+    )
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            src = fh.read()
+        if marker in src:
+            return
+        if old not in src:
+            print("[TIME_MAP_GUARD] target not found; leaving app.py unchanged", flush=True)
+            return
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(src.replace(old, new, 1))
+        print("[TIME_MAP_GUARD] live reconciliation installed", flush=True)
+    except Exception as exc:
+        print(f"[TIME_MAP_GUARD] install degraded: {exc!r}", flush=True)
+
+_install_time_map_live_guard()
+
 if _IS_REAL_WORKER:
     try:
         import runtime_supervisor
@@ -28,9 +60,6 @@ if _IS_REAL_WORKER:
     except Exception as exc:
         print(f"[RUNTIME_SUPERVISOR] startup error: {exc!r}", flush=True)
 
-# Publish the first local heartbeat synchronously before any persistence restore
-# or heavy worker imports. This removes the first-open race where the UI can
-# render before the background heartbeat thread gets CPU time.
 if _IS_REAL_WORKER:
     try:
         import local_runtime_health
@@ -43,12 +72,6 @@ if _IS_REAL_WORKER:
     except Exception as exc:
         print(f"[LOCAL_RUNTIME_HEALTH] first heartbeat error: {exc!r}", flush=True)
 
-# Production persistence startup order:
-# 1) cold Render worker restores full SQLite/model checkpoint;
-# 2) newest control-plane rows overlay the checkpoint;
-# 3) worker starts private checkpoint/control sync and sanitized UI replication;
-# 4) Streamlit pulls the sanitized API replica before app.py renders, then keeps
-#    refreshing that local read cache in one background thread.
 try:
     import persistent_bridge
     if _IS_REAL_WORKER and persistent_bridge.postgres_enabled():
@@ -77,9 +100,6 @@ try:
 except Exception as exc:
     print(f"[PERSIST_BRIDGE] startup degraded: {exc!r}", flush=True)
 
-# Persistence restore can overlay old local_worker_* state from a checkpoint or
-# control plane. Re-assert this process identity synchronously before UI health
-# checks or background heartbeat threads rely on that state.
 if _IS_REAL_WORKER:
     try:
         import local_runtime_health
@@ -99,6 +119,7 @@ _WATCH = (
     "app.py",
     "dynamic_engine.py",
     "dynamic_opportunity_ui.py",
+    "time_map_live_guard.py",
     "top5_timeline.py",
     "recommendation_history.py",
     "hold_engine.py",
@@ -203,8 +224,6 @@ elif not _IS_RUNTIME_API and os.environ.get("AI_ENGINE_WORKER") != "1":
     except Exception:
         pass
 
-
-# Targeted IHSG Yahoo query1 -> query2 failover.
 try:
     import requests
 
