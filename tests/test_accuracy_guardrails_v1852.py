@@ -13,7 +13,7 @@ def test_real_runtime_451_refresh_728_ready_must_publish():
         last_collection="2026-10-15T02:30:00+00:00",
         now=now,
     )
-    assert GUARDRAIL_REVISION == "usable-v1852-r2"
+    assert GUARDRAIL_REVISION == "usable-v1852-r50"
     assert q["ready"] is True
     assert q["status"] == "READY"
     assert q["reasons"] == []
