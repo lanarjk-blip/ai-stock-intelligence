@@ -6,8 +6,8 @@ dataset.
 
 This module is imported directly by ``worker_base.py``. The production worker
 therefore uses it as a guaranteed bootstrap point for H-10, preliminary
-Pre-Market, guarded storage housekeeping, a fast startup self-check, and R47
-live-precision guardrails.
+Pre-Market, guarded storage housekeeping, a fast startup self-check, R47
+live-precision guardrails, and the R50 realised-performance feedback guard.
 """
 from datetime import datetime, timezone
 import os
@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 
-GUARDRAIL_REVISION = "usable-v1852-r2"
+GUARDRAIL_REVISION = "usable-v1852-r50"
 
 
 def _install_live_precision_guard():
@@ -32,7 +32,18 @@ def _install_live_precision_guard():
         print(f"[LIVE_PRECISION] install degraded: {exc!r}", flush=True)
 
 
+def _install_research_feedback_guard():
+    """Install realised performance/calibration feedback after live precision."""
+    try:
+        import research_feedback
+        ok = bool(research_feedback.install())
+        print(f"[RESEARCH_FEEDBACK] R50 guard installed={ok}", flush=True)
+    except Exception as exc:
+        print(f"[RESEARCH_FEEDBACK] install degraded: {exc!r}", flush=True)
+
+
 _install_live_precision_guard()
+_install_research_feedback_guard()
 
 
 def _run_h10_daemon():
