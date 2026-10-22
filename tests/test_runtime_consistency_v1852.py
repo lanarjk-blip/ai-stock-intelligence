@@ -6,8 +6,8 @@ import json
 def test_runtime_version_is_normalized_from_config():
     cfg = json.loads(Path("config.json").read_text(encoding="utf-8"))
     ui = Path("dynamic_opportunity_ui.py").read_text(encoding="utf-8")
-    assert cfg["engine_version"] == "1.8.56"
-    assert cfg["mobile_ui_version"] == "1.8.55"
+    assert cfg["engine_version"] == "1.8.57"
+    assert cfg["mobile_ui_version"] == "1.8.57"
     assert "mobile_ui_version" in ui
     assert "st.title = title" in ui
     assert "st.set_page_config = set_page_config" in ui
