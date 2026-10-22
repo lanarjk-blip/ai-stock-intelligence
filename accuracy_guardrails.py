@@ -8,8 +8,8 @@ This module is imported directly by ``worker_base.py``. The production worker
 therefore uses it as a guaranteed bootstrap point for H-10, preliminary
 Pre-Market, guarded storage housekeeping, a fast startup self-check, R47
 live-precision guardrails, the R50 realised-performance feedback guard, R51
-capital-preservation circuit breaker, R52-R54 portfolio/model hardening, and the
-R55-R60 adaptive ensemble safety layer.
+capital-preservation circuit breaker, R52-R54 portfolio/model hardening, the
+R55-R60 adaptive ensemble safety layer, and the R61-R67 final adaptive engine.
 """
 from datetime import datetime, timezone
 import os
@@ -17,11 +17,10 @@ import sys
 import threading
 import time
 
-GUARDRAIL_REVISION = "usable-v1857-r60"
+GUARDRAIL_REVISION = "usable-v1857-r67"
 
 
 def _install_live_precision_guard():
-    """Install live decision guards while preserving the legacy worker selector."""
     try:
         import live_precision_patch
         live_precision_patch._WORKER_PATCHED = True
@@ -32,7 +31,6 @@ def _install_live_precision_guard():
 
 
 def _install_research_feedback_guard():
-    """Install realised performance/calibration feedback after live precision."""
     try:
         import research_feedback
         ok = bool(research_feedback.install())
@@ -42,7 +40,6 @@ def _install_research_feedback_guard():
 
 
 def _install_capital_preservation_guard():
-    """Install loss-streak/drawdown circuit breaker after research feedback."""
     try:
         import capital_preservation
         ok = bool(capital_preservation.install())
@@ -52,7 +49,6 @@ def _install_capital_preservation_guard():
 
 
 def _install_risk_hardening():
-    """Install correlation, adaptive sizing and validation-degradation hardening."""
     try:
         import risk_hardening
         ok = bool(risk_hardening.install())
@@ -62,7 +58,6 @@ def _install_risk_hardening():
 
 
 def _install_ensemble_safety():
-    """Install calibrated challenger ensemble plus uncertainty/execution guards."""
     try:
         import ensemble_safety
         ok = bool(ensemble_safety.install())
@@ -71,11 +66,22 @@ def _install_ensemble_safety():
         print(f"[ENSEMBLE_SAFETY] install degraded: {exc!r}", flush=True)
 
 
+def _install_advanced_ensemble():
+    """Install real-XGBoost + temporal + regime meta layer after R55-R60."""
+    try:
+        import advanced_ensemble
+        ok = bool(advanced_ensemble.install())
+        print(f"[ADVANCED_ENSEMBLE] R61-R67 installed={ok}", flush=True)
+    except Exception as exc:
+        print(f"[ADVANCED_ENSEMBLE] install degraded: {exc!r}", flush=True)
+
+
 _install_live_precision_guard()
 _install_research_feedback_guard()
 _install_capital_preservation_guard()
 _install_risk_hardening()
 _install_ensemble_safety()
+_install_advanced_ensemble()
 
 
 def _run_h10_daemon():
@@ -114,7 +120,6 @@ def _run_startup_selfcheck():
 
 
 def _start_worker_premarket_daemons():
-    """Start production helpers exactly once in the real worker."""
     if os.environ.get("AI_ENGINE_WORKER") != "1":
         return
     if os.path.basename(str(sys.argv[0] or "")) != "worker_base.py":
