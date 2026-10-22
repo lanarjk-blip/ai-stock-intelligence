@@ -1,14 +1,15 @@
 """Safe local bootstrap for AI Stock Intelligence hybrid worker.
 
-This file deliberately does not contain DATABASE_URL.  The secret stays on the
+This file deliberately does not contain DATABASE_URL. The secret stays on the
 host in a local env file (outside the repository) or in the host environment.
 
 Usage:
     python ops/autostart/start_hybrid_worker.py --env-file /path/to/asi-runtime.env
 
-The wrapper validates configuration, prevents accidental secret printing, then
-executes hybrid_worker.py --daemon.  Lease/singleton safety remains owned by the
-existing hybrid worker and Neon lease implementation.
+HP/Termux mode deliberately enables ASI_TERMUX_LITE so native-heavy optional
+packages such as XGBoost are never required locally. The worker remains fail-open
+and keeps the proven baseline/risk guards alive rather than compiling C++ on a
+phone.
 """
 from __future__ import annotations
 
@@ -58,8 +59,12 @@ def main() -> int:
     env = os.environ.copy()
     if args.device != "auto":
         env["ASI_DEVICE_TYPE"] = args.device
+    if args.device == "hp" or env.get("ASI_DEVICE_TYPE") == "hp":
+        env["ASI_TERMUX_LITE"] = "1"
+        env.setdefault("AI_ENGINE_WORKER", "1")
 
-    print("AUTOSTART READY: launching hybrid_worker.py --daemon (credential hidden).", flush=True)
+    mode = " TERMUX_LITE" if env.get("ASI_TERMUX_LITE") == "1" else ""
+    print(f"AUTOSTART READY:{mode} launching hybrid_worker.py --daemon (credential hidden).", flush=True)
     proc = subprocess.run(
         [sys.executable, str(HYBRID), "--daemon"],
         cwd=str(ROOT),

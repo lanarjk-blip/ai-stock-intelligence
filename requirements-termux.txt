@@ -1,0 +1,11 @@
+# Termux/Android worker dependencies.
+# Heavy native packages are supplied by Termux packages, not pip:
+#   pkg install python-numpy python-pandas python-pyarrow
+# XGBoost is intentionally omitted on Android. advanced_ensemble.py fails open
+# and keeps the proven JST/temporal safety path while server/CI can use XGBoost.
+streamlit>=1.40,<2
+requests>=2.31,<3
+psycopg[binary]>=3.2,<4
+fastapi>=0.115,<1
+uvicorn>=0.34,<1
+google-auth>=2.35,<3
