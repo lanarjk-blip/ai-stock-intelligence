@@ -1,4 +1,4 @@
-# V1.8.52 stabilization R21
+# V1.8.57 stabilization + R61-R67 final ensemble
 streamlit>=1.40,<2
 pandas>=2.2,<3
 numpy>=1.26,<3
@@ -6,5 +6,6 @@ requests>=2.31,<3
 psycopg[binary]>=3.2,<4
 fastapi>=0.115,<1
 uvicorn>=0.34,<1
+xgboost>=2.1,<4
 
 google-auth>=2.35,<3
