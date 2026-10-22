@@ -9,7 +9,8 @@ therefore uses it as a guaranteed bootstrap point for H-10, preliminary
 Pre-Market, guarded storage housekeeping, a fast startup self-check, R47
 live-precision guardrails, the R50 realised-performance feedback guard, R51
 capital-preservation circuit breaker, R52-R54 portfolio/model hardening, the
-R55-R60 adaptive ensemble safety layer, and the R61-R67 final adaptive engine.
+R55-R60 adaptive ensemble safety layer, the R61-R67 final adaptive engine, and
+R68-R72 maturity corrections for chronological OOS validation and execution EV.
 """
 from datetime import datetime, timezone
 import os
@@ -17,7 +18,7 @@ import sys
 import threading
 import time
 
-GUARDRAIL_REVISION = "usable-v1857-r67"
+GUARDRAIL_REVISION = "usable-v1857-r72"
 
 
 def _install_live_precision_guard():
@@ -76,12 +77,23 @@ def _install_advanced_ensemble():
         print(f"[ADVANCED_ENSEMBLE] install degraded: {exc!r}", flush=True)
 
 
+def _install_advanced_maturity():
+    """Correct chronology, OOS promotion thresholds and execution expected value."""
+    try:
+        import advanced_ensemble_maturity
+        ok = bool(advanced_ensemble_maturity.install())
+        print(f"[ADVANCED_MATURITY] R68-R72 installed={ok}", flush=True)
+    except Exception as exc:
+        print(f"[ADVANCED_MATURITY] install degraded: {exc!r}", flush=True)
+
+
 _install_live_precision_guard()
 _install_research_feedback_guard()
 _install_capital_preservation_guard()
 _install_risk_hardening()
 _install_ensemble_safety()
 _install_advanced_ensemble()
+_install_advanced_maturity()
 
 
 def _run_h10_daemon():
