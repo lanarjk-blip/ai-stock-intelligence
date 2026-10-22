@@ -1,0 +1,52 @@
+name: Advanced Engine Validation
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'advanced_ensemble.py'
+      - 'advanced_ensemble_maturity.py'
+      - 'accuracy_guardrails.py'
+      - 'requirements.txt'
+      - 'tests/test_advanced_ensemble_r61_r67.py'
+      - 'tests/test_advanced_ensemble_maturity_r68_r72.py'
+      - '.github/workflows/advanced_engine_validation.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'advanced_ensemble.py'
+      - 'advanced_ensemble_maturity.py'
+      - 'accuracy_guardrails.py'
+      - 'requirements.txt'
+      - 'tests/test_advanced_ensemble_r61_r67.py'
+      - 'tests/test_advanced_ensemble_maturity_r68_r72.py'
+      - '.github/workflows/advanced_engine_validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-advanced-engine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install -q -r requirements.txt pytest
+      - name: Compile advanced engine
+        run: python -m py_compile advanced_ensemble.py advanced_ensemble_maturity.py accuracy_guardrails.py
+      - name: Verify real XGBoost package
+        run: |
+          python - <<'PY'
+          import xgboost
+          import advanced_ensemble as ae
+          assert ae.XGBClassifier is not None
+          print('xgboost', xgboost.__version__)
+          PY
+      - name: Advanced engine regression suite
+        run: python -m pytest -q tests/test_advanced_ensemble_r61_r67.py tests/test_advanced_ensemble_maturity_r68_r72.py
+      - name: Full regression suite
+        run: python -m pytest -q
