@@ -1,4 +1,4 @@
-"""R68-R72 maturity corrections for the final adaptive engine.
+"""R68-R73 maturity corrections for the final adaptive engine.
 
 This module deliberately patches the already-stable R61-R67 layer instead of
 replacing it. Corrections:
@@ -7,22 +7,27 @@ replacing it. Corrections:
 - require stricter promotion evidence before production activation;
 - use expected-value execution edge with upside AND stop-loss downside;
 - keep runtime regime labels consistent with the same IHSG regime classifier
-  used during training.
+  used during training;
+- publish the actual production model name/validation metric to the UI;
+- force one fresh post-maturity retrain so stale pre-R72 artifacts cannot be
+  promoted using the older validation geometry.
 
 The invariant remains conservative: this layer may never promote a weaker
 baseline signal into a stronger trade.
 """
 from __future__ import annotations
 
+import os
 import numpy as np
 import pandas as pd
 
 import app
 import advanced_ensemble as ae
 
-REVISION = "R68-R72-MATURITY-AUDIT-1"
+REVISION = "R68-R73-MATURITY-TRUTH-1"
 _INSTALLED = False
 _ORIGINAL_HARDEN = None
+_ORIGINAL_TRAIN_FINAL = None
 
 
 def temporal_matrix_chronological(rows, lags=ae.TEMP_LAGS):
@@ -164,8 +169,77 @@ def harden_rows_consistent_regime(res, bundle=None):
     return _ORIGINAL_HARDEN(d, bundle=bundle)
 
 
+def _training_payload(result):
+    """Resolve complete validation metadata even when train_final returns SKIP_FRESH."""
+    payload = dict(result or {}) if isinstance(result, dict) else {}
+    if "production_enabled" not in payload:
+        try:
+            bundle = ae.load_bundle()
+            meta = (bundle or {}).get("meta") or {}
+            for key, value in meta.items():
+                payload.setdefault(key, value)
+        except Exception:
+            pass
+    return payload
+
+
+def _publish_model_truth(result):
+    """Keep dashboard model identity and WF metric aligned with production reality."""
+    payload = _training_payload(result)
+    enabled = bool(payload.get("production_enabled"))
+    status = str(payload.get("status") or "").upper()
+    if status == "ACTIVE":
+        enabled = True
+
+    try:
+        if enabled:
+            winner = str(payload.get("temporal_winner") or "TEMPORAL").replace("_", " ")
+            app.state_set("active_model_name", f"ADAPTIVE ENSEMBLE • JST + XGBOOST + {winner}")
+            app.state_set("engine_model_status", "ACTIVE_ENSEMBLE")
+            metrics = payload.get("ensemble_metrics") or {}
+            wf = metrics.get("accuracy")
+            try:
+                wf = float(wf)
+                if np.isfinite(wf) and 0.0 <= wf <= 1.0:
+                    app.state_set("walk_forward_accuracy", wf)
+                    app.state_set("walk_forward_source", "ADVANCED_ENSEMBLE_OOS")
+            except Exception:
+                pass
+        else:
+            # Baseline training runs immediately before the advanced challenger,
+            # so its JST walk-forward value is already the truthful production metric.
+            app.state_set("active_model_name", "JST")
+            app.state_set("engine_model_status", "JST_WITH_ENSEMBLE_SHADOW")
+            app.state_set("walk_forward_source", "JST_BASELINE")
+
+        app.state_set("advanced_ensemble_runtime_status", "ACTIVE" if enabled else "SHADOW_ONLY")
+        app.state_set("runtime_guard_revision", REVISION)
+        app.state_set("engine_version", str(app.CFGD.get("engine_version", "1.8.57")))
+        if os.environ.get("AI_ENGINE_WORKER") == "1":
+            app.state_set(
+                "local_worker_runtime_build",
+                f"V{app.CFGD.get('engine_version', '1.8.57')}-R73",
+            )
+    except Exception:
+        pass
+    return payload
+
+
+def train_final_truth(universe, force=False):
+    """Run a fresh matured validation once, then publish only the earned winner."""
+    needs_maturity_retrain = str(app.state_get("advanced_maturity_model_revision") or "") != REVISION
+    result = _ORIGINAL_TRAIN_FINAL(universe, force=bool(force or needs_maturity_retrain))
+    payload = _publish_model_truth(result)
+    if payload.get("trained_at") or str(payload.get("status") or "").upper() in {"ACTIVE", "SHADOW_ONLY"}:
+        try:
+            app.state_set("advanced_maturity_model_revision", REVISION)
+        except Exception:
+            pass
+    return result
+
+
 def install():
-    global _INSTALLED, _ORIGINAL_HARDEN
+    global _INSTALLED, _ORIGINAL_HARDEN, _ORIGINAL_TRAIN_FINAL
     if _INSTALLED:
         return True
 
@@ -183,9 +257,17 @@ def install():
     ae._cost_model = execution_cost_expected_value
     _ORIGINAL_HARDEN = ae.harden_rows
     ae.harden_rows = harden_rows_consistent_regime
+    _ORIGINAL_TRAIN_FINAL = ae.train_final
+    ae.train_final = train_final_truth
 
     try:
         app.state_set("advanced_maturity_revision", REVISION)
+        app.state_set("runtime_guard_revision", REVISION)
+        if os.environ.get("AI_ENGINE_WORKER") == "1":
+            app.state_set(
+                "local_worker_runtime_build",
+                f"V{app.CFGD.get('engine_version', '1.8.57')}-R73",
+            )
     except Exception:
         pass
     _INSTALLED = True
@@ -202,4 +284,5 @@ def status_snapshot():
         "min_brier_gain": app.CFGD.get("advanced_min_brier_gain"),
         "min_up_precision": app.CFGD.get("advanced_min_up_precision"),
         "min_net_edge_pct": app.CFGD.get("advanced_min_net_edge_pct"),
+        "runtime_build": f"V{app.CFGD.get('engine_version', '1.8.57')}-R73",
     }
