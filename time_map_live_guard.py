@@ -1,16 +1,20 @@
-"""Live reconciliation guard for the historical Time Map.
+"""Strict live reconciliation guard for every ticker Time Map.
 
-Historical clock-slot statistics remain useful evidence, but they must not be
-rendered as actionable when today's tape is stale or moving against them.
-This module only confirms/downgrades historical evidence. It never upgrades a
-weak historical slot into BUY/ACTIVE from live price alone.
+Historical clock-slot statistics are retained as evidence, but actionable Time
+Map status must be confirmed by fresh same-session tape. The guard is ticker-
+agnostic: no symbol-specific exceptions. It never upgrades weak historical
+evidence into ACTIVE from live price alone.
 """
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
-MAX_LIVE_AGE_MINUTES = 45.0
+MAX_LIVE_AGE_MINUTES = 20.0
+MIN_LIVE_BARS = 2
+MIN_TRUST_SAMPLES = 20
+MIN_TRUST_CONFIDENCE = 55.0
+MIN_TRUST_EDGE = 10.0
 
 
 def _minutes(label):
@@ -26,8 +30,25 @@ def _empty(reason='NO_INTRADAY'):
         'usable': False, 'fresh': False, 'direction': 'UNKNOWN',
         'ret_day': np.nan, 'ret_last': np.nan, 'ret_recent': np.nan,
         'bars': 0, 'last_price': np.nan, 'age_minutes': np.nan,
-        'reason': reason,
+        'reason': reason, 'session_bars': 0,
     }
+
+
+def _session_window(now):
+    """Return current IDX regular-session bounds in WIB minutes."""
+    dow = int(now.dayofweek)
+    minute = int(now.hour) * 60 + int(now.minute)
+    if dow == 4:  # Friday
+        if 9 * 60 <= minute <= 11 * 60 + 30:
+            return 9 * 60, 11 * 60 + 30, 'SESI_I'
+        if 14 * 60 <= minute <= 15 * 60 + 50:
+            return 14 * 60, 15 * 60 + 50, 'SESI_II'
+    else:
+        if 9 * 60 <= minute <= 12 * 60:
+            return 9 * 60, 12 * 60, 'SESI_I'
+        if 13 * 60 + 30 <= minute <= 15 * 60 + 50:
+            return 13 * 60 + 30, 15 * 60 + 50, 'SESI_II'
+    return None, None, 'OUTSIDE_REGULAR_SESSION'
 
 
 def _live_direction(intraday, market_date, now):
@@ -40,53 +61,74 @@ def _live_direction(intraday, market_date, now):
     d['close'] = pd.to_numeric(d['close'], errors='coerce')
     if 'open' in d.columns:
         d['open'] = pd.to_numeric(d['open'], errors='coerce')
+    if 'volume' in d.columns:
+        d['volume'] = pd.to_numeric(d['volume'], errors='coerce')
     d = d.dropna(subset=['ts', 'close']).sort_values('ts')
     if d.empty:
         return _empty('INVALID_INTRADAY')
     d['wib'] = d['ts'].dt.tz_convert('Asia/Jakarta')
-    d = d[d['wib'].dt.date.astype(str) == str(market_date)]
+    d = d[d['wib'].dt.date.astype(str) == str(market_date)].copy()
     if d.empty:
         return _empty('STALE_MARKET_DATE')
 
-    last_ts = d.iloc[-1]['wib']
-    try:
-        age_minutes = max(0.0, (now - last_ts).total_seconds() / 60.0)
-    except Exception:
-        age_minutes = np.inf
-
-    last = float(d.iloc[-1]['close'])
-    # Critical gate: same-day data is NOT automatically live. A morning bar must
-    # never certify a Sesi-II Time Map. During live market, >45 min is stale.
-    if age_minutes > MAX_LIVE_AGE_MINUTES:
-        out = _empty('STALE_INTRADAY_AGE')
-        out.update({'bars': int(len(d)), 'last_price': last, 'age_minutes': age_minutes})
+    start_min, end_min, session_name = _session_window(now)
+    if start_min is None:
+        return _empty('OUTSIDE_REGULAR_SESSION')
+    d['minute'] = d['wib'].dt.hour * 60 + d['wib'].dt.minute
+    s = d[(d['minute'] >= start_min) & (d['minute'] <= end_min)].copy()
+    if s.empty:
+        out = _empty('NO_CURRENT_SESSION_DATA')
+        out['bars'] = int(len(d))
         return out
 
-    first_open = d.iloc[0].get('open', np.nan)
-    if pd.isna(first_open) or not float(first_open):
-        first_open = float(d.iloc[0]['close'])
-    ret_day = last / float(first_open) - 1.0
-    ret_last = float(d['close'].pct_change().iloc[-1]) if len(d) >= 2 else 0.0
-    ret_recent = last / float(d.iloc[-3]['close']) - 1.0 if len(d) >= 3 else ret_last
+    last_ts = s.iloc[-1]['wib']
+    age_minutes = max(0.0, (now - last_ts).total_seconds() / 60.0)
+    last = float(s.iloc[-1]['close'])
+    if age_minutes > MAX_LIVE_AGE_MINUTES:
+        out = _empty('STALE_INTRADAY_AGE')
+        out.update({'bars': int(len(d)), 'session_bars': int(len(s)), 'last_price': last, 'age_minutes': age_minutes})
+        return out
+    if len(s) < MIN_LIVE_BARS:
+        out = _empty('INSUFFICIENT_CURRENT_SESSION_BARS')
+        out.update({'bars': int(len(d)), 'session_bars': int(len(s)), 'last_price': last, 'age_minutes': age_minutes})
+        return out
 
-    # Conservative live classification. Sustained/material tape direction wins
-    # over historical clock-slot tendency; tiny movement remains MIXED.
-    if ret_day <= -0.008 or ret_recent <= -0.006 or (ret_last <= -0.004 and ret_day < 0):
+    first_open = s.iloc[0].get('open', np.nan)
+    if pd.isna(first_open) or not float(first_open):
+        first_open = float(s.iloc[0]['close'])
+    ret_session = last / float(first_open) - 1.0
+    ret_last = float(s['close'].pct_change().iloc[-1])
+    ret_recent = last / float(s.iloc[max(0, len(s)-3)]['close']) - 1.0
+
+    # Multi-horizon composite prevents one candle from overruling the session.
+    composite = 0.50 * ret_session + 0.30 * ret_recent + 0.20 * ret_last
+    if composite <= -0.0025 and ret_session < 0:
         direction = 'DOWN'
-    elif ret_day >= 0.008 or ret_recent >= 0.006 or (ret_last >= 0.004 and ret_day > 0):
+    elif composite >= 0.0025 and ret_session > 0:
         direction = 'UP'
     else:
         direction = 'MIXED'
     return {
         'usable': True, 'fresh': True, 'direction': direction,
-        'ret_day': ret_day, 'ret_last': ret_last, 'ret_recent': ret_recent,
-        'bars': int(len(d)), 'last_price': last, 'age_minutes': age_minutes,
-        'reason': 'CURRENT_SESSION',
+        'ret_day': ret_session, 'ret_last': ret_last, 'ret_recent': ret_recent,
+        'bars': int(len(d)), 'session_bars': int(len(s)), 'last_price': last,
+        'age_minutes': age_minutes, 'reason': session_name,
     }
 
 
+def _historical_trust(row):
+    try:
+        samples = float(row.get('samples') or 0)
+        conf = float(row.get('confidence_pct') or 0)
+        up = float(row.get('up_pct') or 0)
+        down = float(row.get('down_pct') or 0)
+        return samples >= MIN_TRUST_SAMPLES and conf >= MIN_TRUST_CONFIDENCE and abs(up-down) >= MIN_TRUST_EDGE
+    except Exception:
+        return False
+
+
 def reconcile_time_map_live(ticker, time_map, intraday, session):
-    """Reconcile historical Time Map with fresh current-session evidence."""
+    """Apply strict same-session confirmation to every ticker Time Map."""
     if time_map is None or time_map.empty:
         return time_map
     out = time_map.copy()
@@ -99,8 +141,6 @@ def reconcile_time_map_live(ticker, time_map, intraday, session):
     out['trusted'] = False
 
     session = dict(session or {})
-    if not bool(session.get('live')):
-        return out
     try:
         now = pd.Timestamp(session.get('wib'))
         if now.tzinfo is None:
@@ -110,16 +150,21 @@ def reconcile_time_map_live(ticker, time_map, intraday, session):
     except Exception:
         now = pd.Timestamp.now(tz='Asia/Jakarta')
     market_date = str(session.get('market_date') or now.date())
-    live = _live_direction(intraday, market_date, now)
+    predictive = out['session'].isin(['Sesi I', 'Sesi II']) if 'session' in out.columns else pd.Series(True, index=out.index)
 
+    # Outside a live market, keep history visible but never call it trusted/live.
+    if not bool(session.get('live')):
+        out.loc[predictive, 'live_confirmation'] = 'MARKET NOT LIVE'
+        out.loc[predictive & out['status'].isin(['ACTIVE', 'DEVELOPING']), 'status'] = 'WAIT'
+        return out
+
+    live = _live_direction(intraday, market_date, now)
     out['live_direction'] = str(live.get('direction') or 'UNKNOWN')
     out['live_fresh'] = bool(live.get('fresh'))
     out['live_age_min'] = live.get('age_minutes', np.nan)
     out['live_price'] = live.get('last_price', np.nan)
 
-    predictive = out['session'].isin(['Sesi I', 'Sesi II']) if 'session' in out.columns else pd.Series(True, index=out.index)
     if not live.get('usable'):
-        # No fresh same-session evidence means no actionable green map.
         out.loc[predictive & out['status'].isin(['ACTIVE', 'DEVELOPING']), 'status'] = 'WAIT'
         out.loc[predictive, 'live_confirmation'] = 'NO LIVE CONFIRMATION'
         reason = str(live.get('reason') or 'NO_LIVE_DATA')
@@ -138,31 +183,33 @@ def reconcile_time_map_live(ticker, time_map, intraday, session):
         slot = _minutes(row.get('time'))
         if slot is None:
             continue
-        # Completed slots remain preserved for audit. Current/upcoming slots are
-        # reconciled against the actual tape so history cannot masquerade as live.
         if slot < current_floor:
             out.at[idx, 'live_confirmation'] = 'HISTORICAL'
             continue
-        hist = str(row.get('status') or 'NEUTRAL').upper()
+
+        hist = str(row.get('historical_status') or row.get('status') or 'NEUTRAL').upper()
+        hist_trusted = _historical_trust(row)
         if direction == 'DOWN':
-            out.at[idx, 'live_confirmation'] = 'DIVERGENCE'
+            out.at[idx, 'live_confirmation'] = 'DIVERGENCE' if hist in {'ACTIVE','DEVELOPING'} else 'MATCH' if hist == 'WAIT' else 'MIXED'
             if hist in {'ACTIVE', 'DEVELOPING'}:
                 out.at[idx, 'status'] = 'WAIT'
+            out.at[idx, 'trusted'] = bool(hist == 'WAIT' and hist_trusted)
         elif direction == 'UP':
-            aligned = hist in {'ACTIVE', 'DEVELOPING'}
-            out.at[idx, 'live_confirmation'] = 'MATCH' if aligned else 'MIXED'
-            # Never promote WAIT/NEUTRAL from price alone.
-            if aligned:
-                out.at[idx, 'trusted'] = True
+            out.at[idx, 'live_confirmation'] = 'MATCH' if hist in {'ACTIVE','DEVELOPING'} else 'DIVERGENCE' if hist == 'WAIT' else 'MIXED'
+            # Never promote historical WAIT/NEUTRAL to ACTIVE from live movement.
+            if hist == 'WAIT':
+                out.at[idx, 'status'] = 'NEUTRAL'
+            out.at[idx, 'trusted'] = bool(hist in {'ACTIVE','DEVELOPING'} and hist_trusted)
         else:
             out.at[idx, 'live_confirmation'] = 'MIXED'
             if hist in {'ACTIVE', 'DEVELOPING'}:
                 out.at[idx, 'status'] = 'NEUTRAL'
+            out.at[idx, 'trusted'] = False
 
-    ret_day = float(live.get('ret_day') or 0.0) * 100.0
+    ret_session = float(live.get('ret_day') or 0.0) * 100.0
     ret_last = float(live.get('ret_last') or 0.0) * 100.0
     age = float(live.get('age_minutes') or 0.0)
-    suffix = f' Live {direction}: day {ret_day:+.2f}%, last bar {ret_last:+.2f}%, age {age:.0f}m.'
+    suffix = f' Live {direction}: session {ret_session:+.2f}%, last bar {ret_last:+.2f}%, age {age:.0f}m.'
     if 'note' in out.columns:
         mask = out['live_confirmation'].isin(['MATCH', 'MIXED', 'DIVERGENCE', 'NO LIVE CONFIRMATION'])
         out.loc[mask, 'note'] = out.loc[mask, 'note'].astype(str) + suffix
