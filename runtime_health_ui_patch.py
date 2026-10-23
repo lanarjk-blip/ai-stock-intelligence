@@ -130,7 +130,7 @@ def install():
         import timemap_ui_direct_live
         timemap_ui_direct_live.install()
     except Exception as exc:
-        print(f"[R83_TIME_MAP_UI] install degraded: {exc!r}", flush=True)
+        print(f"[R82_TIME_MAP_UI][R83_DIRECT_LIVE] install degraded: {exc!r}", flush=True)
 
     if getattr(dynamic_opportunity_ui._quality_gate_state, "_asi_runtime_health_patch", False):
         return
