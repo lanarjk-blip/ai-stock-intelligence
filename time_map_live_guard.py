@@ -50,15 +50,17 @@ def _decision_first(out):
 def _session_window(now):
     dow = int(now.dayofweek)
     minute = int(now.hour) * 60 + int(now.minute)
+    if dow >= 5:
+        return None, None, 'OUTSIDE_REGULAR_SESSION'
     if dow == 4:
-        if 9 * 60 <= minute <= 11 * 60 + 30:
+        if 9 * 60 <= minute < 11 * 60 + 30:
             return 9 * 60, 11 * 60 + 30, 'SESI_I'
-        if 14 * 60 <= minute <= 15 * 60 + 50:
+        if 14 * 60 <= minute < 15 * 60 + 50:
             return 14 * 60, 15 * 60 + 50, 'SESI_II'
     else:
-        if 9 * 60 <= minute <= 12 * 60:
+        if 9 * 60 <= minute < 12 * 60:
             return 9 * 60, 12 * 60, 'SESI_I'
-        if 13 * 60 + 30 <= minute <= 15 * 60 + 50:
+        if 13 * 60 + 30 <= minute < 15 * 60 + 50:
             return 13 * 60 + 30, 15 * 60 + 50, 'SESI_II'
     return None, None, 'OUTSIDE_REGULAR_SESSION'
 
@@ -78,6 +80,7 @@ def _live_direction(intraday, market_date, now):
     if d.empty:
         return _empty('INVALID_INTRADAY', market_date)
 
+    d = d[(d['ts'] <= now.tz_convert('UTC')) & (d['close'] > 0)].drop_duplicates('ts',keep='last')
     d['wib'] = d['ts'].dt.tz_convert('Asia/Jakarta')
     # R83 hard boundary: previous market-day bars are never live evidence.
     d = d[d['wib'].dt.date.astype(str) == market_date].copy()
