@@ -57,7 +57,6 @@ def _remember_ticker(st, label, value):
 
 
 def _active_ticker(st):
-    # Explicit navigation is authoritative, then the remembered selected ticker.
     try:
         value = st.query_params.get("ticker")
         if isinstance(value, (list, tuple)):
@@ -95,7 +94,6 @@ def _is_map(frame):
 def _session():
     try:
         import market_session
-
         data = dict(market_session.session_status(_cfg()) or {})
         return (
             str(data.get("status") or "UNKNOWN").upper(),
@@ -109,11 +107,9 @@ def _session():
 
 
 def _provider_frame(ticker):
-    """Fetch fresh provider data without trusting the local intraday row count."""
     cfg = _cfg()
     try:
         import app
-
         result = app.fetch_chart_recover(
             ticker,
             max(2, int(cfg.get("intraday_refresh_period_days", 3))),
@@ -486,7 +482,7 @@ def install():
 
     dataframe._asi_r86_hard_timemap = True
     dataframe._asi_r87_today_timemap = True
-    st.dataframe = dataframe
+    st.dataframe=dataframe
 
     original_selectbox = st.selectbox
     if not getattr(original_selectbox, "_asi_timemap_ticker_tracker", False):
