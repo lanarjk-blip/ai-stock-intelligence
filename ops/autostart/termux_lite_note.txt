@@ -1,1 +1,0 @@
-R75 Termux Lite resolver guard placeholder.
