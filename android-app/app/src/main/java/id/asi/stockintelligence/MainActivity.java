@@ -36,7 +36,8 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 public class MainActivity extends Activity {
-    private static final String HOME_URL = "https://ai-stock-intelligence-zijcl2pi2kjweeappbkjiy.streamlit.app";
+    private static final String BUILD_TAG = "R85";
+    private static final String HOME_URL = "https://ai-stock-intelligence-zijcl2pi2kjweeappbkjiy.streamlit.app/?apk_build=R85";
     private static final String NOTIFICATION_CHANNEL_ID = "stock_alerts";
     private static final String NOTIFICATION_CHANNEL_NAME = "AI Stock Alerts";
     private static final int NOTIFICATION_PERMISSION_REQUEST = 1001;
@@ -60,7 +61,7 @@ public class MainActivity extends Activity {
     }
 
     private String appTitle() {
-        return "AI Stock Intelligence V" + appVersion;
+        return "AI Stock Intelligence V" + appVersion + " • " + BUILD_TAG;
     }
 
     @Override
@@ -83,46 +84,34 @@ public class MainActivity extends Activity {
     }
 
     private void createNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            return;
-        }
-
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         NotificationChannel channel = new NotificationChannel(
                 NOTIFICATION_CHANNEL_ID,
                 NOTIFICATION_CHANNEL_NAME,
                 NotificationManager.IMPORTANCE_HIGH);
         channel.setDescription("BUY WINDOW, Pre-Market, Dynamic Opportunity, dan alert penting AI Stock Intelligence.");
         channel.enableVibration(true);
-
         NotificationManager manager = getSystemService(NotificationManager.class);
-        if (manager != null) {
-            manager.createNotificationChannel(channel);
-        }
+        if (manager != null) manager.createNotificationChannel(channel);
     }
 
     private void requestNotificationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(
-                    new String[]{Manifest.permission.POST_NOTIFICATIONS},
-                    NOTIFICATION_PERMISSION_REQUEST);
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_PERMISSION_REQUEST);
         }
     }
 
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode != NOTIFICATION_PERMISSION_REQUEST) {
-            return;
-        }
-
+        if (requestCode != NOTIFICATION_PERMISSION_REQUEST) return;
         if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             Toast.makeText(this, "Notifikasi AI Stock Intelligence aktif.", Toast.LENGTH_SHORT).show();
             showNotificationTest();
         } else {
-            Toast.makeText(
-                    this,
+            Toast.makeText(this,
                     "Notifikasi belum diizinkan. Bisa diaktifkan nanti dari Info aplikasi > Pemberitahuan.",
                     Toast.LENGTH_LONG).show();
         }
@@ -131,23 +120,14 @@ public class MainActivity extends Activity {
     private void showNotificationTest() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED) {
-            return;
-        }
-
+                != PackageManager.PERMISSION_GRANTED) return;
         NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        if (manager == null) {
-            return;
-        }
-
+        if (manager == null) return;
         Intent launchIntent = new Intent(this, MainActivity.class);
         launchIntent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent contentIntent = PendingIntent.getActivity(
-                this,
-                0,
-                launchIntent,
+                this, 0, launchIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-
         Notification notification = new Notification.Builder(this, NOTIFICATION_CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setContentTitle("AI Stock Intelligence")
@@ -156,7 +136,6 @@ public class MainActivity extends Activity {
                 .setAutoCancel(true)
                 .setCategory(Notification.CATEGORY_STATUS)
                 .build();
-
         manager.notify(NOTIFICATION_TEST_ID, notification);
     }
 
@@ -184,6 +163,7 @@ public class MainActivity extends Activity {
         home.setAllCaps(false);
         home.setOnClickListener(v -> {
             mainFrameFailed = false;
+            webView.clearCache(true);
             webView.loadUrl(HOME_URL);
         });
         top.addView(home, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -193,7 +173,9 @@ public class MainActivity extends Activity {
         refresh.setAllCaps(false);
         refresh.setOnClickListener(v -> {
             mainFrameFailed = false;
-            webView.reload();
+            webView.clearCache(true);
+            String current = webView.getUrl();
+            webView.loadUrl(current == null || current.isEmpty() ? HOME_URL : current);
         });
         top.addView(refresh, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
@@ -225,8 +207,8 @@ public class MainActivity extends Activity {
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
         settings.setSupportZoom(false);
-        settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-        settings.setUserAgentString(settings.getUserAgentString() + " AIStockIntelligenceAPK/" + appVersion);
+        settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
+        settings.setUserAgentString(settings.getUserAgentString() + " AIStockIntelligenceAPK/" + appVersion + "/" + BUILD_TAG);
 
         CookieManager cookies = CookieManager.getInstance();
         cookies.setAcceptCookie(true);
@@ -257,9 +239,7 @@ public class MainActivity extends Activity {
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
                 String scheme = uri.getScheme();
-                if ("https".equalsIgnoreCase(scheme)) {
-                    return false;
-                }
+                if ("https".equalsIgnoreCase(scheme)) return false;
                 Toast.makeText(MainActivity.this, "Tautan non-HTTPS diblokir demi keamanan.", Toast.LENGTH_SHORT).show();
                 return true;
             }
@@ -269,7 +249,9 @@ public class MainActivity extends Activity {
                 if (request.isForMainFrame()) {
                     mainFrameFailed = true;
                     status.setText("Koneksi bermasalah • " + appTitle());
-                    Toast.makeText(MainActivity.this, "Internet terputus. Aplikasi akan mencoba pulih otomatis saat jaringan kembali.", Toast.LENGTH_LONG).show();
+                    Toast.makeText(MainActivity.this,
+                            "Internet terputus. Aplikasi akan mencoba pulih otomatis saat jaringan kembali.",
+                            Toast.LENGTH_LONG).show();
                 }
             }
 
@@ -284,10 +266,7 @@ public class MainActivity extends Activity {
 
     private void registerNetworkRecovery() {
         connectivityManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-        if (connectivityManager == null) {
-            return;
-        }
-
+        if (connectivityManager == null) return;
         networkCallback = new ConnectivityManager.NetworkCallback() {
             @Override
             public void onAvailable(Network network) {
@@ -295,7 +274,8 @@ public class MainActivity extends Activity {
                     if (mainFrameFailed && webView != null) {
                         status.setText("Jaringan kembali, memuat ulang...");
                         mainFrameFailed = false;
-                        webView.reload();
+                        webView.clearCache(true);
+                        webView.loadUrl(HOME_URL);
                     }
                 });
             }
@@ -305,7 +285,6 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> status.setText("Menunggu jaringan • " + appTitle()));
             }
         };
-
         NetworkRequest request = new NetworkRequest.Builder()
                 .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
                 .build();
@@ -314,26 +293,19 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (webView != null && webView.canGoBack()) {
-            webView.goBack();
-        } else {
-            super.onBackPressed();
-        }
+        if (webView != null && webView.canGoBack()) webView.goBack();
+        else super.onBackPressed();
     }
 
     @Override
     protected void onSaveInstanceState(Bundle outState) {
-        if (webView != null) {
-            webView.saveState(outState);
-        }
+        if (webView != null) webView.saveState(outState);
         super.onSaveInstanceState(outState);
     }
 
     @Override
     protected void onPause() {
-        if (webView != null) {
-            webView.onPause();
-        }
+        if (webView != null) webView.onPause();
         CookieManager.getInstance().flush();
         super.onPause();
     }
@@ -341,9 +313,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (webView != null) {
-            webView.onResume();
-        }
+        if (webView != null) webView.onResume();
     }
 
     @Override
@@ -351,9 +321,7 @@ public class MainActivity extends Activity {
         if (connectivityManager != null && networkCallback != null) {
             try {
                 connectivityManager.unregisterNetworkCallback(networkCallback);
-            } catch (IllegalArgumentException ignored) {
-                // Already unregistered by the system.
-            }
+            } catch (IllegalArgumentException ignored) {}
         }
         if (webView != null) {
             webView.stopLoading();
