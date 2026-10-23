@@ -52,6 +52,7 @@ def test_current_day_is_a_hard_boundary_in_source():
     assert 'd = d[d["wib"].dt.date.astype(str) == market_date].copy()' in text
     assert 'NO BAR FOR ACTIVE MARKET DAY' in text
     assert 'Previous-session' in text
+    assert 'WAIT FUTURE' in text
 
 
 def test_today_state_is_shown_before_historical_baseline():
