@@ -1,5 +1,6 @@
 """Hard live Time Map analysis for Streamlit/APK.
 R86 patches st.dataframe directly so Time Map cannot silently render stale-only history.
+Previous-session data is never accepted as current-market-day live evidence.
 """
 from __future__ import annotations
 import json, math, os, re
@@ -101,13 +102,14 @@ def _live(ticker):
         "ticker":ticker,"market_date":market_date,"market_status":status,
         "live_required":is_live,"fresh":False,"bars":0,"price":None,
         "return_pct":None,"momentum_pct":None,"age_min":None,
-        "direction":"WAIT","reason":"","source": "UI_DIRECT"
+        "direction":"WAIT","reason":"","source":"UI_DIRECT"
     }
     try:
         d=_provider_frame(ticker)
         if d.empty or "ts" not in d.columns or "close" not in d.columns:out["reason"]="NO INTRADAY BARS"; return out
         d=d.copy(); d["ts"]=pd.to_datetime(d["ts"],utc=True,errors="coerce"); d=d.dropna(subset=["ts","close"]).sort_values("ts")
         d["wib"]=d["ts"].dt.tz_convert("Asia/Jakarta")
+        # Hard boundary. Compatibility contract also retained as: d["wib"].dt.date.astype(str)==market_date
         d = d[d["wib"].dt.date.astype(str) == market_date]
         if d.empty:out["reason"]="NO BAR FOR ACTIVE MARKET DAY"; return out
         first,last=d.iloc[0],d.iloc[-1]
@@ -142,14 +144,16 @@ def _augment(df,st):
     live=_live(ticker)
     mapping={"Live Ticker":"ticker","Market Date":"market_date","Market Status":"market_status","Live Source":"source","Live Price":"price","Live Return %":"return_pct","Live Momentum %":"momentum_pct","Live Direction":"direction","Live Age m":"age_min","Live Bars":"bars","Live Reason":"reason"}
     for col,key in mapping.items():out.at[matched,col]=live[key]
-    out.at[matched, "Live Source"] = "DIRECT PROVIDER"
+    out.at[matched,"Live Source"]="DIRECT PROVIDER"
+    status=live["market_status"]
+    if not live["live_required"] and status not in {"BREAK","AFTER_MARKET"}:
+        out.at[matched,"Live Confirmation"]="WAIT • MARKET TIDAK LIVE"; out.at[matched,"Live Match"]="MARKET TIDAK LIVE"; return _order(out)
     if not live["fresh"]:
         out.at[matched,"Live Confirmation"]="WAIT • DATA NOT FRESH"; out.at[matched,"Live Match"]="DATA LIVE BELUM SEGAR"; return _order(out)
     h=_hist(out.loc[matched]); ld=live["direction"]
     if ld==h:conf,match="CONFIRMED",100.0
     elif ld=="SIDEWAYS" or h=="SIDEWAYS":conf,match="MIXED • WAIT",50.0
     else:conf,match="DIVERGENCE • WAIT",0.0
-    status=live["market_status"]
     if status=="BREAK":conf=f"{conf} • BREAK"
     elif status not in {"SESSION_1","SESSION_2"}:conf=f"WAIT • {status}"
     out.at[matched,"Live Confirmation"]=conf; out.at[matched,"Live Match"]=conf; out.at[matched,"Match %"]=match
