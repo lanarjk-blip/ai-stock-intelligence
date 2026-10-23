@@ -74,7 +74,6 @@ def _session():
         now=datetime.now(ZoneInfo("Asia/Jakarta")); return "UNKNOWN",False,now.date().isoformat(),now.isoformat()
 
 def _provider_frame(ticker):
-    """Use the application's resolved provider path first, raw Yahoo only as fallback."""
     cfg=_cfg()
     try:
         import app
@@ -83,8 +82,7 @@ def _provider_frame(ticker):
             for item in value:
                 if isinstance(item,pd.DataFrame):return item
         if isinstance(value,pd.DataFrame):return value
-    except Exception:
-        pass
+    except Exception:pass
     params={"range":"5d","interval":str(cfg.get("intraday_interval") or "30m"),"events":"history"}
     headers={"User-Agent":str(cfg.get("user_agent") or "AI-Stock-Intelligence/1.8")}; timeout=int(cfg.get("request_timeout_seconds") or 8)
     for host in ("query1.finance.yahoo.com","query2.finance.yahoo.com"):
@@ -99,7 +97,12 @@ def _provider_frame(ticker):
 
 def _live(ticker):
     cfg=_cfg(); status,is_live,market_date,wib=_session()
-    out={"ticker":ticker,"market_date":market_date,"market_status":status,"live_required":is_live,"fresh":False,"bars":0,"price":None,"return_pct":None,"momentum_pct":None,"age_min":None,"direction":"WAIT","reason":"","source":"UI_DIRECT"}
+    out={
+        "ticker":ticker,"market_date":market_date,"market_status":status,
+        "live_required":is_live,"fresh":False,"bars":0,"price":None,
+        "return_pct":None,"momentum_pct":None,"age_min":None,
+        "direction":"WAIT","reason":"","source": "UI_DIRECT"
+    }
     try:
         d=_provider_frame(ticker)
         if d.empty or "ts" not in d.columns or "close" not in d.columns:out["reason"]="NO INTRADAY BARS"; return out
@@ -125,21 +128,23 @@ def _hist(row):
     return "SIDEWAYS" if side>=max(up,down) else ("UP" if up>=down else "DOWN")
 
 def _order(df):
-    pref=["Waktu","Sesi","Horizon","Live Ticker","Market Date","Market Status","Live Source","Live Price","Live Return %","Live Momentum %","Live Direction","Live Confirmation","Match %","Live Age m","Live Bars","Live Reason","Samples","UP %","Sideways %","DOWN %","Mean Return %","Confidence %","Status","Catatan"]
+    pref=["Waktu","Sesi","Horizon","Live Ticker","Market Date","Market Status","Live Source","Live Price","Live Return %","Live Momentum %","Live Direction","Live Confirmation","Live Match","Match %","Live Age m","Live Bars","Live Reason","Samples","UP %","Sideways %","DOWN %","Mean Return %","Confidence %","Status","Catatan"]
     cols=[c for c in pref if c in df.columns]+[c for c in df.columns if c not in pref]; return df.loc[:,cols]
 
 def _augment(df,st):
     if not _is_map(df):return df
-    out=df.copy(); defaults={"Live Ticker":"","Market Date":"","Market Status":"","Live Source":"","Live Price":None,"Live Return %":None,"Live Momentum %":None,"Live Direction":"WAIT","Live Confirmation":"WAIT","Match %":None,"Live Age m":None,"Live Bars":0,"Live Reason":""}
+    out=df.copy(); defaults={"Live Ticker":"","Market Date":"","Market Status":"","Live Source":"","Live Price":None,"Live Return %":None,"Live Momentum %":None,"Live Direction":"WAIT","Live Confirmation":"WAIT","Live Match":"WAIT","Match %":None,"Live Age m":None,"Live Bars":0,"Live Reason":""}
     for c,v in defaults.items():
         if c not in out.columns:out[c]=v
     matched=_row(out); ticker=_active_ticker(st)
-    if not ticker:out.at[matched,"Live Reason"]="TICKER BELUM TERIKAT"; return _order(out)
+    if not ticker:
+        out.at[matched,"Live Reason"]="TICKER BELUM TERIKAT"; out.at[matched,"Live Match"]="TICKER BELUM TERIKAT"; return _order(out)
     live=_live(ticker)
     mapping={"Live Ticker":"ticker","Market Date":"market_date","Market Status":"market_status","Live Source":"source","Live Price":"price","Live Return %":"return_pct","Live Momentum %":"momentum_pct","Live Direction":"direction","Live Age m":"age_min","Live Bars":"bars","Live Reason":"reason"}
     for col,key in mapping.items():out.at[matched,col]=live[key]
     out.at[matched, "Live Source"] = "DIRECT PROVIDER"
-    if not live["fresh"]:out.at[matched,"Live Confirmation"]="WAIT • DATA NOT FRESH"; return _order(out)
+    if not live["fresh"]:
+        out.at[matched,"Live Confirmation"]="WAIT • DATA NOT FRESH"; out.at[matched,"Live Match"]="DATA LIVE BELUM SEGAR"; return _order(out)
     h=_hist(out.loc[matched]); ld=live["direction"]
     if ld==h:conf,match="CONFIRMED",100.0
     elif ld=="SIDEWAYS" or h=="SIDEWAYS":conf,match="MIXED • WAIT",50.0
@@ -147,7 +152,7 @@ def _augment(df,st):
     status=live["market_status"]
     if status=="BREAK":conf=f"{conf} • BREAK"
     elif status not in {"SESSION_1","SESSION_2"}:conf=f"WAIT • {status}"
-    out.at[matched,"Live Confirmation"]=conf; out.at[matched,"Match %"]=match
+    out.at[matched,"Live Confirmation"]=conf; out.at[matched,"Live Match"]=conf; out.at[matched,"Match %"]=match
     return _order(out)
 
 def install():
