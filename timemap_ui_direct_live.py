@@ -102,7 +102,7 @@ def _live(ticker):
         "ticker":ticker,"market_date":market_date,"market_status":status,
         "live_required":is_live,"fresh":False,"bars":0,"price":None,
         "return_pct":None,"momentum_pct":None,"age_min":None,
-        "direction":"WAIT","reason":"","source":"UI_DIRECT"
+        "direction":"WAIT","reason":"","source": "UI_DIRECT"
     }
     try:
         d=_provider_frame(ticker)
