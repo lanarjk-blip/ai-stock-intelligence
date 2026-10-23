@@ -21,6 +21,10 @@ try:
     # longer depends on runtime_health_ui_patch/sitecustomize side effects.
     import timemap_ui_direct_live
     timemap_ui_direct_live.install()
+    # R88: replace the one-row TODAY summary with realized same-day checkpoints.
+    # Historical probabilities remain baseline-only and previous-day bars are rejected.
+    import timemap_checkpoint_today
+    timemap_checkpoint_today.install()
 except Exception:
     pass
 
