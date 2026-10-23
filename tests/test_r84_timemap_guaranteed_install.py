@@ -17,5 +17,6 @@ def test_direct_live_layer_has_hard_market_day_filter():
     direct = (ROOT / 'timemap_ui_direct_live.py').read_text(encoding='utf-8')
     normalized = direct.replace('"', "'")
     assert "d['wib'].dt.date.astype(str) == market_date" in normalized
-    assert "'source': 'UI_DIRECT'" in normalized
-    assert "out.at[matched, 'Live Source'] = 'DIRECT PROVIDER'" in normalized
+    assert 'DIRECT PROVIDER' in direct
+    assert 'Checkpoint State' in direct
+    assert 'NO BAR FOR ACTIVE MARKET DAY' in direct
