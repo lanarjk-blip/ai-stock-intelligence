@@ -50,7 +50,6 @@ def _format_wib(dt):
 
 
 def _latest_persisted_update():
-    """Best-effort latest timestamp from the local UI replica/state database."""
     db_path = os.path.join(_BASE, "db", "market.db")
     candidates = []
     if not os.path.exists(db_path):
@@ -59,12 +58,8 @@ def _latest_persisted_update():
     try:
         con = sqlite3.connect(db_path, timeout=3)
         state_keys = (
-            "engine_last_run",
-            "snapshot_ready_at",
-            "last_intraday_collection",
-            "last_collection",
-            "last_intraday_attempt",
-            "active_model_trained_at",
+            "engine_last_run", "snapshot_ready_at", "last_intraday_collection",
+            "last_collection", "last_intraday_attempt", "active_model_trained_at",
             "walk_forward_at",
         )
         placeholders = ",".join("?" for _ in state_keys)
@@ -76,18 +71,13 @@ def _latest_persisted_update():
             parsed = _parse_timestamp(value)
             if parsed is not None:
                 candidates.append(parsed)
-
         tables = {
             row[0]
-            for row in con.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
+            for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
         if "dynamic_opportunities" in tables:
             try:
-                value = con.execute(
-                    "SELECT MAX(generated_at) FROM dynamic_opportunities"
-                ).fetchone()[0]
+                value = con.execute("SELECT MAX(generated_at) FROM dynamic_opportunities").fetchone()[0]
                 parsed = _parse_timestamp(value)
                 if parsed is not None:
                     candidates.append(parsed)
@@ -95,9 +85,7 @@ def _latest_persisted_update():
                 pass
         if "outlook" in tables:
             try:
-                value = con.execute(
-                    "SELECT MAX(generated_at) FROM outlook"
-                ).fetchone()[0]
+                value = con.execute("SELECT MAX(generated_at) FROM outlook").fetchone()[0]
                 parsed = _parse_timestamp(value)
                 if parsed is not None:
                     candidates.append(parsed)
@@ -115,14 +103,12 @@ def _latest_persisted_update():
 
 
 def _market_status():
-    """Use the production market-session engine when available."""
     now_wib = datetime.now(_WIB)
     try:
         cfg_path = os.path.join(_BASE, "config.json")
         with open(cfg_path, "r", encoding="utf-8") as fh:
             cfg = json.load(fh)
         import market_session
-
         status = dict(market_session.session_status(cfg) or {})
         raw = str(status.get("status") or "UNKNOWN").upper()
         if bool(status.get("live")):
@@ -133,8 +119,6 @@ def _market_status():
             return "🟡 Market Break", raw
         return "⚫ Market Closed", raw
     except Exception:
-        # Safe fallback only for the display label. Trading logic never depends
-        # on this fallback; actionable decisions still use market_session.py.
         weekday = now_wib.weekday()
         return ("⚫ Market Closed", "UNKNOWN") if weekday >= 5 else ("⚪ Market Status", "UNKNOWN")
 
@@ -143,7 +127,6 @@ def _render_refresh_status(st):
     now_wib = datetime.now(_WIB)
     market_label, market_raw = _market_status()
     latest = _latest_persisted_update()
-
     left, right = st.columns([5, 1])
     with left:
         st.markdown(f"**{market_label}**")
@@ -172,6 +155,15 @@ def install():
     import dynamic_opportunity_ui
     import premarket_ui_patch
 
+    # R78: install decision-first Time Map semantics for every ticker before
+    # runtime-health wrappers capture Streamlit functions. This was previously
+    # not guaranteed on the external UI process.
+    try:
+        import ui_theme_patch
+        ui_theme_patch.install()
+    except Exception as exc:
+        print(f"[UI_THEME] R78 install degraded: {exc!r}", flush=True)
+
     if getattr(dynamic_opportunity_ui._quality_gate_state, "_asi_runtime_health_patch", False):
         return
 
@@ -187,15 +179,13 @@ def install():
         if health.get("required") and not health.get("ready"):
             reason = str(health.get("reason") or health.get("status") or "remote runtime unavailable")
             previous = str(base.get("reasons") or "").strip()
-            base.update(
-                {
-                    "known": True,
-                    "ready": False,
-                    "status": str(health.get("status") or "RUNTIME_STALE"),
-                    "reasons": " | ".join(x for x in (previous, reason) if x),
-                    "runtime_health": health,
-                }
-            )
+            base.update({
+                "known": True,
+                "ready": False,
+                "status": str(health.get("status") or "RUNTIME_STALE"),
+                "reasons": " | ".join(x for x in (previous, reason) if x),
+                "runtime_health": health,
+            })
         else:
             base["runtime_health"] = health
         return base
@@ -232,11 +222,7 @@ def install():
     def success(body, *args, **kwargs):
         text = str(body)
         health = runtime_health.remote_runtime_health()
-        if (
-            health.get("required")
-            and not health.get("ready")
-            and "Pre-Market" in text
-        ):
+        if health.get("required") and not health.get("ready") and "Pre-Market" in text:
             return st.warning(
                 "🛡️ **RUNTIME TIDAK SEGAR • status Pre-Market ini tidak actionable.** "
                 + str(health.get("reason") or "worker Render tidak memiliki heartbeat segar")

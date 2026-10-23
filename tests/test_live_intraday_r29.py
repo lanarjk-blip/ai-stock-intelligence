@@ -111,6 +111,7 @@ def test_live_time_signal_fails_closed_when_intraday_is_stale(monkeypatch):
 
 def test_same_day_fresh_intraday_price_overlays_daily_close_in_dynamic_output(tmp_path, monkeypatch):
     import dynamic_engine as d
+    import live_precision_patch as lp
 
     db = tmp_path / 'market.db'
     monkeypatch.setattr(d.app, 'DB', str(db))
@@ -127,6 +128,25 @@ def test_same_day_fresh_intraday_price_overlays_daily_close_in_dynamic_output(tm
         'edge': 0.08, 'confidence': 0.8, 'horizon': 'EOD', 'entry_status': 'ACTIVE',
         'live_required': True, 'intraday_fresh': True,
         'intraday_at': '2026-10-15T02:30:00+00:00', 'price_source': 'LIVE_INTRADAY',
+        'live_match': 'MATCH STRONG',
+    })
+    # R47 is a second, independent live-safety layer. Give it the same fresh
+    # evidence as dynamic_engine so this test verifies the overlay path rather
+    # than accidentally testing fail-closed behavior from an empty synthetic DB.
+    monkeypatch.setattr(lp, 'live_metrics', lambda ticker, now=None: {
+        'ticker': str(ticker), 'live_required': True, 'fresh': True,
+        'bars': 4, 'market_date': '2026-10-15',
+        'last_ts': '2026-10-15T02:30:00+00:00', 'age_minutes': 0.0,
+        'open_price': 120.0, 'current_price': 123.0,
+        'return_from_open_pct': 2.5, 'momentum_pct': 0.4,
+        'volume_ratio': 1.4, 'range_position': 0.8,
+        'relative_strength_pct': 1.0,
+    })
+    monkeypatch.setattr(lp, 'relative_strength_pct', lambda row, metrics=None: 1.0)
+    monkeypatch.setattr(lp, 'market_breadth', lambda now=None, force=False: {
+        'live': True, 'market_date': '2026-10-15', 'symbols': 50,
+        'green': 30, 'red': 15, 'flat': 5,
+        'green_ratio': 0.6, 'red_ratio': 0.3, 'defensive': False,
     })
     monkeypatch.setattr(d, 'update_opening_confirmation', lambda now=None: pd.DataFrame())
 
