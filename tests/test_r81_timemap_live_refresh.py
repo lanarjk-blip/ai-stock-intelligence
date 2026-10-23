@@ -8,10 +8,12 @@ def test_timemap_live_refresh_is_not_blocked_by_existing_history():
     assert "R81_TIME_MAP_LIVE_REFRESH" in text
     assert "if bool(_tm_session.get('live'))" in text
     assert "fetch_chart_recover(str(ticker)" in text
-    refresh_block = text.split('R81_TIME_MAP_LIVE_REFRESH', 1)[1].split('if len(df)<60', 1)[0]
-    assert "fetch_chart_recover" in refresh_block
-    assert "save_intraday" in refresh_block
-    assert "df=_intraday_load" in refresh_block
+    refresh_new = text.split('refresh_new = (', 1)[1].split('    )', 1)[0]
+    assert "R81_TIME_MAP_LIVE_REFRESH" in refresh_new
+    assert "fetch_chart_recover" in refresh_new
+    assert "save_intraday" in refresh_new
+    assert "df=_intraday_load" in refresh_new
+    assert refresh_new.index("fetch_chart_recover") < refresh_new.index("if len(df)<60") if "if len(df)<60" in refresh_new else True
 
 
 def test_timemap_live_truth_is_mobile_decision_first():
