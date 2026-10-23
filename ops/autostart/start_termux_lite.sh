@@ -6,11 +6,29 @@ cd "$ROOT"
 
 export ASI_DEVICE_TYPE="hp"
 export ASI_TERMUX_LITE="1"
+export ASI_WORKER_DEVICE="hp"
 export AI_ENGINE_WORKER="1"
 
-# Kill only stale direct worker instances. Hybrid launcher/schedulers can be
-# restarted separately if the user uses them.
-pkill -f "python .*worker_base.py" 2>/dev/null || true
+# Make project root visible during Python startup so sitecustomize.py is loaded.
+# That bootstrap installs runtime supervisor, Neon lease, persistent bridge,
+# heartbeat, UI replica sync, and pre-market schedulers before worker_base runs.
+if [ -n "${PYTHONPATH:-}" ]; then
+  export PYTHONPATH="$ROOT:$PYTHONPATH"
+else
+  export PYTHONPATH="$ROOT"
+fi
 
-echo "[TERMUX_LITE] Starting worker_base.py (XGBoost disabled locally; fail-open ensemble)."
-exec python worker_base.py
+# Give the runtime heartbeat a source-aware deploy suffix even on Termux.
+if command -v git >/dev/null 2>&1; then
+  export GITHUB_SHA="$(git rev-parse --short=12 HEAD 2>/dev/null || true)"
+fi
+
+# Retire stale direct workers/launchers before starting one authoritative HP launcher.
+pkill -f "python .*worker_base.py" 2>/dev/null || true
+pkill -f "python .*hybrid_worker.py.*--device hp" 2>/dev/null || true
+
+# If started before the IDX worker window, the daemon sleeps and wakes automatically.
+# During the active window it starts worker_base through the hybrid path, which is the
+# only supported path for Neon lease + persistent bridge synchronization.
+echo "[TERMUX_LITE] Starting authoritative HP hybrid launcher (native-heavy ML disabled locally)."
+exec python hybrid_worker.py --device hp --daemon
