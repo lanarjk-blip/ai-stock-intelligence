@@ -72,7 +72,7 @@ def _prepare_day(base, ticker):
             if col not in data.columns:
                 data[col] = None
             data[col] = pd.to_numeric(data[col], errors="coerce")
-        data = data.dropna(subset=["ts", "close"]).sort_values("ts")
+        data = data.dropna(subset=["ts", "close"]).drop_duplicates("ts", keep="last").sort_values("ts")
         data["wib"] = data["ts"].dt.tz_convert("Asia/Jakarta")
         # Absolute lifecycle boundary: yesterday is never today's evidence.
         data = data[data["wib"].dt.date.astype(str) == str(market_date)].copy()
@@ -82,6 +82,15 @@ def _prepare_day(base, ticker):
         data["minute"] = data["wib"].dt.hour * 60 + data["wib"].dt.minute
         now = pd.Timestamp(wib)
         now = now.tz_localize("Asia/Jakarta") if now.tzinfo is None else now.tz_convert("Asia/Jakarta")
+        data = data[data["ts"] <= now.tz_convert("UTC")].copy()
+        # Reject bars outside regular sessions, including Friday lunch.
+        import market_session
+        cfg = base._cfg()
+        valid = data["wib"].map(lambda stamp: market_session.session_status(cfg, now=stamp)["live"])
+        data = data[valid].copy()
+        if data.empty:
+            result["reason"] = "NO VALID BAR AT OR BEFORE NOW"
+            return result
         age = max(0.0, (now.tz_convert("UTC") - data.iloc[-1]["ts"]).total_seconds() / 60.0)
         try:
             cfg = base._cfg()
@@ -200,6 +209,10 @@ def _blank_today_row(history_row, ticker, day_state):
             "Data Type": "TODAY CHECKPOINT",
             "Live Ticker": ticker,
             "Market Date": day_state.get("market_date"),
+            "Hari": ("Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu")[pd.Timestamp(day_state["market_date"]).dayofweek],
+            "Diperiksa WIB": day_state.get("wib"),
+            "Data Terakhir WIB": day_state["frame"].iloc[-1]["wib"].isoformat() if not day_state["frame"].empty else None,
+            "Kesegaran": ("JEDA SESI • ARSIP HARI INI" if day_state.get("reason") == "SESSION PAUSE" else "FRESH" if day_state.get("fresh") else "STALE / NO DATA"),
             "Market Status": day_state.get("market_status"),
             "Live Source": day_state.get("source"),
             "Checkpoint State": "WAIT",
@@ -249,7 +262,8 @@ def _checkpoint_rows(frame, st, base):
 
     state = _prepare_day(base, ticker)
     day = state["frame"]
-    now = datetime.now(ZoneInfo("Asia/Jakarta"))
+    now = pd.Timestamp(state["wib"])
+    now = now.tz_localize("Asia/Jakarta") if now.tzinfo is None else now.tz_convert("Asia/Jakarta")
     current_minute = now.hour * 60 + now.minute
     latest_bar_minute = int(day.iloc[-1]["minute"]) if not day.empty else None
     market_date = str(state.get("market_date") or "")
@@ -270,7 +284,12 @@ def _checkpoint_rows(frame, st, base):
             rows.append(row)
             continue
 
-        if session in {"BREAK", "PRE-CLOSING", "CLOSING"}:
+        import market_session
+        slot_status = market_session.session_status({}, now=pd.Timestamp(market_date).tz_localize("Asia/Jakarta") + pd.Timedelta(minutes=minute))
+        if session in {"SESI I", "SESI II"} and not slot_status["live"]:
+            session = slot_status["status"]
+            row["Sesi"] = session
+        if session in {"BREAK", "PRE-CLOSING", "CLOSING", "WEEKEND", "HOLIDAY", "CLOSED"}:
             row["Checkpoint State"] = session
             row["Live Confirmation"] = "WAIT • MARKET SCHEDULE"
             row["Live Match"] = session
@@ -385,7 +404,7 @@ def _augment(frame, st):
 
     out = pd.concat([today[history.columns], history], ignore_index=True)
     preferred = [
-        "Waktu", "Sesi", "Horizon", "Data Type", "Live Ticker", "Market Date", "Market Status",
+        "Waktu", "Sesi", "Hari", "Market Date", "Live Ticker", "Kesegaran", "Data Terakhir WIB", "Diperiksa WIB", "Data Type", "Horizon", "Market Status",
         "Checkpoint State", "Checkpoint Bar", "Live Price", "Live Return %", "Live Momentum %",
         "Volume Ratio", "Range Pos %", "Vs VWAP %", "Live Score", "Live Confidence %", "Live Direction",
         "Live Confirmation", "Live Match", "Match %", "Live Age m", "Live Bars", "Live Reason", "Live Source",

@@ -910,15 +910,26 @@ def intraday_time_map(ticker):
     represented explicitly.
     """
     df=_intraday_load(str(ticker))
-    if len(df)<60:
+    # R81_TIME_MAP_LIVE_REFRESH is explicit here; no startup source rewriting required.
+    session_now=market_session.session_status(CFGD)
+    now=pd.Timestamp(session_now['wib'])
+    latest=pd.to_datetime(df['ts'],utc=True,errors='coerce').max() if not df.empty else pd.NaT
+    stale=pd.isna(latest) or (now-latest).total_seconds()>1200
+    if len(df)<60 or stale:
         try:
-            fresh=fetch_chart(str(ticker),CFGD.get('intraday_period_days',60),CFGD.get('intraday_interval','30m'))
-            if not fresh.empty:
+            raw=fetch_chart_recover(str(ticker),CFGD.get('intraday_period_days',60),CFGD.get('intraday_interval','30m'))
+            fresh=next((v for v in raw if isinstance(v,pd.DataFrame)),pd.DataFrame()) if isinstance(raw,tuple) else raw
+            if isinstance(fresh,pd.DataFrame) and not fresh.empty:
                 save_intraday(fresh,str(ticker)); df=_intraday_load(str(ticker))
         except Exception:
             pass
-    if len(df)<30:
-        return pd.DataFrame()
+    if df.empty:
+        df=pd.DataFrame(columns=['ts','open','high','low','close','volume'])
+    df=df.copy()
+    df['ts']=pd.to_datetime(df['ts'],utc=True,errors='coerce')
+    df=df.dropna(subset=['ts','close']).drop_duplicates('ts',keep='last')
+    # Baseline uses completed earlier market days, never partial/future outcomes.
+    df=df[df['ts'].dt.tz_convert('Asia/Jakarta').dt.date < now.date()]
     x=df.copy().sort_values('ts').reset_index(drop=True)
     local=x['ts'].dt.tz_convert('Asia/Jakarta')
     x['tod']=local.dt.hour*60+local.dt.minute
@@ -944,8 +955,11 @@ def intraday_time_map(ticker):
     ]
     rows=[]
     for mins,label,session in slots:
+        slot_state=market_session.session_status(CFGD,now=now.replace(hour=mins//60,minute=mins%60,second=0))
+        if session in ('Sesi I','Sesi II') and not slot_state['live']:
+            session=slot_state['status']
         # Break / closing rows are schedule markers, not predictive bars.
-        if session in ('BREAK','PRE-CLOSING','CLOSING'):
+        if session not in ('Sesi I','Sesi II'):
             rows.append({'time':label,'session':session,'horizon':'MARKET','samples':None,'up_pct':None,'sideways_pct':None,'down_pct':None,'mean_return_pct':None,'confidence_pct':None,'status':'CHECKPOINT','note':'Pantau perubahan kondisi / harga penutupan.'})
             continue
         same=x[x.tod==mins].copy()
@@ -971,7 +985,8 @@ def intraday_time_map(ticker):
         elif edge<=-0.10 or (mean<0 and down>up): status='WAIT'
         else: status='NEUTRAL'
         rows.append({'time':label,'session':session,'horizon':horizon,'samples':len(z),'up_pct':up*100,'sideways_pct':side*100,'down_pct':down*100,'mean_return_pct':mean*100,'confidence_pct':conf*100,'status':status,'note':f'Edge {edge*100:+.1f}%; estimasi historis slot.'})
-    return pd.DataFrame(rows)
+    from time_map_live_guard import reconcile_time_map_live
+    return reconcile_time_map_live(str(ticker),pd.DataFrame(rows),_intraday_load(str(ticker)),session_now)
 
 def read_universe_registry(limit=200):
     try:
@@ -1789,6 +1804,10 @@ def stock_search_panel(universe, res, forced_ticker=None):
                 st.warning('Belum ada Entry Window yang cukup kuat. Sistem mempertahankan WAIT/NEUTRAL dan tidak memaksa sinyal.')
 
         st.markdown('### 🕘 AI Intraday Time Map • WIB')
+        _tm_context=market_session.session_status(CFGD)
+        _tm_now=pd.Timestamp(_tm_context['wib'])
+        _tm_day=('Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu')[_tm_now.dayofweek]
+        st.caption(f"{selected_ticker} • {_tm_day}, {_tm_now:%d-%m-%Y} • Diperiksa {_tm_now:%H:%M:%S} WIB • {_tm_context['status']} • Time Map R89")
         tm=intraday_time_map(selected_ticker)
         if tm.empty:
             st.info('Belum ada data intraday yang cukup untuk membentuk Time Map saham ini.')
@@ -1798,7 +1817,7 @@ def stock_search_panel(universe, res, forced_ticker=None):
                 if c in tmshow: tmshow[c]=pd.to_numeric(tmshow[c],errors='coerce').round(1)
             tmshow=tmshow.rename(columns={'time':'Waktu','session':'Sesi','horizon':'Horizon','samples':'Samples','up_pct':'UP %','sideways_pct':'Sideways %','down_pct':'DOWN %','mean_return_pct':'Mean Return %','confidence_pct':'Confidence %','status':'Status','note':'Catatan'})
             st.dataframe(tmshow,width='stretch',hide_index=True)
-            st.caption('Time Map berlaku per ticker. Setiap checkpoint adalah evaluasi kondisi historis/model pada jam yang sama, bukan janji arah harga. Status ACTIVE/DEVELOPING tetap harus dibaca bersama Risk Engine dan invalidation.')
+            st.caption('TODAY CHECKPOINT = realisasi harga hari ini, bukan prediksi. HISTORICAL BASELINE = statistik hari sebelumnya; persentasenya bukan peluang live hari ini. Periksa tanggal, waktu bar, dan status kesegaran. Data kosong/basi tetap WAIT. Jumat Sesi II mulai 14.00 WIB.')
 
         st.markdown('### 💡 Why this stock?')
         reasons=[]
