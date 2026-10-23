@@ -5,9 +5,9 @@ plugins {
 }
 
 def appConfig = new JsonSlurper().parse(file('../../config.json'))
-// R85: Android build version is explicit so APK artifacts can prove which mobile shell is installed.
-def appVersion = '1.8.58'
-def appVersionCode = 1858
+def appVersion = appConfig.mobile_ui_version.toString()
+def versionParts = appVersion.tokenize('.').collect { it as int }
+def appVersionCode = (versionParts[0] * 1000000) + (versionParts[1] * 1000) + versionParts[2]
 
 android {
     namespace 'id.asi.stockintelligence'
