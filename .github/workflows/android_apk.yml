@@ -26,13 +26,10 @@ jobs:
         shell: bash
         run: |
           VERSION=$(python - <<'PY'
-          import re
+          import json
           from pathlib import Path
-          text=Path('android-app/app/build.gradle').read_text()
-          m=re.search(r"def appVersion = '([^']+)'", text)
-          if not m:
-              raise SystemExit('appVersion not found')
-          print(m.group(1))
+          cfg=json.loads(Path('config.json').read_text(encoding='utf-8'))
+          print(cfg['mobile_ui_version'])
           PY
           )
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
