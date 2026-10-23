@@ -4,18 +4,14 @@ This daemon complements the hard H-10 scheduler. It keeps the Pre-Market
 surface useful before the 08:50 WIB final lock without pretending early
 candidates are final recommendations.
 
-Rules:
-- Before 08:50 on a trading day, publish up to five PRELIMINARY candidates.
-- During 08:50-08:59, opening the UI may safely finalize H-10 if the worker
-  missed the exact deadline; after 09:00 it refuses late hindsight finalization.
-- After market close, publish PRELIMINARY candidates for the next trading day.
-- On weekends/holidays, keep next-session PRELIMINARY candidates visible.
-- During the live market, preserve today's H-10 locked snapshot.
-- Never overwrite an H10_FINAL run.
-- Candidate selection reuses premarket_scheduler.select_candidates(), so failed
-  strict BUY rows remain WAIT/MONITOR instead of being fabricated into BUY.
-- The UI may call ensure_on_open() as a self-healing path. That path only uses
-  an already-persisted opportunity snapshot and never launches a heavy scan.
+R77 policy:
+- Pre-Market recommendation slots are quality-only. WAIT/WATCH/MONITOR rows may
+  remain visible elsewhere in the app, but they must not be promoted into the
+  ranked Pre-Market Top list merely to fill five cards.
+- If no strict actionable candidate passes the gates, publish an explicit
+  zero-pick NO_TRADE run and clear any older provisional picks for that date.
+- The same policy is installed onto premarket_scheduler.select_candidates(), so
+  the 08:50 H-10 finalizer follows the identical no-forced-picks rule.
 """
 from __future__ import annotations
 
@@ -24,11 +20,41 @@ import time
 import traceback
 from datetime import datetime, timezone
 
+import pandas as pd
 import premarket_scheduler as h10
 import market_session
 
 CFG = h10.CFG
-VERSION = "PRELIM-R3"
+VERSION = "PRELIM-R4-NO-FORCED-TOP5"
+
+
+def _install_no_forced_top5_policy():
+    current = h10.select_candidates
+    if getattr(current, "_r77_no_forced_top5", False):
+        return
+
+    original = current
+
+    def strict_select_candidates(res):
+        picks, mode, reason = original(res)
+        mode_text = str(mode or "").upper().strip()
+        if mode_text in {"MONITOR_FALLBACK", "QUALITY_MONITOR"}:
+            detail = str(reason or "No strict actionable candidate passed.")
+            return (
+                pd.DataFrame(),
+                "NO_TRADE",
+                "R77 quality-only policy: no strict actionable candidate passed; "
+                "WAIT/WATCH/MONITOR rows are not allowed to fill the ranked Pre-Market list. "
+                + detail,
+            )
+        return picks, mode, reason
+
+    strict_select_candidates._r77_no_forced_top5 = True
+    strict_select_candidates._r77_original = original
+    h10.select_candidates = strict_select_candidates
+
+
+_install_no_forced_top5_policy()
 
 
 def _state_get(key, default=""):
@@ -79,34 +105,38 @@ def _publish_window(local) -> tuple[bool, int]:
 
 
 def _payload_for(target_date: str, local, allow_full_analysis=True):
-    # Prefer the H-10 draft when one already exists and targets the same session.
     payload = h10._load_draft(target_date)
-    if payload and payload.get("picks"):
+    if payload:
         return payload
 
     snapshot = h10._read_latest_snapshot()
     if snapshot is None or snapshot.empty:
         if not allow_full_analysis:
             return None
-        payload = h10.build_draft(local, lightweight=True)
-        return payload if payload and payload.get("picks") else None
+        return h10.build_draft(local, lightweight=True)
 
     picks, mode, reason = h10.select_candidates(snapshot)
-    payload = h10._save_draft(snapshot, target_date, mode, reason)
-    return payload if payload and payload.get("picks") else None
+    return h10._save_draft(snapshot, target_date, mode, reason)
 
 
 def _write_preliminary(payload, target_date):
     payload = h10._sanitize_payload_for_quality(payload)
-    picks = list(payload.get("picks") or [])[: h10.MAX_PICKS]
-    if not picks:
-        return {"status": "NO_CANDIDATE", "market_date": target_date}
+    mode = str(payload.get("mode") or "NO_TRADE").upper().strip()
+    raw_picks = list(payload.get("picks") or [])[: h10.MAX_PICKS]
+    if mode in {"MONITOR_FALLBACK", "QUALITY_MONITOR"}:
+        raw_picks = []
+        mode = "NO_TRADE"
+        payload["reason"] = (
+            "R77 quality-only policy: monitor candidates are not ranked recommendations. "
+            + str(payload.get("reason") or "")
+        )[:1200]
+    picks = raw_picks
 
     generated_at = datetime.now(timezone.utc).isoformat()
-    mode = str(payload.get("mode") or "MONITOR_FALLBACK")
     note = (
         f"PRELIMINARY {VERSION} mode={mode} target={target_date} "
-        f"source_draft={payload.get('generated_at','')} final_lock={h10.FINAL_LOCK} WIB"
+        f"source_draft={payload.get('generated_at','')} final_lock={h10.FINAL_LOCK} WIB "
+        f"reason={payload.get('reason','')}"
     )[:1800]
 
     h10._ensure_tables()
@@ -154,11 +184,12 @@ def _write_preliminary(payload, target_date):
                 ),
             )
 
+        status = "PRELIMINARY" if picks else "NO_TRADE"
         con.execute(
             """INSERT INTO premarket_runs
             (market_date,generated_at,status,pick_count,note)
             VALUES(?,?,?,?,?)""",
-            (target_date, generated_at, "PRELIMINARY", len(picks), note),
+            (target_date, generated_at, status, len(picks), note),
         )
         con.commit()
     except Exception:
@@ -167,15 +198,15 @@ def _write_preliminary(payload, target_date):
     finally:
         con.close()
 
-    _state_set("premarket_status", "PRELIMINARY")
+    _state_set("premarket_status", status)
     _state_set("premarket_market_date", target_date)
     _state_set("premarket_pick_count", len(picks))
     _state_set("premarket_preliminary_at", generated_at)
     _state_set("premarket_preliminary_market_date", target_date)
     _state_set("premarket_preliminary_mode", mode)
-    h10._log("PRELIMINARY", f"market_date={target_date} mode={mode} picks={len(picks)}")
+    h10._log("PRELIMINARY", f"market_date={target_date} status={status} mode={mode} picks={len(picks)}")
     return {
-        "status": "PRELIMINARY",
+        "status": status,
         "market_date": target_date,
         "mode": mode,
         "pick_count": len(picks),
@@ -186,7 +217,6 @@ def publish_preliminary(now=None):
     local = h10._now_wib(now)
     target_date = h10._target_market_date(local)
 
-    # Final H-10 output is immutable. Preliminary must never touch it.
     if h10._already_finalized(target_date):
         return {"status": "FINAL_EXISTS", "market_date": target_date}
 
@@ -205,14 +235,11 @@ def ensure_on_open(now=None):
     if h10._already_finalized(target_date):
         return {"status": "FINAL_EXISTS", "market_date": target_date}
 
-    # Safe catch-up: still before market open, so finalization has no hindsight.
     if window == "FINALIZE":
         result = h10.finalize_h10(local)
         result["self_healed"] = True
         return result
 
-    # Once the market opens, a missing H-10 must stay visibly missing. Never
-    # manufacture a "final" recommendation after seeing the open.
     if window == "AFTER_OPEN":
         session = market_session.session_status(CFG, now=local)
         if str(session.get("status") or "").upper() != "CLOSED":
