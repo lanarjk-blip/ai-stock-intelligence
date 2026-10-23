@@ -37,13 +37,13 @@ def _direction_style(col, value):
         return _font("#b45309", "800" if x >= 50 else "650")
     if col == "DOWN %":
         return _font("#b91c1c", "800" if x >= 50 else "650")
-    if col in {"Mean Return %", "Live %"}:
+    if col in {"Mean Return %", "Live %", "Live Return %", "Live Momentum %", "Vs VWAP %"}:
         if x > 0:
             return _font("#15803d", "800" if x > 0.5 else "650")
         if x < 0:
             return _font("#b91c1c", "800" if x < -0.5 else "650")
         return _font("#6b7280", "600")
-    if col == "Confidence %":
+    if col in {"Confidence %", "Live Confidence %"}:
         return _font("#1d4ed8", "800" if x >= 70 else "650")
     if col == "Samples":
         return _font("#b45309", "800") if x < 10 else ""
@@ -58,14 +58,18 @@ def _direction_style(col, value):
 
 def _status_style(value):
     text = str(value or "").upper().strip()
+    if "CONFIRMED" in text and "WEAK" not in text:
+        return _font("#15803d", "850")
+    if "CONFIRMED" in text:
+        return _font("#16a34a", "750")
+    if "DIVERGENCE" in text:
+        return _font("#b91c1c", "850")
+    if "MIXED" in text or "WAIT" in text or "BELUM CUKUP" in text or "BELUM SEGAR" in text:
+        return _font("#b45309", "750")
     if text == "MATCH STRONG":
         return _font("#15803d", "800")
     if text == "MATCH":
         return _font("#16a34a", "750")
-    if text == "DIVERGENCE":
-        return _font("#b91c1c", "850")
-    if text in {"MIXED", "DATA INTRADAY BELUM CUKUP"}:
-        return _font("#b45309", "750")
     return _font("#6b7280", "600")
 
 
@@ -80,6 +84,7 @@ def _current_ticker_hint():
     candidates = []
     try:
         candidates.extend([
+            st.session_state.get("_timemap_active_ticker"),
             st.session_state.get("stock_search_selection"),
             st.session_state.get("stock_search_query"),
             st.session_state.get("selected_ticker"),
@@ -112,12 +117,24 @@ def _current_slot_label():
     return f"{now.hour:02d}:{minute:02d}"
 
 
+def _is_r86_time_map(df):
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return False
+    cols = set(map(str, df.columns))
+    return {"Live Confirmation", "Market Date", "Live Direction", "UP %", "DOWN %", "Samples"}.issubset(cols)
+
+
 def _decision_first(df):
     if not isinstance(df, pd.DataFrame) or df.empty:
         return df
     preferred = [
-        "Waktu", "Sesi", "Live %", "Live Match", "Match %",
-        "live_direction", "live_confirmation", "live_price", "live_age_min",
+        "Waktu", "Sesi", "Horizon",
+        "Live Ticker", "Market Date", "Market Status", "Live Source",
+        "Live Price", "Live Return %", "Live Momentum %", "Volume Ratio",
+        "Range Pos %", "Vs VWAP %", "Live Score", "Live Confidence %",
+        "Live Direction", "Live Confirmation", "Live Match", "Match %",
+        "Live Age m", "Live Bars", "Live Reason",
+        "Live %", "live_direction", "live_confirmation", "live_price", "live_age_min",
         "Status", "Samples", "UP %", "Sideways %", "DOWN %",
         "Mean Return %", "Confidence %", "Catatan",
     ]
@@ -127,9 +144,11 @@ def _decision_first(df):
 
 
 def _augment_time_map(df):
-    """Attach current-slot live confirmation to Time Map tables only."""
+    """Legacy fallback only. R86 hard-live tables are authoritative and never re-augmented here."""
     if not isinstance(df, pd.DataFrame) or df.empty:
         return df
+    if _is_r86_time_map(df):
+        return _decision_first(df.copy())
     cols = set(map(str, df.columns))
     if not ({"UP %", "DOWN %"} <= cols and "Samples" in cols):
         return df
@@ -175,12 +194,15 @@ def _augment_time_map(df):
 def _style_dataframe(df):
     if not isinstance(df, pd.DataFrame):
         return df
-    df = _augment_time_map(df)
+    # R86 already computed authoritative current-market-day evidence. Do not let
+    # the older local-db live patch overwrite it or push its columns to the right.
+    df = _decision_first(df.copy()) if _is_r86_time_map(df) else _augment_time_map(df)
     semantic = [c for c in [
-        "Live %", "Match %", "Samples", "UP %", "Sideways %", "DOWN %",
+        "Live %", "Live Return %", "Live Momentum %", "Vs VWAP %",
+        "Live Confidence %", "Match %", "Samples", "UP %", "Sideways %", "DOWN %",
         "Mean Return %", "Confidence %"
     ] if c in df.columns]
-    status_cols = [c for c in ["Live Match"] if c in df.columns]
+    status_cols = [c for c in ["Live Direction", "Live Confirmation", "Live Match"] if c in df.columns]
     if not semantic and not status_cols:
         return df
     styler = df.style
