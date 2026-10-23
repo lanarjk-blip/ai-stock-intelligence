@@ -1,9 +1,7 @@
-"""Strict live reconciliation guard for every ticker Time Map.
+"""Authoritative Time Map live reconciliation with explicit market-day lifecycle.
 
-Historical clock-slot statistics are retained as evidence, but actionable Time
-Map status must be confirmed by fresh same-session tape. The guard is ticker-
-agnostic: no symbol-specific exceptions. It never upgrades weak historical
-evidence into ACTIVE from live price alone.
+Historical slot statistics remain long-lived evidence. Live state is strictly scoped
+to the active IDX market date and may never leak from the previous trading day.
 """
 from __future__ import annotations
 
@@ -25,22 +23,22 @@ def _minutes(label):
         return None
 
 
-def _empty(reason='NO_INTRADAY'):
+def _empty(reason='NO_INTRADAY', market_date=''):
     return {
         'usable': False, 'fresh': False, 'direction': 'UNKNOWN',
         'ret_day': np.nan, 'ret_last': np.nan, 'ret_recent': np.nan,
         'bars': 0, 'last_price': np.nan, 'age_minutes': np.nan,
-        'reason': reason, 'session_bars': 0,
+        'reason': reason, 'session_bars': 0, 'market_date': str(market_date or ''),
     }
 
 
 def _decision_first(out):
-    """Keep live truth visible on narrow/mobile screens before historical stats."""
     if out is None or not isinstance(out, pd.DataFrame) or out.empty:
         return out
     preferred = [
-        'time', 'session', 'live_direction', 'live_confirmation', 'live_price',
-        'live_age_min', 'live_fresh', 'status', 'trusted', 'horizon', 'samples',
+        'time', 'session', 'market_date', 'lifecycle', 'live_direction',
+        'live_confirmation', 'live_price', 'live_age_min', 'live_fresh',
+        'current_session_bars', 'status', 'trusted', 'horizon', 'samples',
         'up_pct', 'sideways_pct', 'down_pct', 'mean_return_pct',
         'confidence_pct', 'historical_status', 'note',
     ]
@@ -50,10 +48,9 @@ def _decision_first(out):
 
 
 def _session_window(now):
-    """Return current IDX regular-session bounds in WIB minutes."""
     dow = int(now.dayofweek)
     minute = int(now.hour) * 60 + int(now.minute)
-    if dow == 4:  # Friday
+    if dow == 4:
         if 9 * 60 <= minute <= 11 * 60 + 30:
             return 9 * 60, 11 * 60 + 30, 'SESI_I'
         if 14 * 60 <= minute <= 15 * 60 + 50:
@@ -67,32 +64,33 @@ def _session_window(now):
 
 
 def _live_direction(intraday, market_date, now):
+    market_date = str(market_date or '')
     if intraday is None or intraday.empty:
-        return _empty('NO_INTRADAY')
+        return _empty('NO_INTRADAY', market_date)
     d = intraday.copy()
     if 'ts' not in d.columns or 'close' not in d.columns:
-        return _empty('MISSING_TS_OR_CLOSE')
+        return _empty('MISSING_TS_OR_CLOSE', market_date)
     d['ts'] = pd.to_datetime(d['ts'], utc=True, errors='coerce')
     d['close'] = pd.to_numeric(d['close'], errors='coerce')
     if 'open' in d.columns:
         d['open'] = pd.to_numeric(d['open'], errors='coerce')
-    if 'volume' in d.columns:
-        d['volume'] = pd.to_numeric(d['volume'], errors='coerce')
     d = d.dropna(subset=['ts', 'close']).sort_values('ts')
     if d.empty:
-        return _empty('INVALID_INTRADAY')
+        return _empty('INVALID_INTRADAY', market_date)
+
     d['wib'] = d['ts'].dt.tz_convert('Asia/Jakarta')
-    d = d[d['wib'].dt.date.astype(str) == str(market_date)].copy()
+    # R83 hard boundary: previous market-day bars are never live evidence.
+    d = d[d['wib'].dt.date.astype(str) == market_date].copy()
     if d.empty:
-        return _empty('STALE_MARKET_DATE')
+        return _empty('NEW_MARKET_DAY_NO_BARS', market_date)
 
     start_min, end_min, session_name = _session_window(now)
     if start_min is None:
-        return _empty('OUTSIDE_REGULAR_SESSION')
+        return _empty('OUTSIDE_REGULAR_SESSION', market_date)
     d['minute'] = d['wib'].dt.hour * 60 + d['wib'].dt.minute
     s = d[(d['minute'] >= start_min) & (d['minute'] <= end_min)].copy()
     if s.empty:
-        out = _empty('NO_CURRENT_SESSION_DATA')
+        out = _empty('NO_CURRENT_SESSION_DATA', market_date)
         out['bars'] = int(len(d))
         return out
 
@@ -100,11 +98,11 @@ def _live_direction(intraday, market_date, now):
     age_minutes = max(0.0, (now - last_ts).total_seconds() / 60.0)
     last = float(s.iloc[-1]['close'])
     if age_minutes > MAX_LIVE_AGE_MINUTES:
-        out = _empty('STALE_INTRADAY_AGE')
+        out = _empty('STALE_INTRADAY_AGE', market_date)
         out.update({'bars': int(len(d)), 'session_bars': int(len(s)), 'last_price': last, 'age_minutes': age_minutes})
         return out
     if len(s) < MIN_LIVE_BARS:
-        out = _empty('INSUFFICIENT_CURRENT_SESSION_BARS')
+        out = _empty('INSUFFICIENT_CURRENT_SESSION_BARS', market_date)
         out.update({'bars': int(len(d)), 'session_bars': int(len(s)), 'last_price': last, 'age_minutes': age_minutes})
         return out
 
@@ -114,7 +112,6 @@ def _live_direction(intraday, market_date, now):
     ret_session = last / float(first_open) - 1.0
     ret_last = float(s['close'].pct_change().iloc[-1])
     ret_recent = last / float(s.iloc[max(0, len(s)-3)]['close']) - 1.0
-
     composite = 0.50 * ret_session + 0.30 * ret_recent + 0.20 * ret_last
     if composite <= -0.0025 and ret_session < 0:
         direction = 'DOWN'
@@ -126,7 +123,7 @@ def _live_direction(intraday, market_date, now):
         'usable': True, 'fresh': True, 'direction': direction,
         'ret_day': ret_session, 'ret_last': ret_last, 'ret_recent': ret_recent,
         'bars': int(len(d)), 'session_bars': int(len(s)), 'last_price': last,
-        'age_minutes': age_minutes, 'reason': session_name,
+        'age_minutes': age_minutes, 'reason': session_name, 'market_date': market_date,
     }
 
 
@@ -141,8 +138,24 @@ def _historical_trust(row):
         return False
 
 
+def _marketday_lifecycle(ticker, market_date):
+    """Persist the active market date and report a one-way day transition.
+
+    Failure is safe: live evidence is still date-filtered by _live_direction.
+    """
+    key = f'timemap_active_market_date_{str(ticker).upper()}'
+    try:
+        import app
+        previous = str(app.state_get(key) or '')
+        changed = bool(previous and previous != str(market_date))
+        if previous != str(market_date):
+            app.state_set(key, str(market_date))
+        return 'NEW_MARKET_DAY' if changed else 'CURRENT_MARKET_DAY'
+    except Exception:
+        return 'CURRENT_MARKET_DAY'
+
+
 def reconcile_time_map_live(ticker, time_map, intraday, session):
-    """Apply strict same-session confirmation to every ticker Time Map."""
     if time_map is None or time_map.empty:
         return time_map
     out = time_map.copy()
@@ -152,6 +165,7 @@ def reconcile_time_map_live(ticker, time_map, intraday, session):
     out['live_fresh'] = False
     out['live_age_min'] = np.nan
     out['live_price'] = np.nan
+    out['current_session_bars'] = 0
     out['trusted'] = False
 
     session = dict(session or {})
@@ -164,6 +178,9 @@ def reconcile_time_map_live(ticker, time_map, intraday, session):
     except Exception:
         now = pd.Timestamp.now(tz='Asia/Jakarta')
     market_date = str(session.get('market_date') or now.date())
+    lifecycle = _marketday_lifecycle(ticker, market_date)
+    out['market_date'] = market_date
+    out['lifecycle'] = lifecycle
     predictive = out['session'].isin(['Sesi I', 'Sesi II']) if 'session' in out.columns else pd.Series(True, index=out.index)
 
     if not bool(session.get('live')):
@@ -176,11 +193,15 @@ def reconcile_time_map_live(ticker, time_map, intraday, session):
     out['live_fresh'] = bool(live.get('fresh'))
     out['live_age_min'] = live.get('age_minutes', np.nan)
     out['live_price'] = live.get('last_price', np.nan)
+    out['current_session_bars'] = int(live.get('session_bars') or 0)
 
     if not live.get('usable'):
         out.loc[predictive & out['status'].isin(['ACTIVE', 'DEVELOPING']), 'status'] = 'WAIT'
-        out.loc[predictive, 'live_confirmation'] = 'NO LIVE CONFIRMATION'
         reason = str(live.get('reason') or 'NO_LIVE_DATA')
+        if reason == 'NEW_MARKET_DAY_NO_BARS':
+            out.loc[predictive, 'live_confirmation'] = 'NEW DAY • WAIT LIVE DATA'
+        else:
+            out.loc[predictive, 'live_confirmation'] = 'NO LIVE CONFIRMATION'
         age = live.get('age_minutes', np.nan)
         age_text = f' age={float(age):.0f}m' if pd.notna(age) else ''
         if 'note' in out.columns:
@@ -199,7 +220,6 @@ def reconcile_time_map_live(ticker, time_map, intraday, session):
         if slot < current_floor:
             out.at[idx, 'live_confirmation'] = 'HISTORICAL'
             continue
-
         hist = str(row.get('historical_status') or row.get('status') or 'NEUTRAL').upper()
         hist_trusted = _historical_trust(row)
         if direction == 'DOWN':

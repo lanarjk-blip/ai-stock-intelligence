@@ -1,8 +1,8 @@
 """UI safety patch for stale/missing external runtime heartbeat.
 
 External-mode Streamlit is a read-only replica of the authoritative worker.
-R82 also installs the Time Map dataframe patch directly in the UI process so
-live confirmation cannot depend on an implicit startup side effect.
+R82 installs the Time Map dataframe patch directly in the UI process. R83 adds
+a direct-provider live fallback so Time Map does not depend on a Termux pull.
 """
 from __future__ import annotations
 
@@ -124,12 +124,13 @@ def install():
     import dynamic_opportunity_ui
     import premarket_ui_patch
 
-    # R82: install Time Map dataframe/search hooks explicitly in the UI process.
     try:
         import ui_theme_patch
         ui_theme_patch.install()
+        import timemap_ui_direct_live
+        timemap_ui_direct_live.install()
     except Exception as exc:
-        print(f"[R82_TIME_MAP_UI] install degraded: {exc!r}", flush=True)
+        print(f"[R82_TIME_MAP_UI][R83_DIRECT_LIVE] install degraded: {exc!r}", flush=True)
 
     if getattr(dynamic_opportunity_ui._quality_gate_state, "_asi_runtime_health_patch", False):
         return
