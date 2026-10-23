@@ -3,10 +3,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_live_guard_is_ticker_agnostic():
+def test_live_guard_is_global_not_symbol_specific():
     text = (ROOT / "time_map_live_guard.py").read_text(encoding="utf-8")
     lowered = text.lower()
-    assert "ticker-agnostic" in lowered
+    assert "for every ticker" in lowered
     for symbol in ("MPXL", "BBCA", "BBRI", "ANTM", "PTBA"):
         assert symbol not in text
 
