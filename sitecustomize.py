@@ -19,14 +19,14 @@ _IS_RUNTIME_API = (
     or "runtime_api:app" in _ARGV_TEXT
 )
 
-# V1.8.54 Time Map live-reconciliation bootstrap. The production app keeps the
-# historical map implementation in app.py; this idempotent source patch routes
-# its result through time_map_live_guard before app.py is imported/rendered.
+# Time Map bootstrap. Keep historical slot statistics, but always reconcile them
+# with current-session tape and refresh the selected ticker while the market is
+# live even when the local DB already contains 60+ older bars.
 def _install_time_map_live_guard():
     path = os.path.join(_BASE, "app.py")
-    marker = "reconcile_time_map_live(str(ticker)"
-    old = "    return pd.DataFrame(rows)\n\ndef read_universe_registry(limit=200):"
-    new = (
+    guard_marker = "reconcile_time_map_live(str(ticker)"
+    guard_old = "    return pd.DataFrame(rows)\n\ndef read_universe_registry(limit=200):"
+    guard_new = (
         "    _tm = pd.DataFrame(rows)\n"
         "    try:\n"
         "        from time_map_live_guard import reconcile_time_map_live\n"
@@ -35,17 +35,45 @@ def _install_time_map_live_guard():
         "        return _tm\n\n"
         "def read_universe_registry(limit=200):"
     )
+    refresh_marker = "R81_TIME_MAP_LIVE_REFRESH"
+    refresh_old = "    df=_intraday_load(str(ticker))\n    if len(df)<60:\n"
+    refresh_new = (
+        "    df=_intraday_load(str(ticker))\n"
+        "    # R81_TIME_MAP_LIVE_REFRESH: stale history must never block same-session refresh.\n"
+        "    try:\n"
+        "        _tm_session=market_session.session_status(CFGD)\n"
+        "        if bool(_tm_session.get('live')):\n"
+        "            _raw=fetch_chart_recover(str(ticker),max(2,int(CFGD.get('intraday_refresh_period_days',5))),CFGD.get('intraday_interval','30m'))\n"
+        "            if isinstance(_raw,tuple):\n"
+        "                _fresh=next((v for v in _raw if isinstance(v,pd.DataFrame)),pd.DataFrame())\n"
+        "            else:\n"
+        "                _fresh=_raw if isinstance(_raw,pd.DataFrame) else pd.DataFrame()\n"
+        "            if not _fresh.empty:\n"
+        "                save_intraday(_fresh,str(ticker)); df=_intraday_load(str(ticker))\n"
+        "    except Exception:\n"
+        "        pass\n"
+        "    if len(df)<60:\n"
+    )
     try:
         with open(path, "r", encoding="utf-8") as fh:
             src = fh.read()
-        if marker in src:
-            return
-        if old not in src:
-            print("[TIME_MAP_GUARD] target not found; leaving app.py unchanged", flush=True)
-            return
-        with open(path, "w", encoding="utf-8") as fh:
-            fh.write(src.replace(old, new, 1))
-        print("[TIME_MAP_GUARD] live reconciliation installed", flush=True)
+        changed = False
+        if guard_marker not in src:
+            if guard_old in src:
+                src = src.replace(guard_old, guard_new, 1)
+                changed = True
+            else:
+                print("[TIME_MAP_GUARD] reconciliation target not found", flush=True)
+        if refresh_marker not in src:
+            if refresh_old in src:
+                src = src.replace(refresh_old, refresh_new, 1)
+                changed = True
+            else:
+                print("[TIME_MAP_GUARD] live-refresh target not found", flush=True)
+        if changed:
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(src)
+            print("[TIME_MAP_GUARD] R81 live refresh + reconciliation installed", flush=True)
     except Exception as exc:
         print(f"[TIME_MAP_GUARD] install degraded: {exc!r}", flush=True)
 
