@@ -34,6 +34,21 @@ def _empty(reason='NO_INTRADAY'):
     }
 
 
+def _decision_first(out):
+    """Keep live truth visible on narrow/mobile screens before historical stats."""
+    if out is None or not isinstance(out, pd.DataFrame) or out.empty:
+        return out
+    preferred = [
+        'time', 'session', 'live_direction', 'live_confirmation', 'live_price',
+        'live_age_min', 'live_fresh', 'status', 'trusted', 'horizon', 'samples',
+        'up_pct', 'sideways_pct', 'down_pct', 'mean_return_pct',
+        'confidence_pct', 'historical_status', 'note',
+    ]
+    front = [c for c in preferred if c in out.columns]
+    rest = [c for c in out.columns if c not in front]
+    return out[front + rest]
+
+
 def _session_window(now):
     """Return current IDX regular-session bounds in WIB minutes."""
     dow = int(now.dayofweek)
@@ -100,7 +115,6 @@ def _live_direction(intraday, market_date, now):
     ret_last = float(s['close'].pct_change().iloc[-1])
     ret_recent = last / float(s.iloc[max(0, len(s)-3)]['close']) - 1.0
 
-    # Multi-horizon composite prevents one candle from overruling the session.
     composite = 0.50 * ret_session + 0.30 * ret_recent + 0.20 * ret_last
     if composite <= -0.0025 and ret_session < 0:
         direction = 'DOWN'
@@ -152,11 +166,10 @@ def reconcile_time_map_live(ticker, time_map, intraday, session):
     market_date = str(session.get('market_date') or now.date())
     predictive = out['session'].isin(['Sesi I', 'Sesi II']) if 'session' in out.columns else pd.Series(True, index=out.index)
 
-    # Outside a live market, keep history visible but never call it trusted/live.
     if not bool(session.get('live')):
         out.loc[predictive, 'live_confirmation'] = 'MARKET NOT LIVE'
         out.loc[predictive & out['status'].isin(['ACTIVE', 'DEVELOPING']), 'status'] = 'WAIT'
-        return out
+        return _decision_first(out)
 
     live = _live_direction(intraday, market_date, now)
     out['live_direction'] = str(live.get('direction') or 'UNKNOWN')
@@ -172,7 +185,7 @@ def reconcile_time_map_live(ticker, time_map, intraday, session):
         age_text = f' age={float(age):.0f}m' if pd.notna(age) else ''
         if 'note' in out.columns:
             out.loc[predictive, 'note'] = out.loc[predictive, 'note'].astype(str) + f' Live blocked: {reason}{age_text}.'
-        return out
+        return _decision_first(out)
 
     now_min = int(now.hour) * 60 + int(now.minute)
     current_floor = (now_min // 30) * 30
@@ -196,7 +209,6 @@ def reconcile_time_map_live(ticker, time_map, intraday, session):
             out.at[idx, 'trusted'] = bool(hist == 'WAIT' and hist_trusted)
         elif direction == 'UP':
             out.at[idx, 'live_confirmation'] = 'MATCH' if hist in {'ACTIVE','DEVELOPING'} else 'DIVERGENCE' if hist == 'WAIT' else 'MIXED'
-            # Never promote historical WAIT/NEUTRAL to ACTIVE from live movement.
             if hist == 'WAIT':
                 out.at[idx, 'status'] = 'NEUTRAL'
             out.at[idx, 'trusted'] = bool(hist in {'ACTIVE','DEVELOPING'} and hist_trusted)
@@ -213,4 +225,4 @@ def reconcile_time_map_live(ticker, time_map, intraday, session):
     if 'note' in out.columns:
         mask = out['live_confirmation'].isin(['MATCH', 'MIXED', 'DIVERGENCE', 'NO LIVE CONFIRMATION'])
         out.loc[mask, 'note'] = out.loc[mask, 'note'].astype(str) + suffix
-    return out
+    return _decision_first(out)
