@@ -1,4 +1,4 @@
-"""Central UI semantics for mobile readability and R47 live Time Map confirmation."""
+"""Central UI semantics for mobile readability and live Time Map confirmation."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -6,7 +6,6 @@ from zoneinfo import ZoneInfo
 import math
 import os
 import re
-import sqlite3
 
 import pandas as pd
 import streamlit as st
@@ -25,7 +24,6 @@ def _num(v):
 
 
 def _font(css_fg="#1f2937", weight="700"):
-    # R47: font color only. No cell background/stabilo.
     return f"color:{css_fg};font-weight:{weight};"
 
 
@@ -71,10 +69,21 @@ def _status_style(value):
     return _font("#6b7280", "600")
 
 
+def _clean_ticker(value):
+    text = str(value or "").upper().replace(".JK", "").strip()
+    if " • " in text:
+        text = text.split(" • ", 1)[0].strip()
+    return text if re.fullmatch(r"[A-Z0-9]{2,6}", text) else ""
+
+
 def _current_ticker_hint():
     candidates = []
     try:
-        candidates.append(st.session_state.get("stock_search_query"))
+        candidates.extend([
+            st.session_state.get("stock_search_selection"),
+            st.session_state.get("stock_search_query"),
+            st.session_state.get("selected_ticker"),
+        ])
     except Exception:
         pass
     try:
@@ -83,9 +92,9 @@ def _current_ticker_hint():
     except Exception:
         pass
     for value in candidates:
-        text = str(value or "").upper().replace(".JK", "").strip()
-        if re.fullmatch(r"[A-Z0-9]{2,6}", text):
-            return text
+        ticker = _clean_ticker(value)
+        if ticker:
+            return ticker
     return ""
 
 
@@ -103,6 +112,20 @@ def _current_slot_label():
     return f"{now.hour:02d}:{minute:02d}"
 
 
+def _decision_first(df):
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return df
+    preferred = [
+        "Waktu", "Sesi", "Live %", "Live Match", "Match %",
+        "live_direction", "live_confirmation", "live_price", "live_age_min",
+        "Status", "Samples", "UP %", "Sideways %", "DOWN %",
+        "Mean Return %", "Confidence %", "Catatan",
+    ]
+    cols = [c for c in preferred if c in df.columns]
+    cols += [c for c in df.columns if c not in cols]
+    return df.loc[:, cols]
+
+
 def _augment_time_map(df):
     """Attach current-slot live confirmation to Time Map tables only."""
     if not isinstance(df, pd.DataFrame) or df.empty:
@@ -112,14 +135,6 @@ def _augment_time_map(df):
         return df
     time_col = _time_column(df)
     ticker = _current_ticker_hint()
-    if time_col is None or not ticker:
-        return df
-    try:
-        import live_precision_patch as lp
-        metrics = lp.live_metrics(ticker)
-        metrics["relative_strength_pct"] = lp.relative_strength_pct({"ticker": ticker}, metrics)
-    except Exception:
-        return df
     out = df.copy()
     if "Live %" not in out.columns:
         out["Live %"] = None
@@ -127,6 +142,14 @@ def _augment_time_map(df):
         out["Live Match"] = ""
     if "Match %" not in out.columns:
         out["Match %"] = None
+    if time_col is None or not ticker:
+        return _decision_first(out)
+    try:
+        import live_precision_patch as lp
+        metrics = lp.live_metrics(ticker)
+        metrics["relative_strength_pct"] = lp.relative_strength_pct({"ticker": ticker}, metrics)
+    except Exception:
+        return _decision_first(out)
     current_slot = _current_slot_label()
     matched_index = None
     for idx, value in out[time_col].items():
@@ -136,17 +159,17 @@ def _augment_time_map(df):
             matched_index = idx
             break
     if matched_index is None:
-        return out
+        return _decision_first(out)
     if not metrics.get("fresh"):
         out.at[matched_index, "Live Match"] = "DATA INTRADAY BELUM CUKUP"
-        return out
+        return _decision_first(out)
     up = out.at[matched_index, "UP %"]
     down = out.at[matched_index, "DOWN %"]
     status, score = lp.map_live_match(up, down, metrics)
     out.at[matched_index, "Live %"] = metrics.get("return_from_open_pct")
     out.at[matched_index, "Live Match"] = status
     out.at[matched_index, "Match %"] = score
-    return out
+    return _decision_first(out)
 
 
 def _style_dataframe(df):
@@ -154,8 +177,8 @@ def _style_dataframe(df):
         return df
     df = _augment_time_map(df)
     semantic = [c for c in [
-        "Samples", "UP %", "Sideways %", "DOWN %", "Mean Return %",
-        "Confidence %", "Live %", "Match %"
+        "Live %", "Match %", "Samples", "UP %", "Sideways %", "DOWN %",
+        "Mean Return %", "Confidence %"
     ] if c in df.columns]
     status_cols = [c for c in ["Live Match"] if c in df.columns]
     if not semantic and not status_cols:
@@ -208,8 +231,8 @@ def _record_search(label, value):
     try:
         if str(label).strip().lower() != "cari saham":
             return
-        ticker = str(value or "").upper().replace(".JK", "").strip()
-        if re.fullmatch(r"[A-Z0-9]{2,6}", ticker):
+        ticker = _clean_ticker(value)
+        if ticker:
             import search_priority_refresh
             search_priority_refresh.request(ticker)
     except Exception:
