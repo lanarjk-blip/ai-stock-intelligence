@@ -1,0 +1,3 @@
+AI Stock Intelligence Android V1.8.58
+Backend target: main with R84 Time Map live install.
+Purpose: force a clean Android APK rebuild after Time Map wiring repair.
