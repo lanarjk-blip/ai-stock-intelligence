@@ -63,8 +63,10 @@ def _prepare_day(base, ticker):
     }
     try:
         data = base._provider_frame(ticker)
+        result["source"] = data.attrs.get("source", "DIRECT PROVIDER") if data is not None else "UNAVAILABLE"
+        result["provider_errors"] = data.attrs.get("errors", []) if data is not None else []
         if data is None or data.empty or "ts" not in data.columns or "close" not in data.columns:
-            result["reason"] = "NO INTRADAY BARS"
+            result["reason"] = "NO INTRADAY BARS: " + "; ".join(result.get("provider_errors", []))
             return result
         data = data.copy()
         data["ts"] = pd.to_datetime(data["ts"], utc=True, errors="coerce")
@@ -97,14 +99,19 @@ def _prepare_day(base, ticker):
             stale_limit = max(10, int(cfg.get("intraday_live_stale_minutes") or 25))
         except Exception:
             stale_limit = 25
-        pause = status in {"BREAK", "AFTER_MARKET"}
-        fresh = bool(age <= stale_limit or pause)
+        pause = status in {"BREAK", "AFTER_MARKET", "CLOSED"}
+        # Candle timestamps are START times; only completed windows are realized.
+        data["end_minute"] = (data["minute"] + 30)
+        data["available_at"] = data["wib"].dt.normalize() + pd.to_timedelta(data["end_minute"],unit="m")
+        data = data[data["available_at"] <= now].copy()
+        age = max(0.0, (now - data.iloc[-1]["available_at"]).total_seconds()/60) if not data.empty else None
+        fresh = bool(not data.empty and (age <= max(30, stale_limit) or pause))
         result.update(
             {
                 "frame": data,
                 "fresh": fresh,
                 "age_min": age,
-                "reason": "SESSION PAUSE" if pause else ("FRESH" if fresh else "DATA LIVE BELUM SEGAR"),
+                "reason": "MARKET CLOSED • ARCHIVE" if status in {"CLOSED", "AFTER_MARKET"} else "SESSION PAUSE" if pause else ("FRESH" if fresh else "DATA LIVE BELUM SEGAR"),
             }
         )
     except Exception as exc:
@@ -122,7 +129,7 @@ def _checkpoint_metrics(day, minute):
     last = upto.iloc[-1]
     last_minute = int(last["minute"])
     # A missing provider bar may not be silently filled using an old checkpoint.
-    if int(minute) - last_minute > 35:
+    if int(minute) != last_minute:
         return None
 
     first = day.iloc[0]
@@ -182,16 +189,18 @@ def _checkpoint_metrics(day, minute):
             score -= 1
 
     direction = "UP" if score >= 2 else ("DOWN" if score <= -2 else "SIDEWAYS")
-    confidence = min(95.0, 50.0 + abs(score) * 8.0 + (5.0 if volume_ratio is not None and volume_ratio >= 1.20 else 0.0))
+    confidence = None  # Indicator score is not a calibrated probability.
     return {
         "bar_minute": last_minute,
         "bar_time": last["wib"].strftime("%H:%M"),
+        "available_at": last.get("available_at", last["wib"]).isoformat(),
         "bars": int(len(upto)),
         "price": current,
         "open": open_price,
         "high": high,
         "low": low,
         "return_pct": return_pct,
+        "slot_return_pct": (current / _num(last.get("open"), current) - 1) * 100,
         "momentum_pct": momentum_pct,
         "volume_ratio": volume_ratio,
         "range_position_pct": range_position,
@@ -212,7 +221,7 @@ def _blank_today_row(history_row, ticker, day_state):
             "Hari": ("Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu")[pd.Timestamp(day_state["market_date"]).dayofweek],
             "Diperiksa WIB": day_state.get("wib"),
             "Data Terakhir WIB": day_state["frame"].iloc[-1]["wib"].isoformat() if not day_state["frame"].empty else None,
-            "Kesegaran": ("JEDA SESI • ARSIP HARI INI" if day_state.get("reason") == "SESSION PAUSE" else "FRESH" if day_state.get("fresh") else "STALE / NO DATA"),
+            "Kesegaran": ("ARSIP • MARKET TUTUP" if day_state.get("market_status") in {"CLOSED", "AFTER_MARKET"} else "JEDA SESI • ARSIP HARI INI" if day_state.get("reason") == "SESSION PAUSE" else "FRESH" if day_state.get("fresh") else "STALE / NO DATA"),
             "Market Status": day_state.get("market_status"),
             "Live Source": day_state.get("source"),
             "Checkpoint State": "WAIT",
@@ -227,7 +236,7 @@ def _blank_today_row(history_row, ticker, day_state):
             "Range Pos %": None,
             "Vs VWAP %": None,
             "Live Score": 0,
-            "Live Confidence %": 0.0,
+            "Live Confidence %": None,
             "Live Direction": "WAIT",
             "Live Confirmation": "WAIT",
             "Live Match": "WAIT",
@@ -253,7 +262,7 @@ def _blank_today_row(history_row, ticker, day_state):
 
 
 def _checkpoint_rows(frame, st, base):
-    ticker = base._active_ticker(st)
+    ticker = frame.attrs.get("ticker") or base._active_ticker(st)
     if not ticker:
         return None
     time_col = base._time_column(frame)
@@ -285,7 +294,7 @@ def _checkpoint_rows(frame, st, base):
             continue
 
         import market_session
-        slot_status = market_session.session_status({}, now=pd.Timestamp(market_date).tz_localize("Asia/Jakarta") + pd.Timedelta(minutes=minute))
+        slot_status = market_session.session_status(base._cfg() if hasattr(base,"_cfg") else {}, now=pd.Timestamp(market_date).tz_localize("Asia/Jakarta") + pd.Timedelta(minutes=minute))
         if session in {"SESI I", "SESI II"} and not slot_status["live"]:
             session = slot_status["status"]
             row["Sesi"] = session
@@ -314,11 +323,17 @@ def _checkpoint_rows(frame, st, base):
             rows.append(row)
             continue
 
-        if minute > current_minute or (latest_bar_minute is not None and minute > latest_bar_minute + 35):
+        if minute > current_minute:
             row["Checkpoint State"] = "WAIT FUTURE"
             row["Live Confirmation"] = "WAIT • CHECKPOINT BELUM TERJADI"
             row["Live Match"] = "WAIT FUTURE"
             row["Live Reason"] = "CHECKPOINT BELUM TERJADI"
+            rows.append(row)
+            continue
+
+        if minute + 30 > current_minute:
+            row["Checkpoint State"] = "FORMING"
+            row["Live Reason"] = "CANDLE BELUM SELESAI"
             rows.append(row)
             continue
 
@@ -335,12 +350,14 @@ def _checkpoint_rows(frame, st, base):
             {
                 "Checkpoint State": "REALIZED TODAY",
                 "Checkpoint Bar": metrics["bar_time"],
+                "Hasil Tersedia WIB": metrics["available_at"],
                 "Live Price": metrics["price"],
                 "Live Open": metrics["open"],
                 "Live High": metrics["high"],
                 "Live Low": metrics["low"],
                 "Live Return %": metrics["return_pct"],
                 "Live Momentum %": metrics["momentum_pct"],
+                "Slot Return %": metrics["slot_return_pct"],
                 "Volume Ratio": metrics["volume_ratio"],
                 "Range Pos %": metrics["range_position_pct"],
                 "Vs VWAP %": metrics["price_vs_vwap_pct"],
@@ -357,14 +374,12 @@ def _checkpoint_rows(frame, st, base):
             row["Live Age m"] = state.get("age_min")
 
         hist_direction = _history_direction(hist)
-        live_direction = metrics["direction"]
-        match_pct = _history_probability(hist, live_direction)
-        if live_direction == hist_direction:
-            confirmation = "CONFIRMED" if match_pct >= 55 else "CONFIRMED • WEAK"
-        elif live_direction == "SIDEWAYS" or hist_direction == "SIDEWAYS":
-            confirmation = "MIXED • WAIT"
-        else:
-            confirmation = "DIVERGENCE • WAIT"
+        threshold = float(base._cfg().get("time_return_threshold", .002)) * 100 if hasattr(base,"_cfg") else .2
+        slot_return = metrics["slot_return_pct"]
+        live_direction = "UP" if slot_return > threshold else "DOWN" if slot_return < -threshold else "SIDEWAYS"
+        has_baseline = all(_num(hist.get(c)) is not None for c in ("UP %", "DOWN %", "Sideways %"))
+        match_pct = _history_probability(hist, live_direction) if has_baseline else None
+        confirmation = ("SESUAI BASELINE" if live_direction == hist_direction else "BERBEDA DARI BASELINE") if has_baseline else "BASELINE BELUM CUKUP"
 
         is_latest = latest_bar_minute is not None and metrics["bar_minute"] == latest_bar_minute
         if is_latest and not state.get("fresh"):
@@ -376,7 +391,7 @@ def _checkpoint_rows(frame, st, base):
 
         row["Live Confirmation"] = confirmation
         row["Live Match"] = confirmation
-        row["Match %"] = round(float(match_pct), 1)
+        row["Match %"] = round(float(match_pct), 1) if match_pct is not None else None
         rows.append(row)
 
     return pd.DataFrame(rows)
@@ -395,6 +410,9 @@ def _augment(frame, st):
 
     history = frame.copy()
     history["Data Type"] = "HISTORICAL BASELINE"
+    history["Live Ticker"] = frame.attrs.get("ticker")
+    history["Market Date"] = frame.get("historical_asof")
+    history["Kesegaran"] = "HISTORIS • BUKAN LIVE"
     for col in today.columns:
         if col not in history.columns:
             history[col] = None
@@ -405,7 +423,7 @@ def _augment(frame, st):
     out = pd.concat([today[history.columns], history], ignore_index=True)
     preferred = [
         "Waktu", "Sesi", "Hari", "Market Date", "Live Ticker", "Kesegaran", "Data Terakhir WIB", "Diperiksa WIB", "Data Type", "Horizon", "Market Status",
-        "Checkpoint State", "Checkpoint Bar", "Live Price", "Live Return %", "Live Momentum %",
+        "Checkpoint State", "Checkpoint Bar", "Hasil Tersedia WIB", "Slot Return %", "Live Price", "Live Return %", "Live Momentum %",
         "Volume Ratio", "Range Pos %", "Vs VWAP %", "Live Score", "Live Confidence %", "Live Direction",
         "Live Confirmation", "Live Match", "Match %", "Live Age m", "Live Bars", "Live Reason", "Live Source",
         "Baseline UP %", "Baseline Sideways %", "Baseline DOWN %", "Samples", "UP %", "Sideways %", "DOWN %",
@@ -413,7 +431,10 @@ def _augment(frame, st):
     ]
     columns = [col for col in preferred if col in out.columns]
     columns += [col for col in out.columns if col not in columns]
-    return out.loc[:, columns]
+    out = out.loc[:, columns]
+    out.attrs['timemap_rendered'] = True
+    out.attrs['ticker'] = frame.attrs.get('ticker')
+    return out
 
 
 def install():

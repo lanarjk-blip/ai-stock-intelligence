@@ -57,6 +57,8 @@ def _install_time_map_live_guard():
     try:
         with open(path, "r", encoding="utf-8") as fh:
             src = fh.read()
+        if "from timemap_statistics import build" in src:
+            return  # R90 owns explicit ingestion and completed-bar reconciliation.
         changed = False
         if guard_marker not in src:
             if guard_old in src:

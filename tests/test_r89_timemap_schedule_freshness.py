@@ -1,3 +1,4 @@
+from unittest.mock import patch
 import ast
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,7 +23,8 @@ def base_map(now, data, ticker='TEST'):
               fetch_chart_recover=lambda *a: calls.append(a) or pd.DataFrame(),
               save_intraday=lambda *a: None)
     exec(compile(ast.Module(body=[node], type_ignores=[]), 'app.py', 'exec'), ns)
-    return ns['intraday_time_map'](ticker), calls
+    with patch('timemap_data.load', side_effect=lambda *a, **kw: calls.append(a) or empty_bars()):
+        return ns['intraday_time_map'](ticker), calls
 
 
 def empty_bars():

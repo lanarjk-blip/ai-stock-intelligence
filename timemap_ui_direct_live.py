@@ -107,65 +107,8 @@ def _session():
 
 
 def _provider_frame(ticker):
-    cfg = _cfg()
-    try:
-        import app
-        result = app.fetch_chart_recover(
-            ticker,
-            max(2, int(cfg.get("intraday_refresh_period_days", 3))),
-            cfg.get("intraday_interval", "30m"),
-        )
-        if isinstance(result, tuple):
-            for item in result:
-                if isinstance(item, pd.DataFrame):
-                    return item
-        if isinstance(result, pd.DataFrame):
-            return result
-    except Exception:
-        pass
-
-    params = {
-        "range": "5d",
-        "interval": str(cfg.get("intraday_interval") or "30m"),
-        "events": "history",
-    }
-    headers = {"User-Agent": str(cfg.get("user_agent") or "AI-Stock-Intelligence/1.8")}
-    timeout = int(cfg.get("request_timeout_seconds") or 8)
-    for host in ("query1.finance.yahoo.com", "query2.finance.yahoo.com"):
-        try:
-            response = requests.get(
-                f"https://{host}/v8/finance/chart/{ticker}.JK",
-                params=params,
-                timeout=timeout,
-                headers=headers,
-            )
-            response.raise_for_status()
-            results = ((response.json().get("chart") or {}).get("result") or [])
-            if not results:
-                continue
-            raw = results[0]
-            timestamps = raw.get("timestamp") or []
-            quote = ((raw.get("indicators") or {}).get("quote") or [{}])[0]
-            if not timestamps:
-                continue
-
-            def arr(name):
-                values = quote.get(name)
-                return values if isinstance(values, list) and len(values) == len(timestamps) else [None] * len(timestamps)
-
-            return pd.DataFrame(
-                {
-                    "ts": pd.to_datetime(timestamps, unit="s", utc=True, errors="coerce"),
-                    "open": arr("open"),
-                    "high": arr("high"),
-                    "low": arr("low"),
-                    "close": arr("close"),
-                    "volume": arr("volume"),
-                }
-            )
-        except Exception:
-            continue
-    return pd.DataFrame()
+    from timemap_data import load
+    return load(ticker)
 
 
 def _live(ticker):
@@ -477,6 +420,8 @@ def install():
 
     def dataframe(data=None, *args, **kwargs):
         if isinstance(data, pd.DataFrame):
+            if data.attrs.get("timemap_rendered"):
+                return original(data, *args, **kwargs)
             data = _augment(data, st)
         return original(data, *args, **kwargs)
 

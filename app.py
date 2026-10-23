@@ -909,84 +909,22 @@ def intraday_time_map(ticker):
     at that exact minute. Session breaks and Friday's different schedule are
     represented explicitly.
     """
-    df=_intraday_load(str(ticker))
-    # R81_TIME_MAP_LIVE_REFRESH is explicit here; no startup source rewriting required.
+    # R81_TIME_MAP_LIVE_REFRESH: bounded shared ingestion, independent of row count.
+    from timemap_data import load, canonical_ticker, clean
+    from timemap_statistics import build
+    ticker=canonical_ticker(ticker)
     session_now=market_session.session_status(CFGD)
     now=pd.Timestamp(session_now['wib'])
-    latest=pd.to_datetime(df['ts'],utc=True,errors='coerce').max() if not df.empty else pd.NaT
-    stale=pd.isna(latest) or (now-latest).total_seconds()>1200
-    if len(df)<60 or stale:
-        try:
-            raw=fetch_chart_recover(str(ticker),CFGD.get('intraday_period_days',60),CFGD.get('intraday_interval','30m'))
-            fresh=next((v for v in raw if isinstance(v,pd.DataFrame)),pd.DataFrame()) if isinstance(raw,tuple) else raw
-            if isinstance(fresh,pd.DataFrame) and not fresh.empty:
-                save_intraday(fresh,str(ticker)); df=_intraday_load(str(ticker))
-        except Exception:
-            pass
-    if df.empty:
-        df=pd.DataFrame(columns=['ts','open','high','low','close','volume'])
-    df=df.copy()
-    df['ts']=pd.to_datetime(df['ts'],utc=True,errors='coerce')
-    df=df.dropna(subset=['ts','close']).drop_duplicates('ts',keep='last')
-    # Baseline uses completed earlier market days, never partial/future outcomes.
-    df=df[df['ts'].dt.tz_convert('Asia/Jakarta').dt.date < now.date()]
-    x=df.copy().sort_values('ts').reset_index(drop=True)
-    local=x['ts'].dt.tz_convert('Asia/Jakarta')
-    x['tod']=local.dt.hour*60+local.dt.minute
-    x['day']=local.dt.date
-    x['next_tod']=x['tod'].shift(-1)
-    x['next_day']=x['day'].shift(-1)
-    x['next_close']=x['close'].shift(-1)
-    x['ret30']=np.where((x['next_day']==x['day']) & ((x['next_tod']-x['tod'])<=45), x['next_close']/x['close']-1, np.nan)
-    x['day_end']=x.groupby('day')['close'].transform('last')
-    x['reteod']=x['day_end']/x['close']-1
-    x['vol20']=x['volume'].rolling(20).mean()
-    x['vol_ratio']=x['volume']/x['vol20'].replace(0,np.nan)
-    x=x.dropna(subset=['close','vol_ratio']).copy()
-    threshold=float(CFGD.get('time_return_threshold',0.002))
-    # Normal trading checkpoints. 12:00 is a session boundary on Mon-Thu;
-    # Friday's second session begins at 14:00, so the UI marks that separately.
-    slots=[
-        (9*60,'09:00','Sesi I'),(9*60+30,'09:30','Sesi I'),(10*60,'10:00','Sesi I'),
-        (10*60+30,'10:30','Sesi I'),(11*60,'11:00','Sesi I'),(11*60+30,'11:30','Sesi I'),
-        (12*60,'12:00','BREAK'),(13*60+30,'13:30','Sesi II'),(14*60,'14:00','Sesi II'),
-        (14*60+30,'14:30','Sesi II'),(15*60,'15:00','Sesi II'),(15*60+30,'15:30','Sesi II'),
-        (15*60+50,'15:50','PRE-CLOSING'),(16*60,'16:00','CLOSING')
-    ]
-    rows=[]
-    for mins,label,session in slots:
-        slot_state=market_session.session_status(CFGD,now=now.replace(hour=mins//60,minute=mins%60,second=0))
-        if session in ('Sesi I','Sesi II') and not slot_state['live']:
-            session=slot_state['status']
-        # Break / closing rows are schedule markers, not predictive bars.
-        if session not in ('Sesi I','Sesi II'):
-            rows.append({'time':label,'session':session,'horizon':'MARKET','samples':None,'up_pct':None,'sideways_pct':None,'down_pct':None,'mean_return_pct':None,'confidence_pct':None,'status':'CHECKPOINT','note':'Pantau perubahan kondisi / harga penutupan.'})
-            continue
-        same=x[x.tod==mins].copy()
-        if session=='Sesi II':
-            # Friday 13:30 is not a regular-session checkpoint. Keep it visible
-            # but do not manufacture statistics from another clock slot.
-            same_day=pd.Series(local.dt.dayofweek==4,index=x.index)
-            if label=='13:30':
-                same=same[~same_day.loc[same.index]]
-        z=same.ret30.dropna()
-        # At the final regular checkpoint use the remaining session/EOD move.
-        horizon='30m'
-        if label=='15:30':
-            z=same.reteod.dropna(); horizon='EOD'
-        if len(z)<8:
-            rows.append({'time':label,'session':session,'horizon':horizon,'samples':int(len(z)),'up_pct':None,'sideways_pct':None,'down_pct':None,'mean_return_pct':None,'confidence_pct':None,'status':'LIMITED','note':'Data historis slot belum cukup.'})
-            continue
-        up=float((z>threshold).mean()); down=float((z<-threshold).mean()); side=max(0.0,1-up-down); mean=float(z.mean()); edge=up-down
-        sample_rel=min(1.0,len(z)/60.0); sep=min(1.0,abs(edge)/0.35); dominant=max(up,down,side); concentration=float(np.clip((dominant-1/3)/(2/3),0,1))
-        conf=float(np.clip(0.30+0.30*sample_rel+0.25*sep+0.15*concentration,0.30,0.90))
-        if conf>=0.55 and edge>=0.10 and mean>0: status='ACTIVE'
-        elif conf>=0.45 and edge>=0.03 and mean>0: status='DEVELOPING'
-        elif edge<=-0.10 or (mean<0 and down>up): status='WAIT'
-        else: status='NEUTRAL'
-        rows.append({'time':label,'session':session,'horizon':horizon,'samples':len(z),'up_pct':up*100,'sideways_pct':side*100,'down_pct':down*100,'mean_return_pct':mean*100,'confidence_pct':conf*100,'status':status,'note':f'Edge {edge*100:+.1f}%; estimasi historis slot.'})
-    from time_map_live_guard import reconcile_time_map_live
-    return reconcile_time_map_live(str(ticker),pd.DataFrame(rows),_intraday_load(str(ticker)),session_now)
+    fresh=load(ticker)
+    stored=_intraday_load(ticker)
+    parts=[part for part in (stored,fresh) if not part.empty]
+    df=clean(pd.concat(parts,ignore_index=True) if parts else fresh,ticker,now)
+    df.attrs.update(fresh.attrs)
+    if not fresh.empty and not fresh.attrs.get('cache_hit'):
+        save_intraday(fresh,ticker)
+    out=build(ticker,df,now,CFGD)
+    # Live evidence is rendered explicitly by the checkpoint layer.
+    return out
 
 def read_universe_registry(limit=200):
     try:
@@ -1680,7 +1618,7 @@ def stock_search_panel(universe, res, forced_ticker=None):
     tm_coverage=intraday_time_map(selected_ticker)
     dc1,dc2,dc3,dc4=st.columns(4)
     dc1.metric('Technical', 'READY')
-    dc2.metric('Intraday / Time Map', 'READY' if not tm_coverage.empty else 'LIMITED')
+    dc2.metric('Intraday / Time Map', 'READY' if tm_coverage['up_pct'].notna().any() else 'LIMITED')
     dc3.metric('Fundamental', 'NOT CONNECTED')
     dc4.metric('News / Sentiment', 'NOT CONNECTED')
     st.caption('Fundamental dan News/Sentiment sengaja ditandai belum terhubung. Sistem tidak mengarang angka atau berita ketika sumber datanya belum tersedia.')
@@ -1699,9 +1637,13 @@ def stock_search_panel(universe, res, forced_ticker=None):
     if is_intraday:
         market=_intraday_load(selected_ticker)
         try:
-            fresh=fetch_chart(selected_ticker,2,CFGD.get('intraday_interval','30m'))
+            from timemap_data import load as _tm_load
+            fresh=_tm_load(selected_ticker)
             if not fresh.empty:
-                save_intraday(fresh,selected_ticker); market=_intraday_load(selected_ticker)
+
+                if not fresh.attrs.get('cache_hit'):
+                    save_intraday(fresh,selected_ticker)
+                market=pd.concat([market,fresh],ignore_index=True).drop_duplicates('ts',keep='last').sort_values('ts')
         except Exception: pass
         if not market.empty:
             market=market.copy(); market['wib']=market['ts'].dt.tz_convert('Asia/Jakarta'); market['trade_date']=market['wib'].dt.date
@@ -1803,21 +1745,38 @@ def stock_search_panel(universe, res, forced_ticker=None):
             else:
                 st.warning('Belum ada Entry Window yang cukup kuat. Sistem mempertahankan WAIT/NEUTRAL dan tidak memaksa sinyal.')
 
-        st.markdown('### 🕘 AI Intraday Time Map • WIB')
-        _tm_context=market_session.session_status(CFGD)
-        _tm_now=pd.Timestamp(_tm_context['wib'])
-        _tm_day=('Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu')[_tm_now.dayofweek]
-        st.caption(f"{selected_ticker} • {_tm_day}, {_tm_now:%d-%m-%Y} • Diperiksa {_tm_now:%H:%M:%S} WIB • {_tm_context['status']} • Time Map R89")
-        tm=intraday_time_map(selected_ticker)
-        if tm.empty:
-            st.info('Belum ada data intraday yang cukup untuk membentuk Time Map saham ini.')
-        else:
-            tmshow=tm.copy()
-            for c in ['up_pct','sideways_pct','down_pct','mean_return_pct','confidence_pct']:
-                if c in tmshow: tmshow[c]=pd.to_numeric(tmshow[c],errors='coerce').round(1)
-            tmshow=tmshow.rename(columns={'time':'Waktu','session':'Sesi','horizon':'Horizon','samples':'Samples','up_pct':'UP %','sideways_pct':'Sideways %','down_pct':'DOWN %','mean_return_pct':'Mean Return %','confidence_pct':'Confidence %','status':'Status','note':'Catatan'})
-            st.dataframe(tmshow,width='stretch',hide_index=True)
-            st.caption('TODAY CHECKPOINT = realisasi harga hari ini, bukan prediksi. HISTORICAL BASELINE = statistik hari sebelumnya; persentasenya bukan peluang live hari ini. Periksa tanggal, waktu bar, dan status kesegaran. Data kosong/basi tetap WAIT. Jumat Sesi II mulai 14.00 WIB.')
+        _tm_initial=tm_coverage
+        @st.fragment(run_every=90)
+        def _render_time_map():
+            nonlocal _tm_initial
+            st.markdown('### 🕘 AI Intraday Time Map • WIB')
+            _tm_context=market_session.session_status(CFGD)
+            _tm_now=pd.Timestamp(_tm_context['wib'])
+            _tm_day=('Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu')[_tm_now.dayofweek]
+            st.caption(f"{selected_ticker} • {_tm_day}, {_tm_now:%d-%m-%Y} • Diperiksa {_tm_now:%H:%M:%S} WIB • {_tm_context['status']} • Time Map R90")
+            tm=_tm_initial.copy() if _tm_initial is not None else intraday_time_map(selected_ticker)
+            _tm_initial=None
+            _tm_meta=tm.attrs
+            _tm_latest=_tm_meta.get('latest_bar')
+            _tm_latest_wib=pd.Timestamp(_tm_latest).tz_convert('Asia/Jakarta').strftime('%d-%m-%Y %H:%M') if _tm_latest else '—'
+            st.caption(f"Sumber: {_tm_meta.get('source','UNKNOWN')} • Bar terakhir WIB: {_tm_latest_wib} • Acuan jadwal: {tm['schedule_date'].iloc[0] if not tm.empty else '—'} • Historis sampai: {tm['historical_asof'].iloc[0] if not tm.empty else '—'} • Pengambilan {_tm_meta.get('elapsed_ms','—')} ms • Pembaruan otomatis 90 detik")
+            if _tm_meta.get('errors'):
+                st.warning('Sumber intraday: '+'; '.join(_tm_meta['errors']))
+            _tm_eval=_tm_meta.get('validation',{})
+            if _tm_eval.get('n',0):
+                st.caption(f"Uji kronologis per ticker: {_tm_eval['n']} hasil di luar sampel • ketepatan {_tm_eval['accuracy_pct']:.1f}% • Brier {_tm_eval['brier']:.3f} (uniform 0.667; lebih kecil lebih baik) • {_tm_eval['status']}")
+            if tm.empty:
+                st.info('Belum ada data intraday yang cukup untuk membentuk Time Map saham ini.')
+            else:
+                tmshow=tm.copy()
+                tmshow.attrs['ticker']=str(selected_ticker).upper().removesuffix('.JK')
+                for c in ['up_pct','sideways_pct','down_pct','mean_return_pct','confidence_pct']:
+                    if c in tmshow: tmshow[c]=pd.to_numeric(tmshow[c],errors='coerce').round(1)
+                tmshow=tmshow.rename(columns={'time':'Waktu','session':'Sesi','horizon':'Horizon','samples':'Samples','up_pct':'UP %','sideways_pct':'Sideways %','down_pct':'DOWN %','mean_return_pct':'Mean Return %','confidence_pct':'Confidence %','status':'Status','note':'Catatan'})
+                st.dataframe(tmshow,width='stretch',hide_index=True)
+                st.caption('TODAY CHECKPOINT = realisasi candle mulai Waktu sampai Hasil Tersedia WIB. Candle belum selesai tidak dinilai. Ini realisasi, bukan prediksi. HISTORICAL BASELINE = statistik hari sebelumnya; persentasenya bukan peluang live hari ini. Periksa tanggal, waktu bar, dan status kesegaran. Data kosong/basi tetap WAIT. Jumat Sesi II mulai 14.00 WIB.')
+
+        _render_time_map()
 
         st.markdown('### 💡 Why this stock?')
         reasons=[]

@@ -128,8 +128,8 @@ def _decision_first(df):
     if not isinstance(df, pd.DataFrame) or df.empty:
         return df
     preferred = [
-        "Waktu", "Sesi", "Horizon",
-        "Live Ticker", "Market Date", "Market Status", "Live Source",
+        "Waktu", "Sesi", "Hari", "Market Date", "Live Ticker", "Kesegaran", "Checkpoint State", "Hasil Tersedia WIB", "Data Type", "Horizon",
+        "Market Status", "Live Source",
         "Live Price", "Live Return %", "Live Momentum %", "Volume Ratio",
         "Range Pos %", "Vs VWAP %", "Live Score", "Live Confidence %",
         "Live Direction", "Live Confirmation", "Live Match", "Match %",
