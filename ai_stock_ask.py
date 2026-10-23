@@ -16,6 +16,11 @@ import math
 try:
     import ui_theme_patch
     ui_theme_patch.install()
+    # R84: app.py imports ai_stock_ask directly on every Streamlit startup.
+    # Install the direct-provider Time Map live layer here too, so Time Map no
+    # longer depends on runtime_health_ui_patch/sitecustomize side effects.
+    import timemap_ui_direct_live
+    timemap_ui_direct_live.install()
 except Exception:
     pass
 
