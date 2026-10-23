@@ -222,6 +222,8 @@ def _blank_today_row(history_row, ticker, day_state):
             "Live Age m": None,
             "Live Bars": 0,
             "Live Reason": "",
+            "Status": "WAIT",
+            "Catatan": "TODAY checkpoint dipisahkan dari Historical Baseline.",
             "Baseline UP %": _num(history_row.get("UP %")),
             "Baseline Sideways %": _num(history_row.get("Sideways %")),
             "Baseline DOWN %": _num(history_row.get("DOWN %")),
@@ -328,6 +330,8 @@ def _checkpoint_rows(frame, st, base):
                 "Live Direction": metrics["direction"],
                 "Live Bars": metrics["bars"],
                 "Live Reason": "TODAY CHECKPOINT",
+                "Status": f"REALIZED {metrics['direction']}",
+                "Catatan": "Realisasi checkpoint hari market aktif; histori hanya pembanding.",
             }
         )
         if latest_bar_minute is not None and metrics["bar_minute"] == latest_bar_minute:
@@ -346,8 +350,10 @@ def _checkpoint_rows(frame, st, base):
         is_latest = latest_bar_minute is not None and metrics["bar_minute"] == latest_bar_minute
         if is_latest and not state.get("fresh"):
             confirmation = "WAIT • DATA NOT FRESH"
+            row["Status"] = "WAIT"
         elif is_latest and state.get("market_status") == "BREAK":
             confirmation = f"{confirmation} • BREAK"
+            row["Status"] = "WAIT • BREAK"
 
         row["Live Confirmation"] = confirmation
         row["Live Match"] = confirmation
