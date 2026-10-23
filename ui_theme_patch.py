@@ -72,6 +72,10 @@ def _status_style(value):
 
 def _normalize_ticker(value):
     text = str(value or "").upper().replace(".JK", "").strip()
+    # Selectbox values are rendered as "TICKER • Company • match ...".
+    # Treat the leading token as the explicit ticker context.
+    if "•" in text:
+        text = text.split("•", 1)[0].strip()
     return text if re.fullmatch(r"[A-Z0-9]{2,6}", text) else ""
 
 
@@ -100,26 +104,36 @@ def _ticker_exists(ticker):
 
 
 def _current_ticker_hint():
-    candidates = []
+    # Explicit navigation/search context is authoritative. Replica mode does not
+    # mirror full prices/intraday tables, so requiring local DB membership here
+    # incorrectly rejects perfectly valid selected tickers.
     try:
         for key in (
             "selected_ticker", "current_ticker", "ticker", "symbol",
             "stock_search_query", "analysis_ticker", "opportunity_ticker",
-            "selected_stock", "stock_symbol",
+            "selected_stock", "stock_symbol", "stock_search_selection",
         ):
-            candidates.append(st.session_state.get(key))
-        # App revisions have used several names for the selected opportunity.
-        # Scan scalar session values as a final fallback, but validate against
-        # the local market database so labels such as READY are never mistaken
-        # for ticker symbols.
-        for value in st.session_state.values():
-            if isinstance(value, str):
-                candidates.append(value)
+            ticker = _normalize_ticker(st.session_state.get(key))
+            if ticker:
+                return ticker
     except Exception:
         pass
     try:
         qp = st.query_params
-        candidates.extend([qp.get("ticker"), qp.get("stock"), qp.get("symbol")])
+        for value in (qp.get("ticker"), qp.get("stock"), qp.get("symbol")):
+            ticker = _normalize_ticker(value)
+            if ticker:
+                return ticker
+    except Exception:
+        pass
+
+    # Only the broad scalar scan needs DB validation, otherwise unrelated labels
+    # such as READY could accidentally look like ticker symbols.
+    candidates = []
+    try:
+        for value in st.session_state.values():
+            if isinstance(value, str):
+                candidates.append(value)
     except Exception:
         pass
     seen = set()
@@ -208,8 +222,6 @@ def _augment_time_map(df):
                 if hist in {"ACTIVE", "DEVELOPING"}:
                     out.at[matched_index, "Status"] = "WAIT" if status == "DIVERGENCE" else "NEUTRAL"
 
-    # Mobile decision-first order. Historical probabilities stay intact and
-    # explicitly follow the live evidence instead of masquerading as live calls.
     front = [c for c in [time_col, "Sesi", "Live %", "Live Match", "Match %", "Status"] if c in out.columns]
     rest = [c for c in out.columns if c not in front]
     return out[front + rest]
