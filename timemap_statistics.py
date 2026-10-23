@@ -56,22 +56,24 @@ def walk_forward(obs, threshold=.002, min_train=8):
 def build(ticker, frame, now, cfg=None):
     now=pd.Timestamp(now).tz_convert('Asia/Jakarta'); cfg=cfg or {}
     obs=observations(frame,ticker,now,cfg)
+    schedule_date=market_session.next_trading_date(cfg,now=now,after_close=False)
+    schedule=pd.Timestamp(schedule_date,tz='Asia/Jakarta')
     threshold=float(cfg.get('time_return_threshold',.002))
     summary,_=walk_forward(obs,threshold)
     labels=['09:00','09:30','10:00','10:30','11:00','11:30','12:00','13:30','14:00','14:30','15:00','15:30','15:50','16:00']
     rows=[]
     for label in labels:
         h,m=map(int,label.split(':'))
-        slot=now.replace(hour=h,minute=m,second=0,microsecond=0)
+        slot=schedule.replace(hour=h,minute=m,second=0,microsecond=0)
         ss=market_session.session_status(cfg,now=slot)
         session={'SESSION_1':'Sesi I','SESSION_2':'Sesi II'}.get(ss['status'],ss['status'])
-        if label in ('15:50','16:00') and market_session.is_trading_date(now.date(),cfg):
+        if label in ('15:50','16:00') and market_session.is_trading_date(schedule.date(),cfg):
             session='PRE-CLOSING' if label=='15:50' else 'CLOSING'
         z=obs[obs.slot==label].ret
         row=dict(time=label,session=session,horizon='30m' if ss['live'] else 'MARKET',samples=len(z) if ss['live'] else None,
                  up_pct=None,sideways_pct=None,down_pct=None,mean_return_pct=None,confidence_pct=None,
                  status='LIMITED' if ss['live'] else 'CHECKPOINT',note='Sampel historis belum cukup.',
-                 ticker=ticker,trusted=False,historical_asof=str(obs.day.max()) if not obs.empty else '',
+                 ticker=ticker,trusted=False,schedule_date=schedule_date,historical_asof=str(obs.day.max()) if not obs.empty else '',
                  validation_n=summary['n'],validation_accuracy_pct=summary['accuracy_pct'],validation_brier=summary['brier'],validation_status=summary['status'])
         if ss['live'] and len(z)>=8:
             counts=np.array([(z < -threshold).sum(),(z.abs()<=threshold).sum(),(z>threshold).sum()])

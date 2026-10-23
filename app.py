@@ -1759,7 +1759,7 @@ def stock_search_panel(universe, res, forced_ticker=None):
             _tm_meta=tm.attrs
             _tm_latest=_tm_meta.get('latest_bar')
             _tm_latest_wib=pd.Timestamp(_tm_latest).tz_convert('Asia/Jakarta').strftime('%d-%m-%Y %H:%M') if _tm_latest else '—'
-            st.caption(f"Sumber: {_tm_meta.get('source','UNKNOWN')} • Bar terakhir WIB: {_tm_latest_wib} • Historis sampai: {tm['historical_asof'].iloc[0] if not tm.empty else '—'} • Pengambilan {_tm_meta.get('elapsed_ms','—')} ms • Pembaruan otomatis 90 detik")
+            st.caption(f"Sumber: {_tm_meta.get('source','UNKNOWN')} • Bar terakhir WIB: {_tm_latest_wib} • Acuan jadwal: {tm['schedule_date'].iloc[0] if not tm.empty else '—'} • Historis sampai: {tm['historical_asof'].iloc[0] if not tm.empty else '—'} • Pengambilan {_tm_meta.get('elapsed_ms','—')} ms • Pembaruan otomatis 90 detik")
             if _tm_meta.get('errors'):
                 st.warning('Sumber intraday: '+'; '.join(_tm_meta['errors']))
             _tm_eval=_tm_meta.get('validation',{})

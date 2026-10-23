@@ -132,3 +132,14 @@ def test_explicit_table_ticker_wins_over_other_widget(monkeypatch):
     out=cp._checkpoint_rows(frame,None,base)
     assert seen==['AAAA'] and out['Live Ticker'].iloc[0]=='AAAA'
     assert out['Match %'].isna().all()
+
+
+def test_weekend_preserves_historical_baseline_for_next_session():
+    frame=bars(pd.bdate_range('2026-09-01','2026-10-23',tz='UTC')+pd.Timedelta(hours=2))
+    out=stats.build('TEST',frame,pd.Timestamp('2026-10-24 00:15',tz='Asia/Jakarta'))
+    assert out.up_pct.notna().any()
+    assert set(out.schedule_date)=={'2026-10-26'}
+    assert set(out.historical_asof)=={'2026-10-23'}
+    state=dict(market_date='2026-10-24',wib='2026-10-24T00:15:00+07:00',frame=pd.DataFrame(),fresh=False,market_status='WEEKEND',reason='NO DATA',source='fixture')
+    # A Saturday schedule never grants live trust to Monday's historical baseline.
+    assert not out.trusted.any()
