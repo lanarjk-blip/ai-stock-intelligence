@@ -48,7 +48,11 @@ def walk_forward(obs, threshold=.002, min_train=8):
     if ev.empty:
         return {'n':0,'accuracy_pct':None,'brier':None,'uniform_brier':2/3,'status':'INSUFFICIENT'},ev
     score=float(ev.brier.mean())
+    recalls=[float((ev.loc[ev.actual==label,'predicted']==label).mean()) for label in range(3) if (ev.actual==label).any()]
+    precision={str(label): float((ev.loc[ev.predicted==label,'actual']==label).mean()) if (ev.predicted==label).any() else None for label in range(3)}
     return {'n':len(ev),'accuracy_pct':float((ev.actual==ev.predicted).mean()*100),
+            'balanced_accuracy_pct':float(np.mean(recalls)*100),
+            'precision_down':precision['0'],'precision_up':precision['2'],
             'brier':score,'uniform_brier':2/3,
             'status':'INSUFFICIENT' if len(ev)<30 else 'ABOVE UNIFORM' if score < 2/3 else 'NO EDGE VS UNIFORM'},ev
 
@@ -84,4 +88,7 @@ def build(ticker, frame, now, cfg=None):
     out=pd.DataFrame(rows)
     out.attrs.update(frame.attrs)
     out.attrs['validation']=summary
+    out.attrs['calculated_at']=now.isoformat()
+    out.attrs['model_version']='R90-slot-laplace'
+    out.attrs['forecast_generated_at']=None
     return out
