@@ -43,3 +43,21 @@ def test_failed_refresh_preserves_original_fetch_timestamp(monkeypatch):
         assert recovered.attrs['latest_bar'] == str(bar.ts.iloc[0])
     finally:
         data._CACHE.clear()
+
+
+def test_freshness_never_calls_friday_bar_live_on_monday():
+    friday = pd.DataFrame({'ts':[pd.Timestamp('2026-10-23T08:00Z')]})
+    monday = pd.Timestamp('2026-10-26T03:00Z')
+    assert data.bar_freshness(friday, monday) == 'WAITING FOR NEW BAR'
+
+
+def test_freshness_weekend_history_not_live():
+    friday = pd.DataFrame({'ts':[pd.Timestamp('2026-10-23T08:00Z')]})
+    saturday = pd.Timestamp('2026-10-24T03:00Z')
+    assert data.bar_freshness(friday, saturday) == 'HISTORICAL ONLY'
+
+
+def test_freshness_rejects_same_day_failed_refresh():
+    frame = pd.DataFrame({'ts':[pd.Timestamp('2026-10-26T02:30Z')]})
+    frame.attrs['fallback'] = True
+    assert data.bar_freshness(frame, pd.Timestamp('2026-10-26T03:00Z')) == 'DATA STALE'
