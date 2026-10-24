@@ -74,6 +74,27 @@ def _download(ticker, days, timeout, now):
     return pd.DataFrame(columns=COLUMNS),'UNAVAILABLE',errors
 
 
+def bar_freshness(frame, now):
+    """Explicitly distinguish new trading-day bars from dated historical context.
+
+    This is a data-status contract, not a claim that the provider is real-time.
+    """
+    now = pd.Timestamp(now)
+    now = now.tz_localize('UTC') if now.tzinfo is None else now.tz_convert('UTC')
+    local_now = now.tz_convert('Asia/Jakarta')
+    if frame is None or frame.empty:
+        return 'DATA UNAVAILABLE'
+    latest = pd.to_datetime(frame.ts.max(), utc=True, errors='coerce')
+    if pd.isna(latest):
+        return 'DATA UNAVAILABLE'
+    if latest.tz_convert('Asia/Jakarta').date() != local_now.date():
+        return 'HISTORICAL ONLY' if local_now.weekday() >= 5 else 'WAITING FOR NEW BAR'
+    if frame.attrs.get('fallback') or frame.attrs.get('source') == 'LAST GOOD CACHE':
+        return 'DATA STALE'
+    # Intraday Yahoo 30m bars may be delayed or unchanged after a refresh.
+    return 'TODAY BAR AVAILABLE'
+
+
 def load(ticker, days=59, timeout=6, now=None):
     """Shared bounded cache by ticker/date/range. Empty responses expire too."""
     ticker = canonical_ticker(ticker)
@@ -88,6 +109,7 @@ def load(ticker, days=59, timeout=6, now=None):
         if cached and time.monotonic()-cached[0] < TTL_SECONDS:
             out = cached[1].copy(deep=True)
             out.attrs = dict(cached[1].attrs,cache_hit=True,elapsed_ms=round((time.perf_counter()-started)*1000,2))
+            out.attrs['data_status'] = bar_freshness(out, now)
             return out
         frame,source,errors = _download(ticker,days,timeout,now)
         if frame.empty and days > 5 and not (cached and not cached[1].empty):
@@ -110,6 +132,7 @@ def load(ticker, days=59, timeout=6, now=None):
                            refresh_attempt_at=now.isoformat(),
                            latest_bar=str(frame.ts.max()) if not frame.empty else None,
                            elapsed_ms=round((time.perf_counter()-started)*1000,2))
+        frame.attrs['data_status'] = bar_freshness(frame, now)
         with _LOCK:
             _CACHE[key]=(time.monotonic(),frame.copy(deep=True))
             _CACHE.move_to_end(key)
