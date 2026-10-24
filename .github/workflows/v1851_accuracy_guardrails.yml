@@ -104,7 +104,7 @@ jobs:
           assert cfg['housekeeping_engine_log_retention_days']==21
           calendar=json.loads(Path('data/idx_holidays.json').read_text(encoding='utf-8'))
           assert set(calendar['holidays']['2026']) == set(cfg['market_holidays'])
-          assert calendar['verified_years'] == [2026]
+          assert {2026, 2027}.issubset(calendar['verified_years'])
           worker=Path('worker_base.py').read_text(encoding='utf-8')
           assert 'DATA_QUALITY' in worker and 'accuracy_guardrails' in worker
           guard=Path('accuracy_guardrails.py').read_text(encoding='utf-8')
