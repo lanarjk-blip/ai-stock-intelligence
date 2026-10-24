@@ -19,4 +19,19 @@ Evidence before deployment (2026-10-23):
 - MPXL long-history and short-history requests timed out from this execution environment; no live data or successful validation claimed for that ticker.
 - Android wrapper uses the unchanged production URL, JavaScript and DOM storage enabled. No native code changes. No device/emulator test or new APK claimed.
 
-Next action: publish tested branch, verify GitHub CI, merge authorized PR, verify Time Map R90 on production for multiple symbols. Update deployment evidence after completion. Do not report deployment until visible.
+## Deployment verified, 24 October 2026 WIB
+
+- PR71 merged to main: a02545e3508eb9e962e0344f7e0fd3367ad4a66c. Main tree matches the tested implementation.
+- Final PR validation: 257 tests passed in 2.30s; production contracts, compile, live IHSG, JST end-to-end smoke, and opportunity analysis all passed. Post-merge validate-main also succeeded.
+- Production URL: https://ai-stock-intelligence-zijcl2pi2kjweeappbkjiy.streamlit.app/
+- Browser observed Time Map R90 with MPXL on 24 October at05:44 WIB and again at11:34 WIB. Source query1.finance.yahoo.com, latest bar23 October16:00 WIB, schedule reference26 October, historical cutoff23 October.
+- Local MPXL network timeouts did not reproduce on the production server. Production fetch was90.93ms at11:34 WIB, historical held-out n345, accuracy32.8%, Brier0.685. These are observed metrics, not an accuracy improvement claim.
+- In the same browser session, BBCA at11:33 WIB showed its own ticker, source and held-out n361, accuracy38.0%, Brier0.686; switching back to MPXL changed the ticker and evaluation. BBCA server fetch110.84ms. Both baselines remain NO EDGE VS UNIFORM.
+- Replay of real Friday BBCA/ANTM candles at an explicitly simulated Friday16:30 clock yielded nine regular-session candles per ticker, excluding lunch. The14:00 candle became available at14:30; closes5050 and2830 respectively. Replay is not a live-market observation.
+- Native Android wrapper configuration was reviewed; it opens the same unchanged HTTPS web app with JavaScript/DOM storage. No new APK built and no physical Android/emulator test performed.
+
+- Automatic fragment refresh observed without a Refresh click: MPXL inspection time advanced from11:34:15 to11:35:46 WIB; latest market bar stayed23 October16:00 WIB. Server fetch109.08ms on the refresh. Screenshot: r90-production.jpg.
+
+Remaining limits: the market is closed for the weekend, so active-market auto-refresh/data delivery cannot yet be observed during a trading session. No exhaustive live fetch of all957 tickers was performed. No calibrated predictive edge or guaranteed price direction has been established. Historical baseline remains separate from current-day realized evidence.
+
+Next verification when the market reopens: at09:30 WIB, check that the09:00 candle is completed, the09:30 candle remains FORMING, source timestamps advance, and changing ticker preserves isolation. No code changes are currently pending.
