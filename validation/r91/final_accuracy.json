@@ -1,0 +1,58 @@
+{
+  "BBCA": {
+    "bars": 498,
+    "period": [
+      "2026-08-26",
+      "2026-10-23"
+    ],
+    "R90": {
+      "n": 365,
+      "accuracy_pct": 38.35616438356164,
+      "balanced_accuracy_pct": 34.928142428142436,
+      "precision_down": 0.3486238532110092,
+      "precision_up": 0.21875,
+      "brier": 0.6831005509194471,
+      "uniform_brier": 0.6666666666666666,
+      "status": "NO EDGE VS UNIFORM"
+    },
+    "R91": {
+      "n": 365,
+      "accuracy_pct": 38.35616438356164,
+      "balanced_accuracy_pct": 34.928142428142436,
+      "precision_down": 0.3486238532110092,
+      "precision_up": 0.21875,
+      "brier": 0.6831005509194471,
+      "uniform_brier": 0.6666666666666666,
+      "status": "NO EDGE VS UNIFORM"
+    },
+    "reason": "Same statistical estimator; data integrity changes only. No new model promoted."
+  },
+  "ANTM": {
+    "bars": 499,
+    "period": [
+      "2026-08-26",
+      "2026-10-23"
+    ],
+    "R90": {
+      "n": 365,
+      "accuracy_pct": 38.082191780821915,
+      "balanced_accuracy_pct": 36.10161211529066,
+      "precision_down": 0.366120218579235,
+      "precision_up": 0.452991452991453,
+      "brier": 0.67015027739813,
+      "uniform_brier": 0.6666666666666666,
+      "status": "NO EDGE VS UNIFORM"
+    },
+    "R91": {
+      "n": 365,
+      "accuracy_pct": 38.082191780821915,
+      "balanced_accuracy_pct": 36.10161211529066,
+      "precision_down": 0.366120218579235,
+      "precision_up": 0.452991452991453,
+      "brier": 0.67015027739813,
+      "uniform_brier": 0.6666666666666666,
+      "status": "NO EDGE VS UNIFORM"
+    },
+    "reason": "Same statistical estimator; data integrity changes only. No new model promoted."
+  }
+}

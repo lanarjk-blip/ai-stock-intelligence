@@ -68,6 +68,7 @@ def _prepare_day(base, ticker):
         if data is None or data.empty or "ts" not in data.columns or "close" not in data.columns:
             result["reason"] = "NO INTRADAY BARS: " + "; ".join(result.get("provider_errors", []))
             return result
+        provider_failed = bool(data.attrs.get("fallback") or data.attrs.get("source") == "LAST GOOD CACHE")
         data = data.copy()
         data["ts"] = pd.to_datetime(data["ts"], utc=True, errors="coerce")
         for col in ("open", "high", "low", "close", "volume"):
@@ -105,13 +106,13 @@ def _prepare_day(base, ticker):
         data["available_at"] = data["wib"].dt.normalize() + pd.to_timedelta(data["end_minute"],unit="m")
         data = data[data["available_at"] <= now].copy()
         age = max(0.0, (now - data.iloc[-1]["available_at"]).total_seconds()/60) if not data.empty else None
-        fresh = bool(not data.empty and (age <= max(30, stale_limit) or pause))
+        fresh = bool(not provider_failed and not data.empty and (age <= max(30, stale_limit) or pause))
         result.update(
             {
                 "frame": data,
                 "fresh": fresh,
                 "age_min": age,
-                "reason": "MARKET CLOSED • ARCHIVE" if status in {"CLOSED", "AFTER_MARKET"} else "SESSION PAUSE" if pause else ("FRESH" if fresh else "DATA LIVE BELUM SEGAR"),
+                "reason": "DATA STALE • PROVIDER FAILED" if provider_failed else "MARKET CLOSED • ARCHIVE" if status in {"CLOSED", "AFTER_MARKET"} else "SESSION PAUSE" if pause else ("FRESH" if fresh else "DATA LIVE BELUM SEGAR"),
             }
         )
     except Exception as exc:
@@ -298,7 +299,7 @@ def _checkpoint_rows(frame, st, base):
         if session in {"SESI I", "SESI II"} and not slot_status["live"]:
             session = slot_status["status"]
             row["Sesi"] = session
-        if session in {"BREAK", "PRE-CLOSING", "CLOSING", "WEEKEND", "HOLIDAY", "CLOSED"}:
+        if session in {"BREAK", "PRE-CLOSING", "CLOSING", "WEEKEND", "HOLIDAY", "CLOSED", "CALENDAR_UNVERIFIED"}:
             row["Checkpoint State"] = session
             row["Live Confirmation"] = "WAIT • MARKET SCHEDULE"
             row["Live Match"] = session

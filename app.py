@@ -1745,6 +1745,8 @@ def stock_search_panel(universe, res, forced_ticker=None):
             else:
                 st.warning('Belum ada Entry Window yang cukup kuat. Sistem mempertahankan WAIT/NEUTRAL dan tidak memaksa sinyal.')
 
+        from timemap_resume import install_resume_guard
+        install_resume_guard()
         _tm_initial=tm_coverage
         @st.fragment(run_every=90)
         def _render_time_map():
@@ -1760,6 +1762,9 @@ def stock_search_panel(universe, res, forced_ticker=None):
             _tm_latest=_tm_meta.get('latest_bar')
             _tm_latest_wib=pd.Timestamp(_tm_latest).tz_convert('Asia/Jakarta').strftime('%d-%m-%Y %H:%M') if _tm_latest else '—'
             st.caption(f"Sumber: {_tm_meta.get('source','UNKNOWN')} • Bar terakhir WIB: {_tm_latest_wib} • Acuan jadwal: {tm['schedule_date'].iloc[0] if not tm.empty else '—'} • Historis sampai: {tm['historical_asof'].iloc[0] if not tm.empty else '—'} • Pengambilan {_tm_meta.get('elapsed_ms','—')} ms • Pembaruan otomatis 90 detik")
+            st.caption(f"Status data: {_tm_meta.get('data_status', 'DATA UNAVAILABLE')} • Model: R90 statistical baseline • Prediksi live: NO EDGE / belum tersedia • Statistik dihitung: {_tm_meta.get('calculated_at', '—')}")
+            if not _tm_context.get('calendar_verified'):
+                st.warning('CALENDAR UNVERIFIED — jadwal tahun ini belum terverifikasi; sinyal live dinonaktifkan.')
             if _tm_meta.get('errors'):
                 st.warning('Sumber intraday: '+'; '.join(_tm_meta['errors']))
             _tm_eval=_tm_meta.get('validation',{})

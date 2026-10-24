@@ -35,6 +35,7 @@ def _bundled_calendar():
             "holidays": holidays,
             "verified_years": years,
             "source": str(payload.get("source") or ""),
+            "sources": payload.get("sources", {}),
         }
     except Exception:
         return {"holidays": set(), "verified_years": set(), "source": ""}
@@ -43,13 +44,23 @@ def _bundled_calendar():
 def market_holidays(config=None):
     cfg = config or {}
     holidays = set(_bundled_calendar()["holidays"])
+    from idx_calendar_sync import verified_snapshot
+    for item in verified_snapshot().values():
+        holidays.update(item["days"])
     holidays.update(str(x) for x in (cfg.get("market_holidays") or []))
     return holidays
 
 
 def calendar_metadata(day=None):
     local_day = day or datetime.now(timezone.utc).astimezone(WIB).date()
-    bundled = _bundled_calendar()
+    bundled = dict(_bundled_calendar())
+    from idx_calendar_sync import verified_snapshot, schedule_refresh
+    schedule_refresh(datetime.now(WIB).year)
+    remote = verified_snapshot()
+    bundled["verified_years"] = bundled["verified_years"] | {int(y) for y in remote}
+    bundled["source"] = bundled.get("sources", {}).get(str(local_day.year), bundled["source"])
+    if str(local_day.year) in remote:
+        bundled["source"] = remote[str(local_day.year)]["source"]
     return {
         "year": int(local_day.year),
         "verified": int(local_day.year) in bundled["verified_years"],
@@ -121,6 +132,9 @@ def session_status(config=None, now=None):
         return {"live": False, "status": "WEEKEND", **common}
     if day_text in holidays:
         return {"live": False, "status": "HOLIDAY", **common}
+
+    if not calendar["verified"]:
+        return {"live": False, "status": "CALENDAR_UNVERIFIED", **common}
 
     if weekday == 4:
         sessions = [

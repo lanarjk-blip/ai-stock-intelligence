@@ -74,12 +74,45 @@ def _download(ticker, days, timeout, now):
     return pd.DataFrame(columns=COLUMNS),'UNAVAILABLE',errors
 
 
+def bar_freshness(frame, now):
+    """Explicitly distinguish new trading-day bars from dated historical context.
+
+    This is a data-status contract, not a claim that the provider is real-time.
+    """
+    now = pd.Timestamp(now)
+    now = now.tz_localize('UTC') if now.tzinfo is None else now.tz_convert('UTC')
+    local_now = now.tz_convert('Asia/Jakarta')
+    if frame is None or frame.empty:
+        return 'DATA UNAVAILABLE'
+    latest = pd.to_datetime(frame.ts.max(), utc=True, errors='coerce')
+    if pd.isna(latest):
+        return 'DATA UNAVAILABLE'
+    from market_session import session_status
+    session = session_status(now=local_now)
+    if not session['calendar_verified']:
+        return 'CALENDAR UNVERIFIED'
+    if session['status'] in {'WEEKEND', 'HOLIDAY', 'CLOSED'}:
+        return 'HISTORICAL ONLY'
+    if latest.tz_convert('Asia/Jakarta').date() != local_now.date():
+        return 'HISTORICAL ONLY' if local_now.weekday() >= 5 else 'WAITING FOR NEW BAR'
+    if frame.attrs.get('fallback') or frame.attrs.get('source') == 'LAST GOOD CACHE':
+        return 'DATA STALE'
+    if session['status'] in {'BREAK', 'PRE_MARKET'}:
+        return 'HISTORICAL ONLY'
+    if now - latest > pd.Timedelta(minutes=60):
+        return 'DATA STALE'
+    # Yahoo is not an exchange real-time feed.
+    return 'DELAYED'
+
+
 def load(ticker, days=59, timeout=6, now=None):
     """Shared bounded cache by ticker/date/range. Empty responses expire too."""
     ticker = canonical_ticker(ticker)
     now = pd.Timestamp.now(tz='UTC') if now is None else pd.Timestamp(now).tz_convert('UTC')
     days = min(59,max(2,int(days)))
-    key = (ticker,now.tz_convert('Asia/Jakarta').date().isoformat(),days)
+    from market_session import session_status
+    session = session_status(now=now)
+    key = (ticker,session['market_date'],session['status'],days)
     started = time.perf_counter()
     # Same-key requests coalesce; unrelated symbols can fetch concurrently.
     with _REFRESH_LOCKS[hash(key) % len(_REFRESH_LOCKS)]:
@@ -87,7 +120,8 @@ def load(ticker, days=59, timeout=6, now=None):
             cached = _CACHE.get(key)
         if cached and time.monotonic()-cached[0] < TTL_SECONDS:
             out = cached[1].copy(deep=True)
-            out.attrs = dict(cached[1].attrs,cache_hit=True,elapsed_ms=round((time.perf_counter()-started)*1000,2))
+            out.attrs = dict(cached[1].attrs,cache_hit=True,new_candle=False,elapsed_ms=round((time.perf_counter()-started)*1000,2))
+            out.attrs['data_status'] = bar_freshness(out, now)
             return out
         frame,source,errors = _download(ticker,days,timeout,now)
         if frame.empty and days > 5 and not (cached and not cached[1].empty):
@@ -110,6 +144,10 @@ def load(ticker, days=59, timeout=6, now=None):
                            refresh_attempt_at=now.isoformat(),
                            latest_bar=str(frame.ts.max()) if not frame.empty else None,
                            elapsed_ms=round((time.perf_counter()-started)*1000,2))
+        frame.attrs['data_status'] = bar_freshness(frame, now)
+        frame.attrs['trading_date'] = session['market_date']
+        frame.attrs['session'] = session['status']
+        frame.attrs['new_candle'] = bool(not frame.empty and (cached is None or frame.attrs['latest_bar'] != cached[1].attrs.get('latest_bar')))
         with _LOCK:
             _CACHE[key]=(time.monotonic(),frame.copy(deep=True))
             _CACHE.move_to_end(key)

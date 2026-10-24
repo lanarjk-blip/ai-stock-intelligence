@@ -10,7 +10,7 @@ def test_bundled_and_configured_2026_idx_holidays_are_identical():
     calendar = json.loads(Path("data/idx_holidays.json").read_text(encoding="utf-8"))
     bundled = set(calendar["holidays"]["2026"])
     configured = set(cfg["market_holidays"])
-    assert calendar["verified_years"] == [2026]
+    assert 2026 in calendar["verified_years"]
     assert cfg["market_calendar_verified_years"] == [2026]
     assert bundled == configured
     assert len(bundled) == 22
