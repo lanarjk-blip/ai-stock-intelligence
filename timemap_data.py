@@ -28,6 +28,9 @@ def clean(frame, ticker, now=None):
     now = pd.Timestamp.now(tz='UTC') if now is None else pd.Timestamp(now).tz_convert('UTC')
     if frame is None or frame.empty:
         return pd.DataFrame(columns=COLUMNS)
+    ticker = canonical_ticker(ticker)
+    if frame.attrs.get('ticker') and canonical_ticker(frame.attrs['ticker']) != ticker:
+        raise ValueError('TICKER MISMATCH')
     if 'ticker' in frame and set(frame.ticker.astype(str).str.upper().str.replace('.JK', '', regex=False)) != {ticker}:
         raise ValueError('TICKER MISMATCH')
     out = frame.reindex(columns=COLUMNS).copy()
@@ -94,7 +97,7 @@ def load(ticker, days=59, timeout=6, now=None):
             if not frame.empty:
                 source += ' • 5d recovery'
         # A failed refresh may retain dated bars; their timestamps are never advanced.
-        if frame.empty and cached:
+        if frame.empty and cached and not cached[1].empty:
             frame = cached[1].copy(deep=True)
             source = 'LAST GOOD CACHE'
         frame.attrs = dict(ticker=ticker,source=source,errors=errors,cache_hit=False,
