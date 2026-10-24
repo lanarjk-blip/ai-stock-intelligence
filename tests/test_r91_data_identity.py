@@ -19,3 +19,27 @@ def test_empty_cache_never_claims_last_good_data(monkeypatch):
         assert frame.empty
         assert frame.attrs['source']=='UNAVAILABLE'
     data._CACHE.clear()
+
+
+def test_failed_refresh_preserves_original_fetch_timestamp(monkeypatch):
+    data._CACHE.clear()
+    monkeypatch.setattr(data, 'TTL_SECONDS', 0)
+    first = pd.Timestamp('2026-10-23T03:00Z')
+    later = pd.Timestamp('2026-10-23T03:05Z')
+    bar = pd.DataFrame({'ts':[pd.Timestamp('2026-10-23T02:30Z')],
+                        'open':[100], 'high':[101], 'low':[99],
+                        'close':[100], 'volume':[10]})
+    calls = iter([(bar, 'provider', []),
+                  (pd.DataFrame(columns=data.COLUMNS), 'UNAVAILABLE', ['timeout'])])
+    monkeypatch.setattr(data, '_download', lambda *args: next(calls))
+    try:
+        original = data.load('MPXL', days=5, now=first)
+        recovered = data.load('MPXL', days=5, now=later)
+        assert original.attrs['fetched_at'] == first.isoformat()
+        assert recovered.attrs['source'] == 'LAST GOOD CACHE'
+        assert recovered.attrs['fallback'] is True
+        assert recovered.attrs['fetched_at'] == first.isoformat()
+        assert recovered.attrs['refresh_attempt_at'] == later.isoformat()
+        assert recovered.attrs['latest_bar'] == str(bar.ts.iloc[0])
+    finally:
+        data._CACHE.clear()
