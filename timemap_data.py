@@ -97,11 +97,19 @@ def load(ticker, days=59, timeout=6, now=None):
             if not frame.empty:
                 source += ' • 5d recovery'
         # A failed refresh may retain dated bars; their timestamps are never advanced.
+        fallback = False
+        original_fetch_time = now.isoformat()
         if frame.empty and cached and not cached[1].empty:
             frame = cached[1].copy(deep=True)
             source = 'LAST GOOD CACHE'
+            fallback = True
+            # Never stamp an old observation with the time of a failed refresh.
+            original_fetch_time = frame.attrs.get('fetched_at') or None
         frame.attrs = dict(ticker=ticker,source=source,errors=errors,cache_hit=False,
-                           fetched_at=now.isoformat(),latest_bar=str(frame.ts.max()) if not frame.empty else None,elapsed_ms=round((time.perf_counter()-started)*1000,2))
+                           fallback=fallback, fetched_at=original_fetch_time,
+                           refresh_attempt_at=now.isoformat(),
+                           latest_bar=str(frame.ts.max()) if not frame.empty else None,
+                           elapsed_ms=round((time.perf_counter()-started)*1000,2))
         with _LOCK:
             _CACHE[key]=(time.monotonic(),frame.copy(deep=True))
             _CACHE.move_to_end(key)
