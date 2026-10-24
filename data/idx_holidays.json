@@ -1,6 +1,9 @@
 {
   "source": "PT KSEI announcement PENG-0002/DIR/KSEI/0126, adjusted 2026 holiday and joint-leave calendar following IDX exchange-holiday calendar",
-  "verified_years": [2026],
+  "verified_years": [
+    2026,
+    2027
+  ],
   "holidays": {
     "2026": [
       "2026-01-01",
@@ -25,6 +28,31 @@
       "2026-12-24",
       "2026-12-25",
       "2026-12-31"
+    ],
+    "2027": [
+      "2027-01-01",
+      "2027-01-05",
+      "2027-02-05",
+      "2027-03-08",
+      "2027-03-09",
+      "2027-03-10",
+      "2027-03-11",
+      "2027-03-12",
+      "2027-03-15",
+      "2027-03-25",
+      "2027-03-26",
+      "2027-05-06",
+      "2027-05-17",
+      "2027-05-18",
+      "2027-05-19",
+      "2027-05-20",
+      "2027-06-01",
+      "2027-08-17",
+      "2027-12-24",
+      "2027-12-31"
     ]
+  },
+  "sources": {
+    "2027": "https://web.ksei.co.id/files/Pengumuman_Hari_Libur_dan_Cuti_Bersama_PT_KSEI_Tahun_2027.pdf"
   }
 }
