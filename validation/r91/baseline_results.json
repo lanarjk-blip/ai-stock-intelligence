@@ -1,0 +1,84 @@
+[
+  {
+    "ticker": "BBCA",
+    "days": 43,
+    "bars": 455,
+    "train_end": "2026-09-29",
+    "validation_end": "2026-10-12",
+    "test_start": "2026-10-13",
+    "test_end": "2026-10-23",
+    "selected_on_validation": "global",
+    "validation": {
+      "slot": {
+        "n": 95,
+        "accuracy": 0.3368421052631579,
+        "brier": 0.7046035626468277
+      },
+      "global": {
+        "n": 95,
+        "accuracy": 0.42105263157894735,
+        "brier": 0.6550178213410558
+      },
+      "conditional": {
+        "n": 95,
+        "accuracy": 0.35789473684210527,
+        "brier": 0.7082012773789838
+      }
+    },
+    "untouched_test": {
+      "slot": {
+        "n": 95,
+        "accuracy": 0.4105263157894737,
+        "brier": 0.6677614573836698
+      },
+      "global": {
+        "n": 95,
+        "accuracy": 0.3684210526315789,
+        "brier": 0.6660154647031926
+      }
+    },
+    "production_promotion": false,
+    "note": "slot comparator uses frozen training counts; not an exact replay of R90 expanding updates"
+  },
+  {
+    "ticker": "ANTM",
+    "days": 43,
+    "bars": 455,
+    "train_end": "2026-09-29",
+    "validation_end": "2026-10-12",
+    "test_start": "2026-10-13",
+    "test_end": "2026-10-23",
+    "selected_on_validation": "conditional",
+    "validation": {
+      "slot": {
+        "n": 95,
+        "accuracy": 0.3684210526315789,
+        "brier": 0.6687713071498623
+      },
+      "global": {
+        "n": 95,
+        "accuracy": 0.3684210526315789,
+        "brier": 0.6643669906555205
+      },
+      "conditional": {
+        "n": 95,
+        "accuracy": 0.4,
+        "brier": 0.6618036792328187
+      }
+    },
+    "untouched_test": {
+      "slot": {
+        "n": 95,
+        "accuracy": 0.42105263157894735,
+        "brier": 0.6361135758651287
+      },
+      "conditional": {
+        "n": 95,
+        "accuracy": 0.4105263157894737,
+        "brier": 0.6508985373418272
+      }
+    },
+    "production_promotion": false,
+    "note": "slot comparator uses frozen training counts; not an exact replay of R90 expanding updates"
+  }
+]
