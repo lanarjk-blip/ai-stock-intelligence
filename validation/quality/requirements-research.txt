@@ -1,0 +1,2 @@
+# Optional offline experiment only; production dependencies are unchanged.
+scikit-learn==1.8.0
