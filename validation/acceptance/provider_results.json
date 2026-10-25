@@ -1,0 +1,1358 @@
+{
+  "checked_at": "2026-10-25T02:17:28.714987+00:00",
+  "supported": 957,
+  "attempted": 128,
+  "not_attempted": 829,
+  "results": [
+    {
+      "ticker": "MPXL",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BBCA",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "ANTM",
+      "status": "DATA",
+      "bars": 47,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BBRI",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "GOTO",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "AALI",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "ZATA",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "ZYRX",
+      "status": "DATA",
+      "bars": 45,
+      "latest": "2026-10-23 08:30:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "ABBA",
+      "status": "NO_DATA",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ValueError: EMPTY VALID BARS",
+        "query2.finance.yahoo.com: ValueError: EMPTY VALID BARS"
+      ]
+    },
+    {
+      "ticker": "ABDA",
+      "status": "DATA",
+      "bars": 27,
+      "latest": "2026-10-23 08:30:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "ABMM",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "ACES",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "ACST",
+      "status": "DATA",
+      "bars": 19,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "ADES",
+      "status": "DATA",
+      "bars": 43,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "ADHI",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ValueError: EMPTY VALID BARS"
+      ]
+    },
+    {
+      "ticker": "AISA",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "AKKU",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "AKPI",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "AKRA",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "AKSI",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "ALDO",
+      "status": "DATA",
+      "bars": 43,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "ALKA",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "ALMI",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ValueError: EMPTY VALID BARS",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "ALTO",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "AMAG",
+      "status": "DATA",
+      "bars": 32,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "AMFG",
+      "status": "DATA",
+      "bars": 30,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "AMIN",
+      "status": "DATA",
+      "bars": 43,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "AMRT",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "ANJT",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "APEX",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "APIC",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "APII",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "APLI",
+      "status": "DATA",
+      "bars": 44,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "APLN",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "ARGO",
+      "status": "DATA",
+      "bars": 23,
+      "latest": "2026-10-23 03:30:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "ARII",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "ARNA",
+      "status": "DATA",
+      "bars": 47,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "ARTA",
+      "status": "DATA",
+      "bars": 43,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "ARTI",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ValueError: EMPTY VALID BARS",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "ARTO",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "ASBI",
+      "status": "DATA",
+      "bars": 33,
+      "latest": "2026-10-23 07:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "ASDM",
+      "status": "DATA",
+      "bars": 28,
+      "latest": "2026-10-23 07:30:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "ASGR",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "ASII",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "ASJT",
+      "status": "DATA",
+      "bars": 34,
+      "latest": "2026-10-23 08:30:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "ASMI",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "ASRI",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "ASRM",
+      "status": "DATA",
+      "bars": 36,
+      "latest": "2026-10-23 08:30:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "ASSA",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "ATIC",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "AUTO",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BABP",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BACA",
+      "status": "DATA",
+      "bars": 45,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BAJA",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BALI",
+      "status": "DATA",
+      "bars": 17,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BAPA",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BATA",
+      "status": "NO_DATA",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ValueError: EMPTY VALID BARS",
+        "query2.finance.yahoo.com: ValueError: EMPTY VALID BARS"
+      ]
+    },
+    {
+      "ticker": "BAYU",
+      "status": "DATA",
+      "bars": 40,
+      "latest": "2026-10-23 08:30:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BBHI",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BBKP",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BBLD",
+      "status": "DATA",
+      "bars": 16,
+      "latest": "2026-10-23 07:30:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BBMD",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BBNI",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BBRM",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BBTN",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BBYB",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BCAP",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BCIC",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BCIP",
+      "status": "DATA",
+      "bars": 45,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BDMN",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BEKS",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BEST",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BFIN",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BGTG",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BHIT",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BIKA",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ValueError: EMPTY VALID BARS",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BIMA",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ValueError: EMPTY VALID BARS"
+      ]
+    },
+    {
+      "ticker": "BINA",
+      "status": "DATA",
+      "bars": 44,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BIPI",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BIPP",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BIRD",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BISI",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BJBR",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BJTM",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BKDP",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BKSL",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BKSW",
+      "status": "DATA",
+      "bars": 43,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BLTA",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BLTZ",
+      "status": "DATA",
+      "bars": 36,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BMAS",
+      "status": "DATA",
+      "bars": 32,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BMRI",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BMSR",
+      "status": "DATA",
+      "bars": 42,
+      "latest": "2026-10-23 08:30:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BMTR",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BNBA",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BNBR",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BNGA",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BNII",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BNLI",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BOLT",
+      "status": "DATA",
+      "bars": 29,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BPFI",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BPII",
+      "status": "DATA",
+      "bars": 13,
+      "latest": "2026-10-23 07:30:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BRAM",
+      "status": "DATA",
+      "bars": 21,
+      "latest": "2026-10-23 08:30:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BRMS",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BRNA",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BRPT",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BSDE",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BSIM",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BSSR",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BSWD",
+      "status": "DATA",
+      "bars": 10,
+      "latest": "2026-10-20 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BTEK",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BTEL",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: HTTP 404",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BTON",
+      "status": "DATA",
+      "bars": 33,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "BTPN",
+      "status": "DATA",
+      "bars": 32,
+      "latest": "2026-10-23 08:30:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BUDI",
+      "status": "DATA",
+      "bars": 39,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BUKK",
+      "status": "DATA",
+      "bars": 43,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BULL",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BUMI",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BUVA",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BVIC",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BWPT",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "BYAN",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "CANI",
+      "status": "FETCH_FAILED",
+      "bars": 0,
+      "latest": null,
+      "data_status": "DATA UNAVAILABLE",
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ValueError: EMPTY VALID BARS"
+      ]
+    },
+    {
+      "ticker": "CASS",
+      "status": "DATA",
+      "bars": 27,
+      "latest": "2026-10-23 08:30:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    },
+    {
+      "ticker": "CEKA",
+      "status": "DATA",
+      "bars": 35,
+      "latest": "2026-10-23 08:30:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "CENT",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "CFIN",
+      "status": "DATA",
+      "bars": 46,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "CINT",
+      "status": "DATA",
+      "bars": 44,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query1.finance.yahoo.com",
+      "errors": []
+    },
+    {
+      "ticker": "CITA",
+      "status": "DATA",
+      "bars": 45,
+      "latest": "2026-10-23 09:00:00+00:00",
+      "data_status": "HISTORICAL ONLY",
+      "source": "query2.finance.yahoo.com",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R"
+      ]
+    }
+  ]
+}
