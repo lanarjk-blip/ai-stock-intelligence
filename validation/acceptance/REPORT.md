@@ -1,6 +1,6 @@
 # R91 final acceptance — 25 October 2026
 
-Tested production/main commit: ae15de23aea5032732b4cc500960927cfa6123e3 (PR #74). No production code or APK changes in this acceptance run.
+Runtime source tested (exact production SHA not independently attested): ae15de23aea5032732b4cc500960927cfa6123e3 (PR #74). No production code or APK changes in this acceptance run.
 
 | Test | Result | Evidence / limit |
 |---|---|---|
@@ -10,8 +10,8 @@ Tested production/main commit: ae15de23aea5032732b4cc500960927cfa6123e3 (PR #74)
 | Open at08:00/09:00/10:00/13:30/14:00/16:30 | PASS (server simulation) | Six clock-controlled scenarios; process cache cleared to simulate fresh session. NOT physical APK lifecycle proof |
 | Empty/failing provider, unchanged/new bars, cross-ticker cache | PASS (simulation) | Acceptance plus existing R90/R91 tests |
 | All 957 symbol identities | PASS (simulation) | Unique per-symbol provider fixture and bounded cache; not a live provider-coverage claim |
-| Actual provider coverage | PENDING | 128 of957 completed before execution network permission cancellation. 82 DATA,44 FETCH_FAILED,2 NO_DATA;829 not attempted |
-| Delayed/suspended/new-listing categories | PENDING | One successful result has history older than2026-10-23. Cannot infer suspension or delay from missing data; official category coverage not established |
+| Actual provider coverage | COMPLETE probe / FAIL universal availability | 957/957 attempted; 540 DATA, 401 FETCH_FAILED, 16 NO_DATA; 0 unattempted. Results span resumed batches on25Oct; 2s timeout is stricter than production and this is not production SLA |
+| Delayed/suspended/new-listing categories | PENDING | 5 successful results have latest history older than2026-10-23. Cannot infer suspension or delay from missing data; official category coverage not established |
 | Whole regression | PASS | 290 passed,0 failed,4.72s locally; 43 targeted passed,0 failed,1.49s |
 | Production UI and scheduled refresh | PASS | MPXL browser:09:18:41→09:20:11 WIB without clicking Refresh. Candle stays2026-10-23 16:00, HISTORICAL ONLY, NO EDGE. Fetch113.82→97.62ms. Search and AI Stock Ask render WAIT |
 | Exact deployed SHA attestation | PENDING | GitHub main SHA verified; new R91 UI behavior observed. App does not expose running git SHA, so exact runtime revision is not independently attested |
@@ -40,4 +40,12 @@ Uniform Brier=.6667. Full per-model metrics/calibration bins in accuracy.json. N
 
 Provider per-ticker errors and timestamps are in provider_results.json. Resume provider_probe.py from the saved checkpoint after network access is available; do not count unattempted symbols as failed/no data. Four concurrent requests; stop on429 or a whole batch of transport failures. Short2-second read timeout measures this probe's availability, not production SLA.
 
-Next actions: complete remaining829 providers and verify category coverage, observe market-day transitions, verify physical Android lifecycle, expose/read runtime revision before claiming exact SHA attestation. No additional deployment was necessary for the passing simulation tests.
+Next actions: investigate failed provider requests under production conditions and verify category coverage, observe market-day transitions, verify physical Android lifecycle, expose/read runtime revision before claiming exact SHA attestation. No additional deployment was necessary for the passing simulation tests.
+
+## Completed probe and production recheck
+
+All957 distinct supported tickers attempted, with no duplicated ticker result. Counts: {"FETCH_FAILED": 401, "DATA": 540, "NO_DATA": 16}. Latest candle UTC dates among DATA results: {"2026-10-23": 535, "2026-10-20": 2, "2026-10-22": 2, "2026-10-21": 1}. Older bars are not proof of suspension or provider delay. No live market test was performed on this Sunday.
+
+Production reopened25Oct2026 at13:54:44 WIB: MPXL source query1.finance.yahoo.com, latest candle23Oct16:00 WIB, HISTORICAL ONLY, live forecast NO EDGE / belum tersedia. Fetch99.72ms. This independently repeats the earlier browser-session observation; not physical Android evidence. No controlled before/after latency benchmark, hence no speed gain claimed.
+
+Acceptance tests merged in PR75, main f17829f04fd8b7ece7ced7a79666a7e26e89487d. GitHub CI:290 passed in4.15s. This update changes evidence only, no runtime/model/APK changes.
