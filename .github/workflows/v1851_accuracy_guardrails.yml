@@ -94,7 +94,7 @@ jobs:
           from pathlib import Path
           cfg=json.loads(Path('config.json').read_text(encoding='utf-8'))
           assert cfg['engine_version']=='1.8.57', cfg['engine_version']
-          assert cfg['mobile_ui_version']=='1.8.57', cfg['mobile_ui_version']
+          assert cfg['mobile_ui_version']=='1.8.58', cfg['mobile_ui_version']
           assert cfg['production_stabilization_version']=='1.8.57', cfg['production_stabilization_version']
           assert cfg['ensemble_safety_version']=='R55-R60-ADAPTIVE-ENSEMBLE-1'
           assert cfg['data_quality_gate_enabled'] is True
