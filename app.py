@@ -1767,6 +1767,7 @@ def stock_search_panel(universe, res, forced_ticker=None):
                 st.warning('CALENDAR UNVERIFIED — jadwal tahun ini belum terverifikasi; sinyal live dinonaktifkan.')
             if _tm_meta.get('errors'):
                 st.warning('Sumber intraday: '+'; '.join(_tm_meta['errors']))
+            st.caption('Pembaruan candle: '+('candle live yang lebih baru tersedia.' if _tm_meta.get('new_candle') else 'belum ada candle live baru; waktu refresh bukan waktu candle.'))
             _tm_eval=_tm_meta.get('validation',{})
             if _tm_eval.get('n',0):
                 st.caption(f"Uji kronologis per ticker: {_tm_eval['n']} hasil di luar sampel • ketepatan {_tm_eval['accuracy_pct']:.1f}% • Brier {_tm_eval['brier']:.3f} (uniform 0.667; lebih kecil lebih baik) • {_tm_eval['status']}")

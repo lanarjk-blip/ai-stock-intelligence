@@ -46,6 +46,7 @@ def clean(frame, ticker, now=None):
 
 def _download(ticker, days, timeout, now):
     errors = []
+    best = None
     # 59d stays inside the provider's 60-day intraday retention boundary.
     params = {'period1':int(now.timestamp())-min(59, max(2,days))*86400,
               'period2':int(now.timestamp()),'interval':'30m','events':'history'}
@@ -67,10 +68,20 @@ def _download(ticker, days, timeout, now):
                         **{c:quote.get(c,[None]*len(ts)) for c in COLUMNS[1:]}}),ticker,now)
             if frame.empty:
                 raise ValueError('EMPTY VALID BARS')
+            # An HTTP success can still return yesterday's tape. During a live
+            # session, try the second host before accepting stale evidence.
+            if best is None or frame.ts.max() > best[0].ts.max():
+                best = (frame, host)
+            from market_session import session_status
+            if session_status(now=now)['live'] and bar_freshness(frame,now) in {'WAITING FOR NEW BAR','DATA STALE'}:
+                errors.append(f'{host}: STALE CANDLES')
+                continue
             return frame,host,errors
         except Exception as exc:
             code = getattr(getattr(exc,'response',None),'status_code',None)
             errors.append(f'{host}: {"HTTP "+str(code) if code else type(exc).__name__+": "+str(exc)[:65]}')
+    if best is not None:
+        return best[0],best[1],errors
     return pd.DataFrame(columns=COLUMNS),'UNAVAILABLE',errors
 
 
@@ -124,10 +135,18 @@ def load(ticker, days=59, timeout=6, now=None):
             out.attrs['data_status'] = bar_freshness(out, now)
             return out
         frame,source,errors = _download(ticker,days,timeout,now)
-        if frame.empty and days > 5 and not (cached and not cached[1].empty):
+        def reject_regression(candidate):
+            if cached and not cached[1].empty and not candidate.empty and candidate.ts.max() < cached[1].ts.max():
+                errors.append('PROVIDER TIMESTAMP REGRESSION: retained newer dated cache')
+                return pd.DataFrame(columns=COLUMNS)
+            return candidate
+        frame = reject_regression(frame)
+        if frame.empty and days > 5 and not any('HTTP 429' in e for e in errors):
             # Recover today's tape even when the long history request fails.
+            # Existing cache must not suppress this opportunity to get new bars.
             frame,source,recent_errors = _download(ticker,5,timeout,now)
             errors += recent_errors
+            frame = reject_regression(frame)
             if not frame.empty:
                 source += ' • 5d recovery'
         # A failed refresh may retain dated bars; their timestamps are never advanced.
@@ -147,7 +166,9 @@ def load(ticker, days=59, timeout=6, now=None):
         frame.attrs['data_status'] = bar_freshness(frame, now)
         frame.attrs['trading_date'] = session['market_date']
         frame.attrs['session'] = session['status']
-        frame.attrs['new_candle'] = bool(not frame.empty and (cached is None or frame.attrs['latest_bar'] != cached[1].attrs.get('latest_bar')))
+        frame.attrs['new_candle'] = bool(not frame.empty and not fallback
+            and frame.attrs['data_status'] == 'DELAYED'
+            and (cached is None or cached[1].empty or frame.ts.max() > cached[1].ts.max()))
         with _LOCK:
             _CACHE[key]=(time.monotonic(),frame.copy(deep=True))
             _CACHE.move_to_end(key)
