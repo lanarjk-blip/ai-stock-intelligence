@@ -1,0 +1,84 @@
+{
+  "BBCA": {
+    "before": {
+      "accepted_bars": 453,
+      "period": [
+        "2026-08-26",
+        "2026-10-23"
+      ],
+      "metrics": {
+        "n": 365,
+        "accuracy_pct": 38.35616438356164,
+        "balanced_accuracy_pct": 34.928142428142436,
+        "precision_down": 0.3486238532110092,
+        "precision_up": 0.21875,
+        "brier": 0.6831005509194471,
+        "uniform_brier": 0.6666666666666666,
+        "status": "NO EDGE VS UNIFORM"
+      },
+      "elapsed_ms": 62.38
+    },
+    "after": {
+      "accepted_bars": 410,
+      "period": [
+        "2026-08-26",
+        "2026-10-23"
+      ],
+      "metrics": {
+        "n": 330,
+        "accuracy_pct": 36.96969696969697,
+        "balanced_accuracy_pct": 34.263222157959,
+        "precision_down": 0.3486238532110092,
+        "precision_up": 0.21875,
+        "brier": 0.6865867099418581,
+        "uniform_brier": 0.6666666666666666,
+        "baseline_brier": 0.664605867743763,
+        "evaluation_days": 35,
+        "ece": 0.08921183307686824,
+        "status": "NO EDGE VS BASELINES"
+      },
+      "elapsed_ms": 68.01
+    }
+  },
+  "ANTM": {
+    "before": {
+      "accepted_bars": 453,
+      "period": [
+        "2026-08-26",
+        "2026-10-23"
+      ],
+      "metrics": {
+        "n": 365,
+        "accuracy_pct": 38.082191780821915,
+        "balanced_accuracy_pct": 36.10161211529066,
+        "precision_down": 0.366120218579235,
+        "precision_up": 0.452991452991453,
+        "brier": 0.67015027739813,
+        "uniform_brier": 0.6666666666666666,
+        "status": "NO EDGE VS UNIFORM"
+      },
+      "elapsed_ms": 46.45
+    },
+    "after": {
+      "accepted_bars": 410,
+      "period": [
+        "2026-08-26",
+        "2026-10-23"
+      ],
+      "metrics": {
+        "n": 330,
+        "accuracy_pct": 36.06060606060606,
+        "balanced_accuracy_pct": 34.189309995436986,
+        "precision_down": 0.366120218579235,
+        "precision_up": 0.4024390243902439,
+        "brier": 0.6764240077491047,
+        "uniform_brier": 0.6666666666666666,
+        "baseline_brier": 0.6608171047877712,
+        "evaluation_days": 35,
+        "ece": 0.08364962121776984,
+        "status": "NO EDGE VS BASELINES"
+      },
+      "elapsed_ms": 90.18
+    }
+  }
+}

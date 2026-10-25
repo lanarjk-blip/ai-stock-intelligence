@@ -5,6 +5,13 @@ import market_session
 from timemap_data import clean
 
 
+def full_regular_bar(ts, cfg=None):
+    """A 30m sample must remain within one verified regular session."""
+    start = market_session.session_status(cfg or {}, now=ts)
+    end = market_session.session_status(cfg or {}, now=ts + pd.Timedelta(minutes=30) - pd.Timedelta(seconds=1))
+    return bool(start['live'] and end['live'] and start['status'] == end['status'])
+
+
 def observations(frame, ticker, cutoff, cfg=None):
     """Each 30m candle predicts open->close; only completed previous days train.
 
@@ -19,8 +26,11 @@ def observations(frame, ticker, cutoff, cfg=None):
     local = d.ts.dt.tz_convert('Asia/Jakarta')
     d['day']=local.dt.date
     d['slot']=local.dt.strftime('%H:%M')
-    regular = local.map(lambda ts: market_session.session_status(cfg or {},now=ts)['live'])
-    d=d[regular & (d.day < cutoff.tz_convert('Asia/Jakarta').date())].copy()
+    regular = local.map(lambda ts: full_regular_bar(ts, cfg))
+    aligned = (local.dt.minute % 30 == 0) & (local.dt.second == 0)
+    # A carried price with no reported trade is not evidence of a flat outcome.
+    liquid = d.volume.notna() & (d.volume > 0)
+    d=d[regular & aligned & liquid & (d.day < cutoff.tz_convert('Asia/Jakarta').date())].copy()
     d['ret']=d.close/d.open-1
     return d[['day','slot','ret']].drop_duplicates(['day','slot']).sort_values(['day','slot'])
 
@@ -32,6 +42,13 @@ def walk_forward(obs, threshold=.002, min_train=8):
     fitting/tuning against held-out outcomes. No claim of validated skill at n<30.
     """
     predictions=[]
+    obs=obs.dropna(subset=['day','slot','ret']).drop_duplicates(['day','slot']).sort_values(['day','slot'])
+    # Freeze the global-frequency comparator before each held-out day starts.
+    prior={}; global_counts=np.zeros(3)
+    for day, group in obs.groupby('day',sort=True):
+        prior[day]=(global_counts+1)/(global_counts.sum()+3)
+        labels=np.where(group.ret.to_numpy()>threshold,2,np.where(group.ret.to_numpy() < -threshold,0,1))
+        global_counts += np.bincount(labels,minlength=3)
     for slot, group in obs.groupby('slot'):
         group=group.sort_values('day')
         labels=np.where(group.ret.to_numpy()>threshold,2,np.where(group.ret.to_numpy() < -threshold,0,1))
@@ -42,19 +59,30 @@ def walk_forward(obs, threshold=.002, min_train=8):
                 target=np.eye(3)[label]
                 predictions.append({'day':str(group.iloc[i].day),'slot':slot,'train_end':str(group.iloc[i-1].day),
                                     'actual':int(label),'predicted':int(np.argmax(p)),
-                                    'brier':float(np.sum((p-target)**2))})
+                                    'brier':float(np.sum((p-target)**2)),
+                                    'baseline_brier':float(np.sum((prior[group.iloc[i].day]-target)**2)),
+                                    'confidence':float(p.max()),
+                                    'p_down':float(p[0]),'p_flat':float(p[1]),'p_up':float(p[2])})
             counts[label]+=1
     ev=pd.DataFrame(predictions)
     if ev.empty:
         return {'n':0,'accuracy_pct':None,'brier':None,'uniform_brier':2/3,'status':'INSUFFICIENT'},ev
     score=float(ev.brier.mean())
+    baseline=float(ev.baseline_brier.mean())
+    days=int(ev.day.nunique())
+    # Calibration is diagnostic only; never an automatic promotion criterion.
+    ece=0.0
+    for lo in np.arange(0,1,.1):
+        z=ev[(ev.confidence>=lo) & (ev.confidence < lo+.1 if lo<.9 else ev.confidence<=1)]
+        if len(z): ece += len(z)/len(ev)*abs(float(z.confidence.mean())-float((z.actual==z.predicted).mean()))
     recalls=[float((ev.loc[ev.actual==label,'predicted']==label).mean()) for label in range(3) if (ev.actual==label).any()]
     precision={str(label): float((ev.loc[ev.predicted==label,'actual']==label).mean()) if (ev.predicted==label).any() else None for label in range(3)}
     return {'n':len(ev),'accuracy_pct':float((ev.actual==ev.predicted).mean()*100),
             'balanced_accuracy_pct':float(np.mean(recalls)*100),
             'precision_down':precision['0'],'precision_up':precision['2'],
             'brier':score,'uniform_brier':2/3,
-            'status':'INSUFFICIENT' if len(ev)<30 else 'ABOVE UNIFORM' if score < 2/3 else 'NO EDGE VS UNIFORM'},ev
+            'baseline_brier':baseline,'evaluation_days':days,'ece':ece,
+            'status':'INSUFFICIENT' if len(ev)<30 or days<10 else 'NO EDGE VS BASELINES' if score>=min(baseline,2/3) else 'UNCONFIRMED EDGE; HISTORICAL ONLY'},ev
 
 
 def build(ticker, frame, now, cfg=None):
@@ -70,6 +98,7 @@ def build(ticker, frame, now, cfg=None):
         h,m=map(int,label.split(':'))
         slot=schedule.replace(hour=h,minute=m,second=0,microsecond=0)
         ss=market_session.session_status(cfg,now=slot)
+        full_bar=full_regular_bar(slot,cfg)
         session={'SESSION_1':'Sesi I','SESSION_2':'Sesi II'}.get(ss['status'],ss['status'])
         if label in ('15:50','16:00') and market_session.is_trading_date(schedule.date(),cfg):
             session='PRE-CLOSING' if label=='15:50' else 'CLOSING'
@@ -79,7 +108,10 @@ def build(ticker, frame, now, cfg=None):
                  status='LIMITED' if ss['live'] else 'CHECKPOINT',note='Sampel historis belum cukup.',
                  ticker=ticker,trusted=False,schedule_date=schedule_date,historical_asof=str(obs.day.max()) if not obs.empty else '',
                  validation_n=summary['n'],validation_accuracy_pct=summary['accuracy_pct'],validation_brier=summary['brier'],validation_status=summary['status'])
-        if ss['live'] and len(z)>=8:
+        if ss['live'] and not full_bar:
+            row.update(horizon='PARTIAL SESSION',status='CHECKPOINT',samples=None,
+                       note='Horizon melewati akhir sesi reguler; tidak dinilai sebagai sampel 30 menit.')
+        if full_bar and len(z)>=8:
             counts=np.array([(z < -threshold).sum(),(z.abs()<=threshold).sum(),(z>threshold).sum()])
             p=(counts+1)/(len(z)+3)
             row.update(down_pct=p[0]*100,sideways_pct=p[1]*100,up_pct=p[2]*100,mean_return_pct=float(z.mean()*100),
