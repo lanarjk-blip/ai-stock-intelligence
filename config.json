@@ -150,7 +150,7 @@
   "ai_stock_ask_version": "1.8.45",
   "ai_stock_ask_enabled": true,
   "production_stabilization_version": "1.8.57",
-  "mobile_ui_version": "1.8.57",
+  "mobile_ui_version": "1.8.58",
   "chart_ui_version": "1.8.57",
   "live_precision_version": "R48-LIVE-FIRST-1",
   "live_precision_enabled": true,
