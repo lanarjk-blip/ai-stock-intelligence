@@ -1,0 +1,47 @@
+{
+  "threshold": 0.6,
+  "total_outcomes": 152,
+  "signals": 4,
+  "correct": 1,
+  "coverage": 0.02631578947368421,
+  "accuracy": 0.25,
+  "per_ticker": {
+    "ANTM": {
+      "signals": 3,
+      "correct": 0
+    },
+    "BBCA": {
+      "signals": 1,
+      "correct": 1
+    }
+  },
+  "precision": {
+    "UP": {
+      "n": 2,
+      "accuracy": 0.5
+    },
+    "DOWN": {
+      "n": 2,
+      "accuracy": 0.0
+    }
+  },
+  "decision": "NO PROMOTION; confidence filtering has not established an edge",
+  "diagnostic_only": true,
+  "production_enabled": false,
+  "model": "logistic",
+  "test_days": [
+    "2026-10-14",
+    "2026-10-15",
+    "2026-10-16",
+    "2026-10-19",
+    "2026-10-20",
+    "2026-10-21",
+    "2026-10-22",
+    "2026-10-23"
+  ],
+  "limitations": [
+    "Previously inspected two-ticker historical replay, not untouched live evidence",
+    "No fees/slippage model; no synchronized IHSG/sector data",
+    "No model or probability threshold promoted to production"
+  ]
+}
