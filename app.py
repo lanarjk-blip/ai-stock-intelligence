@@ -1771,6 +1771,9 @@ def stock_search_panel(universe, res, forced_ticker=None):
             _tm_latest=_tm_meta.get('latest_bar')
             _tm_latest_wib=pd.Timestamp(_tm_latest).tz_convert('Asia/Jakarta').strftime('%d-%m-%Y %H:%M') if _tm_latest else '—'
             st.caption(f"Sumber: {_tm_meta.get('source','UNKNOWN')} • Bar terakhir WIB: {_tm_latest_wib} • Acuan jadwal: {tm['schedule_date'].iloc[0] if not tm.empty else '—'} • Historis sampai: {tm['historical_asof'].iloc[0] if not tm.empty else '—'} • Pengambilan {_tm_meta.get('elapsed_ms','—')} ms • Pembaruan otomatis 90 detik")
+            if _tm_latest:
+                _tm_delay=max(0.0,(_tm_now-pd.Timestamp(_tm_latest).tz_convert('Asia/Jakarta')).total_seconds()/60)
+                st.info(f"Timestamp candle terakhir: {_tm_latest_wib} WIB • selisih waktu {_tm_delay:.1f} menit. Feed provider dapat terlambat; bukan harga broker realtime. Arah tabel = realisasi interval 30 menit, bukan prediksi menit berikutnya.")
             st.caption(f"Status data: {_tm_meta.get('data_status', 'DATA UNAVAILABLE')} • Model: R90 statistical baseline • Prediksi live: NO EDGE / belum tersedia • Statistik dihitung: {_tm_meta.get('calculated_at', '—')}")
             st.warning('BELUM ADA PREDIKSI LIVE YANG TERVALIDASI — NO EDGE. Persentase historis bukan peluang naik/turun hari ini.')
             if not _tm_context.get('calendar_verified'):

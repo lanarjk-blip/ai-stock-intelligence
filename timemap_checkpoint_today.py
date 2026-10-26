@@ -378,6 +378,10 @@ def _checkpoint_rows(frame, st, base):
         threshold = float(base._cfg().get("time_return_threshold", .002)) * 100 if hasattr(base,"_cfg") else .2
         slot_return = metrics["slot_return_pct"]
         live_direction = "UP" if slot_return > threshold else "DOWN" if slot_return < -threshold else "SIDEWAYS"
+        # Realized direction must describe this 30-minute candle, not the
+        # cumulative indicator score since the morning open.
+        row["Live Direction"] = live_direction
+        row["Status"] = f"REALIZED {live_direction}"
         has_baseline = all(_num(hist.get(c)) is not None for c in ("UP %", "DOWN %", "Sideways %"))
         match_pct = _history_probability(hist, live_direction) if has_baseline else None
         confirmation = ("SESUAI BASELINE" if live_direction == hist_direction else "BERBEDA DARI BASELINE") if has_baseline else "BASELINE BELUM CUKUP"

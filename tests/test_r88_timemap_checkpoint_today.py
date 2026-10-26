@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 import timemap_checkpoint_today as cp
 
 
@@ -91,3 +92,25 @@ def test_checkpoint_module_is_universal_and_market_day_scoped():
     assert 'data[data["wib"].dt.date.astype(str) == str(market_date)]' in source
     assert 'NO BAR FOR ACTIVE MARKET DAY' in source
     assert 'WAIT FUTURE' in source
+
+
+@pytest.mark.parametrize('ticker',['PTSP','MPXL','BBCA','ANTM','ZZZZ'])
+def test_afternoon_direction_tracks_slot_even_when_morning_score_is_bullish(monkeypatch,ticker):
+    frame=history_frame();frame.attrs['ticker']=ticker
+    state=day_state('2026-10-26',[120.0,130.0,129.0])
+    state['market_status']='SESSION_2'
+    state['wib']='2026-10-26T15:00:00+07:00'
+    state['frame'].loc[state['frame'].index[-1],'open']=130.0
+    # Still far above the day open, but the last completed candle fell.
+    assert cp._checkpoint_metrics(state['frame'],600)['score']>=2
+    monkeypatch.setattr(cp,'_prepare_day',lambda _base,_ticker:state)
+    row=cp._checkpoint_rows(frame,DummySt(),DummyBase()).query('Waktu == "10:00"').iloc[0]
+    assert row['Slot Return %']<0
+    assert row['Live Direction']=='DOWN'
+    assert row['Status']=='REALIZED DOWN'
+    # Appending future tape cannot rewrite the 10:00 result.
+    future=state['frame'].iloc[[-1]].copy()
+    future['minute']=630;future['close']=200;future['open']=129
+    state['frame']=pd.concat([state['frame'],future],ignore_index=True)
+    row=cp._checkpoint_rows(frame,DummySt(),DummyBase()).query('Waktu == "10:00"').iloc[0]
+    assert row['Live Direction']=='DOWN'
