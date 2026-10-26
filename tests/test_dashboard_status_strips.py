@@ -58,4 +58,3 @@ for _ in range(5):
     assert [c.value for c in app.caption]==['Storage NORMAL']
     assert getattr(theme._storage_health,'_asi_once_per_render',False)
     assert legacy_wrapper.__globals__['_storage_health'] is theme._storage_health
-
