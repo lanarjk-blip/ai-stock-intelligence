@@ -242,6 +242,10 @@ def format_wib(value):
 
 
 def _storage_health():
+    """Read the status for a single caption, despite nested legacy wrappers."""
+    if st.session_state.get('_asi_storage_strip_drawn',False):
+        return None
+    st.session_state['_asi_storage_strip_drawn'] = True
     try:
         import storage_housekeeping
         return storage_housekeeping.storage_health()
