@@ -11,7 +11,7 @@ def setup():
     dynamic=pd.DataFrame([dict(ticker='BBCA',generated_at='2026-10-27T10:02:00+07:00',candidate_mode='STRICT',
         state='ENTRY READY',entry_status='ACTIVE',decision='BUY',close=100,risk='LOW',market_regime='BULLISH',
         entry_low=99,entry_high=101,stop_loss=98,target_1=104,risk_reward=2.)])
-    candles=pd.DataFrame([dict(ticker='BBCA',ts='2026-10-27T10:00:00+07:00',open=100,close=100,volume=1000,source='TEST')])
+    candles=pd.DataFrame([dict(ticker='BBCA',ts='2026-10-27T10:00:00+07:00',open=100.,high=101.,low=99.,close=100.,volume=1000.,source='TEST')])
     return universe,dynamic,candles,session,{'known':True,'ready':True}
 
 
@@ -67,10 +67,10 @@ def test_conflicting_duplicate_snapshots_fail_closed_and_inputs_unchanged():
 
 def test_saved_candle_query_uses_actual_timestamp_not_refresh_time(tmp_path):
     path=tmp_path/'data.db';con=sqlite3.connect(path)
-    con.execute('CREATE TABLE intraday(ticker TEXT,ts TEXT,open REAL,close REAL,volume REAL,source TEXT)')
-    con.executemany('INSERT INTO intraday VALUES(?,?,?,?,?,?)',[
-        ('BBCA','2026-10-26T10:00:00+07:00',98,98,100,'TEST'),
-        ('BBCA','2026-10-27T03:00:00+00:00',100,100,200,'TEST')])
+    con.execute('CREATE TABLE intraday(ticker TEXT,ts TEXT,open REAL,high REAL,low REAL,close REAL,volume REAL,source TEXT)')
+    con.executemany('INSERT INTO intraday VALUES(?,?,?,?,?,?,?,?)',[
+        ('BBCA','2026-10-26T10:00:00+07:00',98,99,97,98,100,'TEST'),
+        ('BBCA','2026-10-27T03:00:00+00:00',100,101,99,100,200,'TEST')])
     con.commit();con.close()
     result=latest_candles(path)
     assert len(result)==1 and result.iloc[0]['close']==100
@@ -178,3 +178,58 @@ render_groups(u,d,c,s,q,key='pages')
     markup=' '.join(m.value for m in app.markdown)
     assert '?ticker=T094' in markup and '?ticker=T001' not in markup
     assert 'BELUM TERBUKTI' in ' '.join(c.value for c in app.caption)
+
+
+@pytest.mark.parametrize('field,value',[
+    ('high',90),('low',110),('high',None),('low',0),('low',float('nan')),('high',float('inf')),
+])
+def test_impossible_or_incomplete_ohlc_cannot_qualify(field,value):
+    u,d,c,s,q=setup();c.loc[0,field]=value
+    a,w=split_groups(u,d,c,s,q)
+    assert a.empty and w.set_index('Ticker').loc['BBCA','Kelompok']=='Belum bisa dinilai'
+    assert 'OHLC' in w.set_index('Ticker').loc['BBCA','Alasan']
+
+
+@pytest.mark.parametrize('threshold',[float('nan'),float('inf'),-1,None,'bad'])
+def test_broken_threshold_cannot_disable_downward_guard(threshold):
+    u,d,c,s,q=setup();c.loc[0,'open']=102;c.loc[0,'high']=103
+    a,w=split_groups(u,d,c,s,q,threshold)
+    assert a.empty and set(w.Kelompok)=={'Belum bisa dinilai'}
+    assert w.Alasan.str.contains('Konfigurasi').all()
+
+
+@pytest.mark.parametrize('field,value',[
+    ('entry_low',-5),('entry_high',-1),('entry_low',102),('stop_loss',0),('target_1',-5),('risk_reward',-1)
+])
+def test_malformed_entry_structure_is_unassessed(field,value):
+    u,d,c,s,q=setup();d.loc[0,field]=value
+    a,w=split_groups(u,d,c,s,q)
+    assert a.empty and w.set_index('Ticker').loc['BBCA','Kelompok']=='Belum bisa dinilai'
+
+
+def test_missing_and_duplicate_universe_identities_do_not_create_phantom_tickers():
+    u,d,c,s,q=setup()
+    u=pd.DataFrame({'ticker':[None,float('nan'),pd.NA,123,'NONE','NAN','NULL',' bbca.jk ','BBCA','ANTM']})
+    a,w=split_groups(u,d,c,s,q)
+    assert a.Ticker.tolist()==['BBCA'] and w.Ticker.tolist()==['ANTM']
+    assert group_summary(a,w).Jumlah.sum()==2
+
+
+def test_actual_range_is_read_from_storage_for_screening(tmp_path):
+    path=tmp_path/'ohlc.db';con=sqlite3.connect(path)
+    con.execute('CREATE TABLE intraday(ticker TEXT,ts TEXT,open REAL,high REAL,low REAL,close REAL,volume REAL,source TEXT)')
+    con.execute('INSERT INTO intraday VALUES(?,?,?,?,?,?,?,?)',('BBCA','2026-10-27T10:00:00+07:00',100,90,80,100,10,'TEST'))
+    con.commit();con.close()
+    u,d,c,s,q=setup()
+    stored=latest_candles(path)
+    assert stored.iloc[0]['high']==90
+    a,w=split_groups(u,d,stored,s,q)
+    assert a.empty and 'OHLC' in w.set_index('Ticker').loc['BBCA','Alasan']
+
+
+@pytest.mark.parametrize('threshold,expected',[(.2,'Tidak lolos'),(.5,'Lolos saringan')])
+def test_valid_threshold_still_controls_falling_candle_with_consistent_ohlc(threshold,expected):
+    u,d,c,s,q=setup();c.loc[0,'open']=100.3;c.loc[0,'high']=101.;c.loc[0,'low']=99.
+    a,w=split_groups(u,d,c,s,q,threshold)
+    all_rows=pd.concat([a,w]).set_index('Ticker')
+    assert all_rows.loc['BBCA','Kelompok']==expected

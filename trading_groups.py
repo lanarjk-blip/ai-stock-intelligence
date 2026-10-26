@@ -15,8 +15,8 @@ def latest_candles(db_path):
     try:
         con=sqlite3.connect(f'file:{db_path}?mode=ro',uri=True,timeout=3)
         try:
-            return pd.read_sql_query('''SELECT ticker,ts,open,close,volume,source FROM (
-                SELECT ticker,ts,open,close,volume,source,
+            return pd.read_sql_query('''SELECT ticker,ts,open,high,low,close,volume,source FROM (
+                SELECT ticker,ts,open,high,low,close,volume,source,
                        ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY julianday(ts) DESC) AS n
                 FROM intraday) WHERE n=1''',con)
         finally:
@@ -26,7 +26,11 @@ def latest_candles(db_path):
 
 
 def _symbol(value):
-    text=str(value).upper().strip().removesuffix('.JK')
+    if not isinstance(value,str):
+        return None
+    text=value.upper().strip().removesuffix('.JK')
+    if text in {'NONE','NAN','NULL','UNKNOWN','UNAVAILABLE'}:
+        return None
     return text if re.fullmatch(r'[A-Z0-9]{2,6}',text) else None
 
 
@@ -53,6 +57,7 @@ def split_groups(universe,dynamic,candles,session,quality,threshold_pct=.2):
                 # Conflicting snapshots cannot become actionable by row order.
                 out[ticker]=row if ticker not in out else None
         return out
+    threshold=_num(threshold_pct)
     dynamic_map=mapping(dynamic);candle_map=mapping(candles)
     symbols={_symbol(v) for v in universe.get('ticker',pd.Series(dtype=str))} if universe is not None else set()
     symbols.discard(None)
@@ -63,7 +68,9 @@ def split_groups(universe,dynamic,candles,session,quality,threshold_pct=.2):
         reason='';stamp=_stamp(bar.get('ts')) if bar else None
         generated=_stamp(row.get('generated_at')) if row else None
         price=_num(bar.get('close')) if bar else None
-        if not session.get('calendar_verified'):
+        if threshold is None or threshold<0:
+            reason='Konfigurasi ambang penurunan tidak valid'
+        elif not session.get('calendar_verified'):
             reason='Kalender belum terverifikasi'
         elif not session.get('live'):
             reason='Menunggu sesi perdagangan; bukan live'
@@ -87,6 +94,10 @@ def split_groups(universe,dynamic,candles,session,quality,threshold_pct=.2):
             reason='Volume transaksi belum tersedia'
         elif _num(bar.get('open')) is None or float(bar['open'])<=0:
             reason='Harga pembukaan candle belum terverifikasi'
+        elif (_num(bar.get('high')) is None or _num(bar.get('low')) is None
+              or not 0 < float(bar['low']) <= min(float(bar['open']),price)
+              or not max(float(bar['open']),price) <= float(bar['high'])):
+            reason='Rentang OHLC candle tidak valid / belum lengkap'
         elif generated is None or not 0 <= (now-generated).total_seconds()/60 <= 5 or generated<stamp:
             reason='Snapshot Dynamic kedaluwarsa / belum mengikuti candle'
         elif _num(row.get('close')) is None or not math.isclose(float(row['close']),price,rel_tol=1e-9,abs_tol=1e-6):
@@ -96,6 +107,9 @@ def split_groups(universe,dynamic,candles,session,quality,threshold_pct=.2):
             reason='Data setup / risiko belum lengkap'
         elif any(_num(row.get(c)) is None for c in ['entry_low','entry_high','stop_loss','target_1','risk_reward']):
             reason='Angka entry / batas risiko belum lengkap'
+        elif (not 0 < float(row['entry_low']) <= float(row['entry_high'])
+              or min(float(row['stop_loss']),float(row['target_1']))<=0 or float(row['risk_reward'])<0):
+            reason='Struktur angka entry / batas risiko tidak valid'
         else:
             reason=None
         # Missing/stale evidence is not a rejection of the stock's setup.
@@ -107,7 +121,7 @@ def split_groups(universe,dynamic,candles,session,quality,threshold_pct=.2):
                 reason='Setup / jendela entry belum aktif'
             elif str(row.get('decision')).upper() not in {'BUY','STRONG_BUY','NEAR ENTRY'}:
                 reason='Keputusan engine masih WAIT / WATCH / AVOID'
-            elif (price/float(bar['open'])-1)*100 < -threshold_pct:
+            elif (price/float(bar['open'])-1)*100 < -threshold:
                 reason='Candle berjalan melemah; setup belum terkonfirmasi'
             elif str(row.get('risk')).upper() not in {'LOW','MEDIUM'}:
                 reason='Risiko tinggi atau belum diketahui'
