@@ -1,0 +1,85 @@
+{
+  "registered_at_wib": "2026-10-26",
+  "purpose": "Bounded engine training diagnostic; never an automatic production promotion",
+  "recovery_tickers": [
+    "PTSP",
+    "MPXL"
+  ],
+  "recovery": {
+    "days": 59,
+    "timeout_seconds": 8,
+    "workers": 2
+  },
+  "universe": [
+    "PTSP",
+    "MPXL",
+    "BBCA",
+    "ANTM",
+    "BBRI",
+    "TLKM"
+  ],
+  "minimum_days_per_ticker": 35,
+  "warmup_days": 20,
+  "final_test_days": 8,
+  "features": [
+    "lag_return",
+    "momentum3",
+    "volatility5",
+    "range_lag",
+    "volume_ratio",
+    "gap_hours",
+    "clock_sin",
+    "clock_cos",
+    "friday"
+  ],
+  "candidates": [
+    "balanced_logistic",
+    "xgboost_small",
+    "mlp_small",
+    "equal_ensemble"
+  ],
+  "selection": "Minimum pooled daily walk-forward validation multiclass Brier; tie by name",
+  "target": "30-minute open-to-close direction, +/-0.2%; no current target price/volume feature",
+  "costs": "No fee/slippage return simulation; directional metrics are not trading win rates",
+  "promotion": "Disabled: previously inspected archives, incomplete coverage, require independent prospective multi-ticker evidence",
+  "tuning": "One fixed configuration per model; no adjustment after test results",
+  "fixed_configs": {
+    "balanced_logistic": {
+      "C": 0.1,
+      "class_weight": "balanced",
+      "max_iter": 500
+    },
+    "xgboost_small": {
+      "n_estimators": 120,
+      "max_depth": 2,
+      "min_child_weight": 10,
+      "learning_rate": 0.05,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8,
+      "reg_lambda": 10,
+      "reg_alpha": 1,
+      "random_state": 91,
+      "n_jobs": 1,
+      "objective": "multi:softprob",
+      "num_class": 3,
+      "eval_metric": "mlogloss"
+    },
+    "mlp_small": {
+      "hidden_layer_sizes": [
+        12
+      ],
+      "activation": "tanh",
+      "solver": "lbfgs",
+      "alpha": 10,
+      "max_iter": 300,
+      "random_state": 91
+    },
+    "equal_ensemble": {
+      "weights": [
+        0.3333333333333333,
+        0.3333333333333333,
+        0.3333333333333333
+      ]
+    }
+  }
+}
