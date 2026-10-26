@@ -253,6 +253,9 @@ def _storage_health():
         return None
 
 
+_storage_health._asi_once_per_render = True
+
+
 def _record_search(label, value):
     try:
         if str(label).strip().lower() != "cari saham":

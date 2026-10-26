@@ -50,3 +50,10 @@ reset at the next dashboard render. This does not bypass access control or
 change market analysis. A Streamlit rendering test exercises five nested calls
 and a subsequent rerun: one refresh button, one clock/status caption, and one
 storage read/caption per run.
+
+Hot-deploy follow-up: the clock strip deduplicated immediately, while storage
+still repeated because the legacy theme module remained cached. A guarded,
+one-time module reload upgrades its globals in place (without bypassing access
+control or restarting the Streamlit server). The helper marker prevents repeated
+reloads. A test retains a preexisting wrapper's globals, upgrades the module,
+and proves it now resolves to the guarded helper.
