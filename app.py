@@ -1760,43 +1760,16 @@ def stock_search_panel(universe, res, forced_ticker=None):
         @st.fragment(run_every=90)
         def _render_time_map():
             nonlocal _tm_initial
-            st.markdown('### 🕘 AI Intraday Time Map • WIB')
             _tm_context=market_session.session_status(CFGD)
-            _tm_now=pd.Timestamp(_tm_context['wib'])
-            _tm_day=('Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu')[_tm_now.dayofweek]
-            st.caption(f"{selected_ticker} • {_tm_day}, {_tm_now:%d-%m-%Y} • Diperiksa {_tm_now:%H:%M:%S} WIB • {_tm_context['status']} • Time Map R90")
             tm=_tm_initial.copy() if _tm_initial is not None else intraday_time_map(selected_ticker)
             _tm_initial=None
-            _tm_meta=tm.attrs
-            _tm_latest=_tm_meta.get('latest_bar')
-            _tm_latest_wib=pd.Timestamp(_tm_latest).tz_convert('Asia/Jakarta').strftime('%d-%m-%Y %H:%M') if _tm_latest else '—'
-            st.caption(f"Sumber: {_tm_meta.get('source','UNKNOWN')} • Bar terakhir WIB: {_tm_latest_wib} • Acuan jadwal: {tm['schedule_date'].iloc[0] if not tm.empty else '—'} • Historis sampai: {tm['historical_asof'].iloc[0] if not tm.empty else '—'} • Pengambilan {_tm_meta.get('elapsed_ms','—')} ms • Pembaruan otomatis 90 detik")
-            if _tm_latest:
-                _tm_delay=max(0.0,(_tm_now-pd.Timestamp(_tm_latest).tz_convert('Asia/Jakarta')).total_seconds()/60)
-                st.info(f"Timestamp candle terakhir: {_tm_latest_wib} WIB • selisih waktu {_tm_delay:.1f} menit. Feed provider dapat terlambat; bukan harga broker realtime. Arah tabel = realisasi interval 30 menit, bukan prediksi menit berikutnya.")
-            st.caption(f"Status data: {_tm_meta.get('data_status', 'DATA UNAVAILABLE')} • Model: R90 statistical baseline • Prediksi live: NO EDGE / belum tersedia • Statistik dihitung: {_tm_meta.get('calculated_at', '—')}")
-            st.warning('BELUM ADA PREDIKSI LIVE YANG TERVALIDASI — NO EDGE. Persentase historis bukan peluang naik/turun hari ini.')
-            if not _tm_context.get('calendar_verified'):
-                st.warning('CALENDAR UNVERIFIED — jadwal tahun ini belum terverifikasi; sinyal live dinonaktifkan.')
-            if _tm_meta.get('errors'):
-                st.warning('Sumber intraday: '+'; '.join(_tm_meta['errors']))
-            st.caption('Pembaruan candle: '+('candle live yang lebih baru tersedia.' if _tm_meta.get('new_candle') else 'belum ada candle live baru; waktu refresh bukan waktu candle.'))
-            _tm_eval=_tm_meta.get('validation',{})
-            if _tm_eval.get('n',0):
-                st.caption(f"Uji kronologis per ticker: {_tm_eval['n']} hasil di luar sampel • ketepatan {_tm_eval['accuracy_pct']:.1f}% • Brier {_tm_eval['brier']:.3f} (uniform 0.667; lebih kecil lebih baik) • {_tm_eval['status']}")
-            if _tm_eval.get('baseline_brier') is not None:
-                st.caption(f"Pembanding riwayat saham: Brier {_tm_eval['baseline_brier']:.3f} • {_tm_eval['evaluation_days']} hari uji • Balanced accuracy {_tm_eval['balanced_accuracy_pct']:.1f}% • Galat kalibrasi {_tm_eval['ece']:.3f}. Keunggulan statistik belum dikonfirmasi; bukan sinyal beli.")
-            st.caption('Kualitas sampel: hanya bar dengan volume positif dan horizon 30 menit penuh dalam satu sesi reguler. Bar tanpa transaksi, volume tidak tersedia, dan bar yang melewati akhir sesi tidak menjadi bukti arah harga.')
-            if tm.empty:
-                st.info('Belum ada data intraday yang cukup untuk membentuk Time Map saham ini.')
-            else:
-                tmshow=tm.copy()
-                tmshow.attrs['ticker']=str(selected_ticker).upper().removesuffix('.JK')
-                for c in ['up_pct','sideways_pct','down_pct','mean_return_pct','confidence_pct']:
-                    if c in tmshow: tmshow[c]=pd.to_numeric(tmshow[c],errors='coerce').round(1)
-                tmshow=tmshow.rename(columns={'time':'Waktu','session':'Sesi','horizon':'Horizon','samples':'Samples','up_pct':'UP %','sideways_pct':'Sideways %','down_pct':'DOWN %','mean_return_pct':'Mean Return %','confidence_pct':'Confidence %','status':'Status','note':'Catatan'})
-                st.dataframe(tmshow,width='stretch',hide_index=True)
-                st.caption('TODAY CHECKPOINT = realisasi candle mulai Waktu sampai Hasil Tersedia WIB. Candle belum selesai tidak dinilai. Ini realisasi, bukan prediksi. HISTORICAL BASELINE = statistik hari sebelumnya; persentasenya bukan peluang live hari ini. Periksa tanggal, waktu bar, dan status kesegaran. Data kosong/basi tetap WAIT. Jumat Sesi II mulai 14.00 WIB.')
+            tmshow=tm.rename(columns={'time':'Waktu','session':'Sesi','horizon':'Horizon','samples':'Samples','up_pct':'UP %','sideways_pct':'Sideways %','down_pct':'DOWN %','mean_return_pct':'Mean Return %','confidence_pct':'Confidence %','status':'Status','note':'Catatan'}).copy()
+            tmshow.attrs['ticker']=str(selected_ticker).upper().removesuffix('.JK')
+            from trading_monitor import render_monitor
+            # Read the current opportunity snapshot on every fragment refresh.
+            # Never reuse the detail page's older outer-scope Dynamic row.
+            render_monitor(tmshow, selected_ticker, _tm_context, dict(tm.attrs),
+                           read_dynamic_opportunities(2000))
 
         _render_time_map()
 
