@@ -2143,6 +2143,12 @@ def render_app():
         if any(k in x for k in ['WATCH','WAIT','NEAR','DEVELOP','SIDEWAYS','WARNING','MEDIUM','PREPAR']): return 'yellow'
         return 'gray'
 
+    # Refresh a legacy cached theme module once; existing wrapper globals are
+    # updated in place by reload, so a server restart is not required.
+    import ui_theme_patch
+    if not getattr(ui_theme_patch._storage_health, '_asi_once_per_render', False):
+        import importlib
+        importlib.reload(ui_theme_patch)
     # One strip per dashboard render even if legacy title wrappers are nested.
     st.session_state['_asi_refresh_strip_drawn'] = False
     st.session_state['_asi_storage_strip_drawn'] = False
