@@ -6,7 +6,7 @@ from market_session import session_status
 
 
 def tape(ticker='PTSP', stamp='2026-10-26T14:00:00+07:00', close=2100, volume=500):
-    d = pd.DataFrame([dict(ts=stamp, open=2300, high=2300, low=2000, close=close, volume=volume)])
+    d = pd.DataFrame([dict(ts=stamp, open=2250, high=2300, low=2000, close=close, volume=volume)])
     d.attrs.update(ticker=ticker, source='TEST FIXTURE')
     return d
 
@@ -64,7 +64,7 @@ def test_fresh_bar_describes_movement_without_buy_or_probability():
     v=make(tape(stamp='2026-10-26T14:30:00+07:00'))
     assert v['direction']=='DOWN'
     assert v['status']=='WAIT'
-    assert v['movement_pct']==pytest.approx(-8.695652)
+    assert v['movement_pct']==pytest.approx(-6.6666667)
     assert 'confidence' not in v
 
 
@@ -79,6 +79,19 @@ def test_no_relabeling_old_or_unfinished_realization():
     assert make(now='2026-10-26T14:02:00+07:00')['schedule'].iloc[0]['Realisasi hari ini']=='—'
     f=frame(); f.loc[0,'Baseline UP %']=99
     assert make(f=f)['schedule'].iloc[0]['UP historis %']=='—'
+
+
+@pytest.mark.parametrize('volume',[0,None])
+def test_realized_label_requires_actual_trading_volume(volume):
+    assert make(tape(volume=volume))['schedule'].iloc[0]['Realisasi hari ini']=='—'
+
+
+def test_partial_session_and_missing_bar_never_become_realized():
+    f=frame(); f.loc[0,'Waktu']='15:30'; f.loc[0,'Checkpoint Bar']='15:30'
+    f.loc[0,'Hasil Tersedia WIB']='2026-10-26T16:00:00+07:00'
+    v=make(tape(stamp='2026-10-26T15:30:00+07:00'),now='2026-10-26T16:30:00+07:00',f=f)
+    assert v['schedule'].iloc[0]['Realisasi hari ini']=='—'
+    assert make(tape(stamp='2026-10-26T14:30:00+07:00'))['schedule'].iloc[0]['Realisasi hari ini']=='—'
 
 
 def test_dynamic_other_ticker_old_session_and_fresh_snapshot():
