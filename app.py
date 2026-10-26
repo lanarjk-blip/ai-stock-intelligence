@@ -284,9 +284,11 @@ def save_daily(df,ticker):
 
 def save_intraday(df,ticker):
     if df.empty:return 0
+    from timemap_data import storage_provenance
+    source,fetched_at=storage_provenance(df)
     con=dbcon(); n=0
     for _,r in df.iterrows():
-        con.execute('INSERT OR REPLACE INTO intraday VALUES(?,?,?,?,?,?,?,?,?)',(ticker,pd.Timestamp(r.ts).isoformat(),r.open,r.high,r.low,r.close,r.volume,'Yahoo Finance 30m chart',datetime.now(timezone.utc).isoformat())); n+=1
+        con.execute('INSERT OR REPLACE INTO intraday VALUES(?,?,?,?,?,?,?,?,?)',(ticker,pd.Timestamp(r.ts).isoformat(),r.open,r.high,r.low,r.close,r.volume,source,fetched_at)); n+=1
     con.commit(); con.close(); return n
 
 def collect_daily(universe,limit):

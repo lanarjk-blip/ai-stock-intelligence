@@ -77,6 +77,24 @@ def test_saved_candle_query_uses_actual_timestamp_not_refresh_time(tmp_path):
     assert result.iloc[0]['ts']=='2026-10-27T03:00:00+00:00'
 
 
+@pytest.mark.parametrize('fallback',[False,True])
+def test_persistence_keeps_original_fetch_time_and_marks_fallback(fallback):
+    from timemap_data import storage_provenance
+    frame=pd.DataFrame()
+    frame.attrs=dict(source='query1.finance.yahoo.com',fallback=fallback,fetched_at='2026-10-26T03:00:00Z')
+    original=dict(frame.attrs)
+    source,stamp=storage_provenance(frame,pd.Timestamp('2026-10-27T03:00:00Z'))
+    assert stamp=='2026-10-26T03:00:00+00:00'
+    assert source==('LAST GOOD CACHE' if fallback else 'query1.finance.yahoo.com')
+    assert frame.attrs==original
+
+
+def test_missing_fallback_fetch_time_cannot_be_replaced_by_refresh_time():
+    from timemap_data import storage_provenance
+    frame=pd.DataFrame();frame.attrs={'fallback':True}
+    assert storage_provenance(frame,pd.Timestamp('2026-10-27T03:00:00Z'))==('LAST GOOD CACHE',None)
+
+
 def test_two_side_by_side_lists_and_literal_ticker_filter_render():
     from streamlit.testing.v1 import AppTest
     app=AppTest.from_string('''

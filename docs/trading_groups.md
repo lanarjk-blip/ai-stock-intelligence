@@ -33,7 +33,7 @@ no new price downloads, universe scans, training jobs, notifications or trades.
 The search label avoids the legacy active-ticker tracker so filtering a list
 does not change the selected stock's Time Map.
 
-Verification:29 targeted tests passed, including real Streamlit rendering of
+Verification:32 targeted group tests passed, including real Streamlit rendering of
 both lanes, exact partition, literal search, prior-day/session rollover, future
 and naive timestamps, cache/missing volume/falling candles, changed snapshot
 price, duplicate identities, missing quality, entry/risk limits, and the actual
@@ -41,3 +41,8 @@ stored candle timestamp query. Compile and diff checks passed. A local full
 suite attempt was interrupted by network approval cancellation; the existing
 GitHub full-regression workflow is required before merge. Live-market and
 physical Android behavior require separate observation.
+
+The persistence path also retains the original fetched_at and source metadata.
+Fallback bars are stored as LAST GOOD CACHE so neither saving nor refreshing
+can disguise them as newly fetched provider data. Unknown fallback fetch times
+remain absent. Existing provider-recovery tests are included in targeted checks.
