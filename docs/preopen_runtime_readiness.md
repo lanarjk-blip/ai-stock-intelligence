@@ -57,3 +57,10 @@ one-time module reload upgrades its globals in place (without bypassing access
 control or restarting the Streamlit server). The helper marker prevents repeated
 reloads. A test retains a preexisting wrapper's globals, upgrades the module,
 and proves it now resolves to the guarded helper.
+
+The one-time theme reload alone did not remove storage captions from all retained
+wrapper instances in production. A final output-boundary guard deduplicates only
+Storage-prefixed captions; other messages pass through. Separate emitted/depth
+state handles both old helpers and nested guard layers without suppressing the
+first caption. A real Streamlit test verifies 15 legacy-style calls yield one
+storage caption, other captions remain visible, and the next rerun refreshes it.

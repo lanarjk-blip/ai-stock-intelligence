@@ -58,3 +58,24 @@ for _ in range(5):
     assert [c.value for c in app.caption]==['Storage NORMAL']
     assert getattr(theme._storage_health,'_asi_once_per_render',False)
     assert legacy_wrapper.__globals__['_storage_health'] is theme._storage_health
+
+
+def test_cached_wrapper_captions_are_deduplicated_at_output_boundary(monkeypatch):
+    import streamlit as st
+    from streamlit.testing.v1 import AppTest
+    # Restore the process-level API when the test ends.
+    monkeypatch.setattr(st,'caption',st.caption)
+    app=AppTest.from_string('''
+import streamlit as st
+from dashboard_status import install_storage_caption_guard
+st.session_state['_asi_storage_caption_emitted']=False
+install_storage_caption_guard(st)
+for i in range(15):
+    st.caption('Storage NORMAL • DB 20.0 MB')
+st.caption('Other status stays visible')
+''').run(timeout=20)
+    assert not app.exception
+    assert [c.value for c in app.caption]==['Storage NORMAL • DB 20.0 MB','Other status stays visible']
+    app.run(timeout=20)
+    assert not app.exception
+    assert [c.value for c in app.caption]==['Storage NORMAL • DB 20.0 MB','Other status stays visible']
