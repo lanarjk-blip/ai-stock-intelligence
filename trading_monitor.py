@@ -8,6 +8,54 @@ import math
 import pandas as pd
 
 TZ = 'Asia/Jakarta'
+_DAYS = ('Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu')
+_MONTHS = ('Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus',
+           'September','Oktober','November','Desember')
+
+
+def _date_label(value):
+    if value is None:
+        return 'BELUM TERVERIFIKASI'
+    return f'{_DAYS[value.weekday()]}, {value.day} {_MONTHS[value.month-1]} {value.year}'
+
+
+def _single_date(frame, column):
+    """Use the original date only; missing or conflicting dates stay unknown."""
+    if frame is None or frame.empty or column not in frame:
+        return None
+    values = set()
+    for raw in frame[column].dropna():
+        try:
+            stamp = pd.Timestamp(raw)
+            if pd.isna(stamp):
+                continue
+            if stamp.tzinfo is not None:
+                stamp = stamp.tz_convert(TZ)
+            values.add(stamp.date())
+        except (TypeError, ValueError):
+            return None
+    return next(iter(values)) if len(values) == 1 else None
+
+
+def date_context(frame, now, latest):
+    """Differentiate check date, actual candle date and historical schedule date."""
+    current = now.date()
+    target = _single_date(frame, 'schedule_date')
+    cutoff = _single_date(frame, 'historical_asof')
+    data_day = latest.date() if latest is not None else None
+    relation = ('HARI INI' if target == current else
+                'BESOK' if target == current + pd.Timedelta(days=1) else
+                'HARI PERDAGANGAN BERIKUTNYA' if target is not None and target > current else
+                'JADWAL LAMA' if target is not None else 'BELUM TERVERIFIKASI')
+    return {
+        'realization_date': current.isoformat(),
+        'realization_label': _date_label(current),
+        'data_label': _date_label(data_day),
+        'data_relation': 'HARI INI' if data_day == current else 'DATA LAMA / HISTORIS' if data_day else 'BELUM ADA DATA',
+        'schedule_date': target.isoformat() if target else None,
+        'schedule_label': _date_label(target), 'schedule_relation': relation,
+        'historical_label': _date_label(cutoff),
+    }
 
 
 def _number(value):
@@ -115,6 +163,7 @@ def build_monitor(frame, tape, ticker, session, opportunities=None, threshold_pc
     if view['status'] == 'WAIT' and dynamic['usable']:
         dynamic['label'] += ' • belum menjadi konfirmasi monitor'
     view['dynamic'] = dynamic
+    view['dates'] = date_context(frame, now, view['latest'])
 
     # Schedule spans the full day. Completed outcomes and future slots differ.
     rows = []
@@ -178,8 +227,13 @@ def render_monitor(history, ticker, session, metadata, opportunities):
     threshold = float(layer._cfg().get('time_return_threshold', .002)) * 100
     view = build_monitor(augmented, tape, ticker, session, opportunities, threshold)
     st.markdown('### 🕘 Monitor Trading • Time Map')
-    day = ('Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu')[view['checked_at'].dayofweek]
+    day = _DAYS[view['checked_at'].dayofweek]
     st.caption(f"{view['ticker']} • {day}, {view['checked_at']:%d-%m-%Y %H:%M:%S} WIB • {session['status']} • otomatis 90 detik")
+    dates = view['dates']
+    st.markdown(f"**DATA HARGA: {dates['data_label']} — {dates['data_relation']}**")
+    st.markdown(f"**REALISASI TABEL: {dates['realization_label']} — HARI INI**")
+    st.markdown(f"**ACUAN JADWAL HISTORIS: {dates['schedule_label']} — {dates['schedule_relation']}**")
+    st.caption(f"Angka UP/DATAR/DOWN memakai riwayat sampai {dates['historical_label']}; bukan data atau prediksi live untuk tanggal acuan.")
     price = f"Rp {view['price']:,.0f}" if view['price'] is not None else '—'
     latest = view['latest'].strftime('%d-%m-%Y %H:%M WIB') if view['latest'] is not None else '—'
     age = f"{view['age_min']:.1f} menit" if view['age_min'] is not None else '—'
@@ -187,9 +241,16 @@ def render_monitor(history, ticker, session, metadata, opportunities):
     st.caption(f"Candle terakhir {latest} • umur dari awal candle {age} • {view['data_status']}. Umur candle bukan ukuran pasti keterlambatan feed.")
     st.info(f"{view['status']} — {view['reason']}")
     st.caption(view['dynamic']['label'])
+    if dates['schedule_date'] and dates['schedule_date'] > dates['realization_date']:
+        st.info(f"Kolom realisasi khusus {dates['realization_label']}. Acuan jadwal historis {dates['schedule_label']}; tanggal berikutnya belum terjadi, bukan data live besok.")
+    elif dates['schedule_date'] and dates['schedule_date'] < dates['realization_date']:
+        st.warning(f"Jadwal historis masih mengacu {dates['schedule_label']}; bukan jadwal hari ini.")
     st.caption('Peta sampai penutupan: angka UP/DATAR/DOWN adalah frekuensi historis, bukan peluang live. Prediksi jam berikutnya belum tervalidasi; NO EDGE.')
     if not view['schedule'].empty:
-        st.dataframe(view['schedule'], hide_index=True, width='stretch')
+        st.caption(f"Tabel realisasi: {dates['realization_label']} • Acuan kolom historis: {dates['schedule_label']}")
+        display = view['schedule'].rename(columns={'Realisasi hari ini': f"Realisasi {view['checked_at']:%d-%m-%Y}"})
+        display.attrs['timemap_rendered'] = True
+        st.dataframe(display, hide_index=True, width='stretch')
     else:
         st.info('Jadwal dan sampel Time Map belum tersedia untuk saham ini.')
     with st.expander('Detail data, evaluasi, dan tabel lengkap', expanded=False):
