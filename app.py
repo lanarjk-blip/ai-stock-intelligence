@@ -1481,9 +1481,13 @@ def stock_search_panel(universe, res, forced_ticker=None):
     latest_updated=str(prices.updated_at.iloc[-1]) if 'updated_at' in prices.columns else ''
 
     display_price=resolve_stock_display_price(selected_ticker,close)
+    from price_context import previous_close, change_pct
+    reference_day=pd.Timestamp(display_price['at']).tz_convert('Asia/Jakarta').date() if display_price.get('at') else pd.Timestamp(r.date).date()
+    day_reference=previous_close(prices, reference_day)
+    ch=change_pct(display_price['price'],day_reference)
     p1,p2,p3,p4,p5=st.columns(5)
     p1.metric(display_price['label'],f"Rp {float(display_price['price']):,.0f}")
-    p2.metric('Perubahan 1D',f'{ch:+.2f}%' if np.isfinite(ch) else '—')
+    p2.metric('Perubahan 1D',f'{ch:+.2f}%' if ch is not None and np.isfinite(ch) else '—')
     p3.metric('Volume',f'{float(r.volume):,.0f}' if pd.notna(r.volume) else '—')
     p4.metric('MA20',f'{float(r.ma20):,.0f}' if pd.notna(r.ma20) else '—')
     p5.metric('RSI 14',f'{float(r.rsi14):.1f}' if pd.notna(r.rsi14) else '—')
@@ -1668,6 +1672,11 @@ def stock_search_panel(universe, res, forced_ticker=None):
     market=market.dropna(subset=['x','close']) if not market.empty else market
     if not market.empty:
         first=float(market['close'].iloc[0]); last=float(market['close'].iloc[-1]); delta=last-first
+        if period=='1D':
+            from price_context import previous_close
+            reference=previous_close(prices, market['trade_date'].iloc[-1] if 'trade_date' in market else now_wib.date())
+            first=reference if reference is not None else np.nan
+            delta=last-first
         period_ret=(last/first-1)*100 if first else np.nan
         hi=float(pd.to_numeric(market['high'] if 'high' in market else market['close'],errors='coerce').max())
         lo=float(pd.to_numeric(market['low'] if 'low' in market else market['close'],errors='coerce').min())
@@ -1763,6 +1772,7 @@ def stock_search_panel(universe, res, forced_ticker=None):
             _tm_latest_wib=pd.Timestamp(_tm_latest).tz_convert('Asia/Jakarta').strftime('%d-%m-%Y %H:%M') if _tm_latest else '—'
             st.caption(f"Sumber: {_tm_meta.get('source','UNKNOWN')} • Bar terakhir WIB: {_tm_latest_wib} • Acuan jadwal: {tm['schedule_date'].iloc[0] if not tm.empty else '—'} • Historis sampai: {tm['historical_asof'].iloc[0] if not tm.empty else '—'} • Pengambilan {_tm_meta.get('elapsed_ms','—')} ms • Pembaruan otomatis 90 detik")
             st.caption(f"Status data: {_tm_meta.get('data_status', 'DATA UNAVAILABLE')} • Model: R90 statistical baseline • Prediksi live: NO EDGE / belum tersedia • Statistik dihitung: {_tm_meta.get('calculated_at', '—')}")
+            st.warning('BELUM ADA PREDIKSI LIVE YANG TERVALIDASI — NO EDGE. Persentase historis bukan peluang naik/turun hari ini.')
             if not _tm_context.get('calendar_verified'):
                 st.warning('CALENDAR UNVERIFIED — jadwal tahun ini belum terverifikasi; sinyal live dinonaktifkan.')
             if _tm_meta.get('errors'):
