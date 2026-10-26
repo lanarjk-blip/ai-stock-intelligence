@@ -1,0 +1,290 @@
+[
+  {
+    "ticker": "PTSP",
+    "checked_at": "2026-10-26 11:29:55.386687+00:00",
+    "bars": 34,
+    "metadata": {
+      "ticker": "PTSP",
+      "source": "query1.finance.yahoo.com \u2022 5d recovery",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ],
+      "cache_hit": false,
+      "fallback": false,
+      "fetched_at": "2026-10-26T11:29:55.386687+00:00",
+      "refresh_attempt_at": "2026-10-26T11:29:55.386687+00:00",
+      "latest_bar": "2026-10-26 09:00:00+00:00",
+      "elapsed_ms": 8972.26,
+      "data_status": "HISTORICAL ONLY",
+      "trading_date": "2026-10-26",
+      "session": "CLOSED",
+      "new_candle": false
+    },
+    "sha256": "891a757b7c73e524660752467da4cbb9f9d1d948a6ee05a9b85fd40528a8c835"
+  },
+  {
+    "ticker": "MPXL",
+    "checked_at": "2026-10-26 11:29:55.386687+00:00",
+    "bars": 34,
+    "metadata": {
+      "ticker": "MPXL",
+      "source": "query1.finance.yahoo.com \u2022 5d recovery",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ],
+      "cache_hit": false,
+      "fallback": false,
+      "fetched_at": "2026-10-26T11:29:55.386687+00:00",
+      "refresh_attempt_at": "2026-10-26T11:29:55.386687+00:00",
+      "latest_bar": "2026-10-26 09:00:00+00:00",
+      "elapsed_ms": 8968.64,
+      "data_status": "HISTORICAL ONLY",
+      "trading_date": "2026-10-26",
+      "session": "CLOSED",
+      "new_candle": false
+    },
+    "sha256": "2474a675ad3e9b4e5c8bbb622c63e5fff58fb31df215c9e1fd44cca34205e783"
+  },
+  {
+    "ticker": "BBCA",
+    "checked_at": "2026-10-26 11:29:55.386687+00:00",
+    "bars": 34,
+    "metadata": {
+      "ticker": "BBCA",
+      "source": "query1.finance.yahoo.com \u2022 5d recovery",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ],
+      "cache_hit": false,
+      "fallback": false,
+      "fetched_at": "2026-10-26T11:29:55.386687+00:00",
+      "refresh_attempt_at": "2026-10-26T11:29:55.386687+00:00",
+      "latest_bar": "2026-10-26 09:00:00+00:00",
+      "elapsed_ms": 7998.57,
+      "data_status": "HISTORICAL ONLY",
+      "trading_date": "2026-10-26",
+      "session": "CLOSED",
+      "new_candle": false
+    },
+    "sha256": "ef08bbe7e1ff32b4bfbee25e261e4358939eb8fdcd37aaa7f3dc9b224dd80972"
+  },
+  {
+    "ticker": "ANTM",
+    "checked_at": "2026-10-26 11:29:55.386687+00:00",
+    "bars": 34,
+    "metadata": {
+      "ticker": "ANTM",
+      "source": "query1.finance.yahoo.com \u2022 5d recovery",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ],
+      "cache_hit": false,
+      "fallback": false,
+      "fetched_at": "2026-10-26T11:29:55.386687+00:00",
+      "refresh_attempt_at": "2026-10-26T11:29:55.386687+00:00",
+      "latest_bar": "2026-10-26 09:00:00+00:00",
+      "elapsed_ms": 8042.46,
+      "data_status": "HISTORICAL ONLY",
+      "trading_date": "2026-10-26",
+      "session": "CLOSED",
+      "new_candle": false
+    },
+    "sha256": "e6b321b081b1a8cf57ad422a8fe8f8a8079b07716220888704a7f27adace3c1b"
+  },
+  {
+    "ticker": "BBRI",
+    "checked_at": "2026-10-26 11:29:55.386687+00:00",
+    "bars": 34,
+    "metadata": {
+      "ticker": "BBRI",
+      "source": "query1.finance.yahoo.com \u2022 5d recovery",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ],
+      "cache_hit": false,
+      "fallback": false,
+      "fetched_at": "2026-10-26T11:29:55.386687+00:00",
+      "refresh_attempt_at": "2026-10-26T11:29:55.386687+00:00",
+      "latest_bar": "2026-10-26 09:00:00+00:00",
+      "elapsed_ms": 8059.65,
+      "data_status": "HISTORICAL ONLY",
+      "trading_date": "2026-10-26",
+      "session": "CLOSED",
+      "new_candle": false
+    },
+    "sha256": "1d04866ff6a89103e218675e26780a5d4711785c424413e72afa3c72fc166df3"
+  },
+  {
+    "ticker": "TLKM",
+    "checked_at": "2026-10-26 11:29:55.386687+00:00",
+    "bars": 34,
+    "metadata": {
+      "ticker": "TLKM",
+      "source": "query1.finance.yahoo.com \u2022 5d recovery",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ],
+      "cache_hit": false,
+      "fallback": false,
+      "fetched_at": "2026-10-26T11:29:55.386687+00:00",
+      "refresh_attempt_at": "2026-10-26T11:29:55.386687+00:00",
+      "latest_bar": "2026-10-26 09:00:00+00:00",
+      "elapsed_ms": 8094.35,
+      "data_status": "HISTORICAL ONLY",
+      "trading_date": "2026-10-26",
+      "session": "CLOSED",
+      "new_candle": false
+    },
+    "sha256": "6bd63df0b0d72303c453a0d73d02d036f5f0488a3e8b01a6da72dfe412bd6a53"
+  },
+  {
+    "ticker": "BMRI",
+    "checked_at": "2026-10-26 11:29:55.386687+00:00",
+    "bars": 34,
+    "metadata": {
+      "ticker": "BMRI",
+      "source": "query1.finance.yahoo.com \u2022 5d recovery",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ],
+      "cache_hit": false,
+      "fallback": false,
+      "fetched_at": "2026-10-26T11:29:55.386687+00:00",
+      "refresh_attempt_at": "2026-10-26T11:29:55.386687+00:00",
+      "latest_bar": "2026-10-26 09:00:00+00:00",
+      "elapsed_ms": 8344.39,
+      "data_status": "HISTORICAL ONLY",
+      "trading_date": "2026-10-26",
+      "session": "CLOSED",
+      "new_candle": false
+    },
+    "sha256": "638d758feed1c49b69c568d601847139056cfcff87871ab7926ec9af4aacb5a8"
+  },
+  {
+    "ticker": "GOTO",
+    "checked_at": "2026-10-26 11:29:55.386687+00:00",
+    "bars": 34,
+    "metadata": {
+      "ticker": "GOTO",
+      "source": "query1.finance.yahoo.com \u2022 5d recovery",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ],
+      "cache_hit": false,
+      "fallback": false,
+      "fetched_at": "2026-10-26T11:29:55.386687+00:00",
+      "refresh_attempt_at": "2026-10-26T11:29:55.386687+00:00",
+      "latest_bar": "2026-10-26 09:00:00+00:00",
+      "elapsed_ms": 8373.22,
+      "data_status": "HISTORICAL ONLY",
+      "trading_date": "2026-10-26",
+      "session": "CLOSED",
+      "new_candle": false
+    },
+    "sha256": "8795c83a1ee58aecfec271161603fcc9057e02854288b3b48255c889dec33a4f"
+  },
+  {
+    "ticker": "BRIS",
+    "checked_at": "2026-10-26 11:29:55.386687+00:00",
+    "bars": 34,
+    "metadata": {
+      "ticker": "BRIS",
+      "source": "query1.finance.yahoo.com \u2022 5d recovery",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ],
+      "cache_hit": false,
+      "fallback": false,
+      "fetched_at": "2026-10-26T11:29:55.386687+00:00",
+      "refresh_attempt_at": "2026-10-26T11:29:55.386687+00:00",
+      "latest_bar": "2026-10-26 09:00:00+00:00",
+      "elapsed_ms": 8723.22,
+      "data_status": "HISTORICAL ONLY",
+      "trading_date": "2026-10-26",
+      "session": "CLOSED",
+      "new_candle": false
+    },
+    "sha256": "cf4b1cd7c01082e8240a8c2844d50b8463fe28d37d15c9a873bf9492600fa27e"
+  },
+  {
+    "ticker": "PTBA",
+    "checked_at": "2026-10-26 11:29:55.386687+00:00",
+    "bars": 34,
+    "metadata": {
+      "ticker": "PTBA",
+      "source": "query1.finance.yahoo.com \u2022 5d recovery",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ],
+      "cache_hit": false,
+      "fallback": false,
+      "fetched_at": "2026-10-26T11:29:55.386687+00:00",
+      "refresh_attempt_at": "2026-10-26T11:29:55.386687+00:00",
+      "latest_bar": "2026-10-26 09:00:00+00:00",
+      "elapsed_ms": 8741.65,
+      "data_status": "HISTORICAL ONLY",
+      "trading_date": "2026-10-26",
+      "session": "CLOSED",
+      "new_candle": false
+    },
+    "sha256": "87c192d91e6d4cd0cc55fb90e14404aac6e5b61ad27e2c6ec0cd2a3daba6a63f"
+  },
+  {
+    "ticker": "JPFA",
+    "checked_at": "2026-10-26 11:29:55.386687+00:00",
+    "bars": 34,
+    "metadata": {
+      "ticker": "JPFA",
+      "source": "query1.finance.yahoo.com \u2022 5d recovery",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ],
+      "cache_hit": false,
+      "fallback": false,
+      "fetched_at": "2026-10-26T11:29:55.386687+00:00",
+      "refresh_attempt_at": "2026-10-26T11:29:55.386687+00:00",
+      "latest_bar": "2026-10-26 09:00:00+00:00",
+      "elapsed_ms": 8029.77,
+      "data_status": "HISTORICAL ONLY",
+      "trading_date": "2026-10-26",
+      "session": "CLOSED",
+      "new_candle": false
+    },
+    "sha256": "fd2f369a18ebae96e75726d31a132f4a75aeb5e014d3bdc930c8a90ec9f19567"
+  },
+  {
+    "ticker": "BBNI",
+    "checked_at": "2026-10-26 11:29:55.386687+00:00",
+    "bars": 34,
+    "metadata": {
+      "ticker": "BBNI",
+      "source": "query1.finance.yahoo.com \u2022 5d recovery",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ],
+      "cache_hit": false,
+      "fallback": false,
+      "fetched_at": "2026-10-26T11:29:55.386687+00:00",
+      "refresh_attempt_at": "2026-10-26T11:29:55.386687+00:00",
+      "latest_bar": "2026-10-26 09:00:00+00:00",
+      "elapsed_ms": 8098.82,
+      "data_status": "HISTORICAL ONLY",
+      "trading_date": "2026-10-26",
+      "session": "CLOSED",
+      "new_candle": false
+    },
+    "sha256": "4367de3a8ecbd1dd5a2c42cf2ee730f93a2da3fca75014ecfce13c2c1af108fe"
+  }
+]

@@ -1,0 +1,112 @@
+{
+  "protocol": {
+    "purpose": "Expanded conditional-model diagnostic; no automatic production promotion",
+    "tickers": [
+      "PTSP",
+      "MPXL",
+      "BBCA",
+      "ANTM",
+      "BBRI",
+      "TLKM",
+      "BMRI",
+      "GOTO",
+      "BRIS",
+      "PTBA",
+      "JPFA",
+      "BBNI"
+    ],
+    "history_days": 59,
+    "timeout_seconds": 3,
+    "workers": 2,
+    "target": "30-minute open-to-close, +/-0.2%",
+    "minimum_days": 35,
+    "warmup_days": 20,
+    "final_test_days": 8,
+    "candidates": [
+      "logistic",
+      "random_forest",
+      "hist_boost",
+      "ensemble"
+    ],
+    "selection": "chronological validation Brier only",
+    "promotion": "disabled: retrospective diagnostic; require prospective untouched evidence and adequate per-ticker calibration"
+  },
+  "coverage": [
+    {
+      "ticker": "PTSP",
+      "eligible_feature_rows": 13,
+      "days": 2,
+      "status": "INSUFFICIENT HISTORY"
+    },
+    {
+      "ticker": "MPXL",
+      "eligible_feature_rows": 13,
+      "days": 2,
+      "status": "INSUFFICIENT HISTORY"
+    },
+    {
+      "ticker": "BBCA",
+      "eligible_feature_rows": 13,
+      "days": 2,
+      "status": "INSUFFICIENT HISTORY"
+    },
+    {
+      "ticker": "ANTM",
+      "eligible_feature_rows": 13,
+      "days": 2,
+      "status": "INSUFFICIENT HISTORY"
+    },
+    {
+      "ticker": "BBRI",
+      "eligible_feature_rows": 13,
+      "days": 2,
+      "status": "INSUFFICIENT HISTORY"
+    },
+    {
+      "ticker": "TLKM",
+      "eligible_feature_rows": 13,
+      "days": 2,
+      "status": "INSUFFICIENT HISTORY"
+    },
+    {
+      "ticker": "BMRI",
+      "eligible_feature_rows": 13,
+      "days": 2,
+      "status": "INSUFFICIENT HISTORY"
+    },
+    {
+      "ticker": "GOTO",
+      "eligible_feature_rows": 13,
+      "days": 2,
+      "status": "INSUFFICIENT HISTORY"
+    },
+    {
+      "ticker": "BRIS",
+      "eligible_feature_rows": 13,
+      "days": 2,
+      "status": "INSUFFICIENT HISTORY"
+    },
+    {
+      "ticker": "PTBA",
+      "eligible_feature_rows": 13,
+      "days": 2,
+      "status": "INSUFFICIENT HISTORY"
+    },
+    {
+      "ticker": "JPFA",
+      "eligible_feature_rows": 13,
+      "days": 2,
+      "status": "INSUFFICIENT HISTORY"
+    },
+    {
+      "ticker": "BBNI",
+      "eligible_feature_rows": 13,
+      "days": 2,
+      "status": "INSUFFICIENT HISTORY"
+    }
+  ],
+  "checked_at": "2026-10-26 11:29:55.386687+00:00",
+  "production_enabled": false,
+  "decision": "NO PROMOTION",
+  "elapsed_seconds": 53.524
+}
