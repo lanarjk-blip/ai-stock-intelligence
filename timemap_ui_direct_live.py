@@ -423,6 +423,16 @@ def install():
             if data.attrs.get("timemap_rendered"):
                 return original(data, *args, **kwargs)
             data = _augment(data, st)
+            from price_context import timemap_sections
+            sections = timemap_sections(data)
+            if sections is not None:
+                today, history = sections
+                st.caption('REALISASI HARI INI — bukan prediksi arah berikutnya')
+                result = original(today, *args, **kwargs)
+                with st.expander('Statistik historis — BUKAN prediksi live', expanded=False):
+                    st.caption('Frekuensi hari sebelumnya; tidak menyesuaikan arah pasar hari ini.')
+                    original(history, *args, **kwargs)
+                return result
         return original(data, *args, **kwargs)
 
     dataframe._asi_r86_hard_timemap = True
