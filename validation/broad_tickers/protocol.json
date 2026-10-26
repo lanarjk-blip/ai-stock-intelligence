@@ -1,0 +1,76 @@
+{
+  "purpose": "Broader ticker evaluation of frozen candidate; no automatic BUY or profit guarantee",
+  "registered_date_wib": "2026-10-26",
+  "tickers": [
+    "BMRI",
+    "BBNI",
+    "ASII",
+    "UNTR",
+    "INDF",
+    "ICBP",
+    "KLBF",
+    "PGAS",
+    "MEDC",
+    "ADRO",
+    "ITMG",
+    "ADMR",
+    "EXCL",
+    "ISAT",
+    "AMRT",
+    "ACES",
+    "BRIS",
+    "PTBA",
+    "JPFA",
+    "GOTO"
+  ],
+  "history_days": 59,
+  "timeout_seconds": 8,
+  "workers": 2,
+  "stop_on_http_429": true,
+  "candidate_manifest": "validation/engine_upgrade/frozen_candidate.json",
+  "candidate_training_end": "2026-10-13",
+  "evaluation_dates": [
+    "2026-10-14",
+    "2026-10-15",
+    "2026-10-16",
+    "2026-10-19",
+    "2026-10-20",
+    "2026-10-21",
+    "2026-10-22",
+    "2026-10-23"
+  ],
+  "minimum_history_days": 35,
+  "minimum_prior_training_days": 20,
+  "minimum_test_outcomes_per_ticker": 40,
+  "fixed_long_signal": {
+    "p_up_min": 0.5,
+    "p_up_minus_p_down_min": 0.15,
+    "prior_volume_ratio_min": 0.8,
+    "gap_hours_max": 0.5
+  },
+  "cost_scenarios_round_trip_pct": [
+    0.3,
+    0.5
+  ],
+  "extra_slippage_round_trip_pct": 0.1,
+  "costs_are_assumptions": true,
+  "paper_trade": "Long only, enter target candle open and exit same candle close; idealized fills, no overlapping positions; not broker execution evidence",
+  "selection": "No model/threshold selection or tuning using these test outcomes",
+  "production_promotion": "disabled: independent prospective execution and adequate coverage still required",
+  "bounded_weekly_recovery": {
+    "tickers": [
+      "BMRI",
+      "ASII",
+      "INDF",
+      "PGAS"
+    ],
+    "windows": 8,
+    "days_per_window": 7,
+    "timeout_seconds": 6,
+    "workers": 2,
+    "stop_on_http_429": true
+  },
+  "ranking": "At each candle start choose at most one qualifying ticker by p_up minus p_down; deterministic ticker tie break; never rank by realized test profit",
+  "amendment_notice": "Weekly recovery and deterministic signal ranking documented after coverage counts, before frozen-model scoring and paper-trade outcomes.",
+  "original_collection_protocol_sha256": "628632edd414f9d2c6b850255d1f7025e412ce7c6f2b7b9840c3239ac60e9fb9"
+}
