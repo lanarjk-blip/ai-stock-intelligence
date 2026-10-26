@@ -27,10 +27,14 @@ def _ensure_background_worker():
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except (ImportError, BlockingIOError, OSError):
             lock_file.close()
+            # A surviving legacy worker may lack startup heartbeat/watch services.
+            import local_runtime_health
+            local_runtime_health.request_worker_recovery()
             return
 
         env=os.environ.copy()
         env['AI_ENGINE_WORKER']='1'
+        env['PYTHONPATH']=os.pathsep.join(filter(None,[BASE,env.get('PYTHONPATH','')]))
         worker_path=os.path.join(BASE,'worker_base.py')
         if not os.path.exists(worker_path):
             lock_file.close()
@@ -2123,7 +2127,10 @@ def render_app():
     snap_at, snap_source = _snapshot_status()
     outlook = read_outlook()
     ihsg = ihsg_snapshot()
-    ready = bool(snap_at and not res.empty)
+    from dynamic_opportunity_ui import _quality_gate_state
+    _dashboard_gate = _quality_gate_state()
+    ready = bool(snap_at and not res.empty and _dashboard_gate.get('ready'))
+    _dashboard_status = 'READY' if ready else str(_dashboard_gate.get('status') or 'PREPARING')
 
     def _pill(text, kind='gray'):
         safe = str(text).replace('<','&lt;').replace('>','&gt;')
@@ -2138,7 +2145,7 @@ def render_app():
 
     st.title(f"📈 AI Stock Intelligence V{CFGD.get('mobile_ui_version','1.8.52')}")
     st.caption('Continuous Intelligence • Rank → Opportunity → Alert → Deep Analysis → Risk → Hold → Overnight')
-    st.markdown('<div class="asi-row">'+_pill('READY' if ready else 'PREPARING', 'green' if ready else 'yellow')+_pill(f'Model {active_name}', 'green' if model else 'gray')+_pill(f'Snapshot {snap_at or "belum ada"}', 'green' if snap_at else 'gray')+'</div>', unsafe_allow_html=True)
+    st.markdown('<div class="asi-row">'+_pill(_dashboard_status, 'green' if ready else 'yellow')+_pill(f'Model {active_name}', 'green' if model else 'gray')+_pill(f'Snapshot {snap_at or "belum ada"}', 'green' if snap_at else 'gray')+'</div>', unsafe_allow_html=True)
 
     forced_detail=str(st.query_params.get('ticker','')).upper().replace('.JK','').strip() or None
     if forced_detail:
@@ -2176,7 +2183,7 @@ def render_app():
         st.subheader('Ringkasan Sistem')
         c1,c2,c3,c4,c5 = st.columns(5)
         c1.metric('Universe', len(universe))
-        c2.metric('Intelligence', 'READY' if ready else 'PREPARING')
+        c2.metric('Intelligence', _dashboard_status)
         c3.metric('Snapshot', snap_at or 'Belum ada')
         c4.metric('Active model', active_name if model else 'BACKGROUND')
         c5.metric('WF accuracy', f'{float(wf)*100:.1f}%' if wf else '—')
@@ -2347,7 +2354,7 @@ def render_app():
     with tab_engine:
         st.subheader('⚙️ Background Engine')
         e1,e2,e3,e4=st.columns(4)
-        e1.metric('Engine','READY' if ready else 'PREPARING'); e2.metric('Last cycle',engine_last or 'Belum ada'); e3.metric('Last JST training',trained or 'Belum ada'); e4.metric('Last walk-forward',wf_at or 'Belum ada')
+        e1.metric('Engine',_dashboard_status); e2.metric('Last cycle',engine_last or 'Belum ada'); e3.metric('Last JST training',trained or 'Belum ada'); e4.metric('Last walk-forward',wf_at or 'Belum ada')
         st.caption(f"Dynamic Opportunity: {state_get('dynamic_opportunity_at') or 'belum berjalan'} • phase={state_get('dynamic_opportunity_phase') or '—'} • candidates={state_get('dynamic_opportunity_count') or 0}")
         st.info('Engine memakai scheduler otomatis: snapshot awal cepat, full refresh, retraining, walk-forward, lalu pembaruan opportunity. Tidak ada tombol manual yang wajib ditekan.')
 
