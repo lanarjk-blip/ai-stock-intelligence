@@ -131,10 +131,16 @@ def build_monitor(frame, tape, ticker, session, opportunities=None, threshold_pc
             bar = available - pd.Timedelta(minutes=30) if available is not None else None
             bar_matches = bar is not None and str(row.get('Checkpoint Bar')) == bar.strftime('%H:%M')
             ret = _number(row.get('Slot Return %'))
+            # Verify the actual tape, not only the checkpoint's display state.
+            from timemap_statistics import full_regular_bar
+            actual = data.loc[data.ts.eq(bar.tz_convert('UTC'))] if bar is not None and not data.empty else pd.DataFrame()
+            actual_volume = _number(actual.iloc[-1].volume) if not actual.empty else None
+            eligible = (bar_matches and full_regular_bar(bar) and actual_volume is not None and actual_volume > 0)
             valid_outcome = (state == 'REALIZED TODAY' and str(row.get('Market Date')) == now.date().isoformat()
                              and available is not None and available <= now
-                             and bar_matches and bar.date() == now.date() and ret is not None)
+                             and eligible and bar.date() == now.date() and ret is not None)
             if valid_outcome:
+                ret = (float(actual.iloc[-1].close) / float(actual.iloc[-1].open) - 1) * 100
                 # Recompute direction from this interval, never from cumulative morning score.
                 direction = 'UP' if ret > threshold_pct else 'DOWN' if ret < -threshold_pct else 'DATAR'
                 realized = f'{direction} {ret:+.2f}%'
