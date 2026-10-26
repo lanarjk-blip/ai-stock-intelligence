@@ -137,6 +137,8 @@ def _start_worker_premarket_daemons():
     if os.path.basename(str(sys.argv[0] or "")) != "worker_base.py":
         return
 
+    import local_runtime_health
+    local_runtime_health.start_worker_monitor()
     _run_startup_selfcheck()
     live_names = {thread.name for thread in threading.enumerate()}
     if "asi-premarket-h10" not in live_names:

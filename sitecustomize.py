@@ -98,6 +98,7 @@ if _IS_REAL_WORKER:
             pid=os.getpid(),
             generation=_identity.get("generation", ""),
             build=_identity.get("build", ""),
+            fingerprint=_identity.get("fingerprint"),
         )
     except Exception as exc:
         print(f"[LOCAL_RUNTIME_HEALTH] first heartbeat error: {exc!r}", flush=True)
@@ -138,6 +139,7 @@ if _IS_REAL_WORKER:
             pid=os.getpid(),
             generation=_identity.get("generation", ""),
             build=_identity.get("build", ""),
+            fingerprint=_identity.get("fingerprint"),
         )
     except Exception as exc:
         print(f"[LOCAL_RUNTIME_HEALTH] post-restore heartbeat error: {exc!r}", flush=True)
@@ -175,6 +177,7 @@ _WATCH = (
     "runtime_api.py",
     "render.yaml",
     "sitecustomize.py",
+    "timemap_data.py", "timemap_statistics.py", "trading_monitor.py", "trading_groups.py",
 )
 
 
@@ -216,6 +219,7 @@ def _run_local_worker_heartbeat():
                 pid=os.getpid(),
                 generation=identity.get("generation", ""),
                 build=identity.get("build", ""),
+                fingerprint=identity.get("fingerprint"),
             )
             time.sleep(30)
     except Exception as exc:

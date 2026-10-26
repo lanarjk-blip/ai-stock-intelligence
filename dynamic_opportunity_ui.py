@@ -139,7 +139,7 @@ def _quality_gate_state():
         con.close()
         state = {str(k): str(v) for k, v in rows}
         status = state.get('data_quality_status', '').upper()
-        return {
+        base = {
             'known': bool(status),
             'ready': status == 'READY',
             'status': status or 'UNKNOWN',
@@ -148,7 +148,23 @@ def _quality_gate_state():
             'reasons': state.get('data_quality_reasons', ''),
         }
     except Exception:
-        return {'known': False, 'ready': False, 'status': 'UNKNOWN', 'collection_ratio': '', 'ready_ratio': '', 'reasons': ''}
+        base = {'known': False, 'ready': False, 'status': 'UNKNOWN', 'collection_ratio': '', 'ready_ratio': '', 'reasons': ''}
+    # Native gate: startup/UI monkey patches must not be required for safety.
+    try:
+        import runtime_health
+        health = runtime_health.remote_runtime_health()
+        if not isinstance(health,dict) or not isinstance(health.get('ready'),bool):
+            raise ValueError('Invalid runtime health response')
+    except Exception:
+        health = {'required': True, 'ready': False, 'status': 'RUNTIME_UNAVAILABLE',
+                  'reason': 'Kesehatan worker belum dapat diperiksa'}
+    base['runtime_health'] = health
+    if health.get('required',True) and not health.get('ready'):
+        base['known'] = True
+        base['ready'] = False
+        base['status'] = str(health.get('status') or 'RUNTIME_UNAVAILABLE')
+        base['reasons'] = ' | '.join(filter(None,[base['reasons'],str(health.get('reason') or 'Heartbeat worker belum terverifikasi')]))
+    return base
 
 
 def _ratio_label(value):

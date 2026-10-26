@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import threading
 from datetime import datetime, timezone
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -21,10 +22,11 @@ FILES = (
     "market_session.py", "premarket_scheduler.py", "premarket_preliminary.py",
     "premarket_intelligence.py", "premarket_evaluation.py", "premarket_explain.py",
     "closing_overnight.py", "hold_engine.py", "ai_stock_ask.py", "fcm_adapter.py",
-    "runtime_supervisor.py", "runtime_health.py", "runtime_health_ui_patch.py",
+    "runtime_supervisor.py", "runtime_health.py", "runtime_health_ui_patch.py", "local_runtime_health.py",
     "persistent_bridge.py", "ui_replica.py", "replica_runtime.py",
     "external_runtime_guard.py", "runtime_api.py", "sitecustomize.py", "config.json",
     "data/idx_holidays.json",
+    "timemap_data.py", "timemap_statistics.py", "trading_monitor.py", "trading_groups.py",
 )
 
 
@@ -53,10 +55,10 @@ def _cfg():
         return {}
 
 
-def write_worker_heartbeat(pid=0, generation="", build=""):
+def write_worker_heartbeat(pid=0, generation="", build="", fingerprint=None):
     os.makedirs(os.path.dirname(DB), exist_ok=True)
     now = datetime.now(timezone.utc).isoformat()
-    fingerprint = source_fingerprint()
+    fingerprint = fingerprint or source_fingerprint()
     con = sqlite3.connect(DB, timeout=10)
     try:
         con.execute("CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY,value TEXT)")
@@ -174,3 +176,69 @@ def health(now=None, max_age_seconds=None):
     if not engine.get("ready"):
         return {**common, **engine}
     return {**common, **engine}
+
+
+def start_worker_monitor():
+    """Explicit worker bootstrap, including when Python skips sitecustomize."""
+    import sys
+    import threading
+    import time
+    if os.environ.get('AI_ENGINE_WORKER') != '1' or os.path.basename(str(sys.argv[0] or '')) != 'worker_base.py':
+        return False
+    import runtime_supervisor
+    identity = dict(runtime_supervisor.CLAIM or {})
+    startup_fingerprint = identity.get('fingerprint') or source_fingerprint()
+    def heartbeat():
+        return write_worker_heartbeat(pid=os.getpid(), generation=identity.get('generation',''),
+                                      build=identity.get('build',''), fingerprint=startup_fingerprint)
+    # Synchronous first heartbeat proves this real worker has reached bootstrap.
+    heartbeat()
+    def pulse():
+        while True:
+            try:
+                heartbeat()
+            except Exception as exc:
+                print(f'[LOCAL_RUNTIME_HEALTH] heartbeat failed: {type(exc).__name__}',flush=True)
+            time.sleep(30)
+    def watch():
+        while True:
+            time.sleep(20)
+            if source_fingerprint() != startup_fingerprint:
+                os.execv(sys.executable,[sys.executable,os.path.join(BASE,'worker_base.py')])
+    names={t.name for t in threading.enumerate()}
+    for name,target in [('asi-local-heartbeat',pulse),('asi-runtime-watchdog',watch)]:
+        if name not in names:
+            threading.Thread(target=target,name=name,daemon=True).start()
+    return True
+
+
+_RECOVERY_LAST = None
+_RECOVERY_LOCK = threading.Lock()
+
+
+def request_worker_recovery():
+    """Bounded recovery; the existing supervisor verifies/replaces stale owners."""
+    import time
+    import sys
+    import subprocess
+    import runtime_health
+    global _RECOVERY_LAST
+    if runtime_health.external_runtime_expected() or os.environ.get('AI_ENGINE_WORKER') == '1':
+        return False
+    if not _RECOVERY_LOCK.acquire(blocking=False):
+        return False
+    try:
+        now=time.monotonic()
+        if _RECOVERY_LAST is not None and now-_RECOVERY_LAST<180:
+            return False
+        if health().get('status') not in {'LOCAL_RUNTIME_MISSING','LOCAL_BUILD_MISMATCH'}:
+            return False
+        env=dict(os.environ)
+        env['AI_ENGINE_WORKER']='1'
+        env['PYTHONPATH']=os.pathsep.join(filter(None,[BASE,env.get('PYTHONPATH','')]))
+        subprocess.Popen([sys.executable,os.path.join(BASE,'worker_base.py')],cwd=BASE,env=env,
+                         stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+        _RECOVERY_LAST=now
+        return True
+    finally:
+        _RECOVERY_LOCK.release()
