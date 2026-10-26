@@ -74,3 +74,18 @@ Targeted tests cover exclusive three-way partition, exact rounded shares,
 missing-data precedence over rejection, closed sessions, empty universe, every
 page reachable, and invariant full-universe counts during search. Market-open
 and physical Android verification remain separate from CI/browser rendering.
+
+## Invalid input guard audit
+
+Reproduced four failure cases before correction: a negative entry-low could pass;
+a candle with high below its close could pass; a NaN decline threshold silently
+disabled the decline gate; null universe values became phantom NAN/NONE symbols.
+The read-only candle query now includes original high/low. Full positive,
+finite OHLC bounds are checked before setup qualification. Nonfinite/negative
+thresholds and malformed entry bounds/negative risk figures become unassessed.
+Missing/sentinel/non-string symbols are excluded and normalized duplicates count
+once. Tests exercise these actual failure cases, the SQLite-to-screen path,
+and valid rising/falling evidence to ensure the gates do not simply block all.
+No filtering rule was loosened, no model retrained, and no accuracy or reduction
+in realized trading losses is claimed. Existing start-of-candle five-minute
+freshness policy still limits coverage when the feed is delayed.
