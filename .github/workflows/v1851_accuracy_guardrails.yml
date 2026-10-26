@@ -6,6 +6,7 @@ on:
       - 'app.py'
       - 'timemap_*.py'
       - 'trading_monitor.py'
+      - 'trading_groups.py'
       - 'worker_base.py'
       - 'accuracy_guardrails.py'
       - 'research_feedback.py'
@@ -44,6 +45,7 @@ on:
       - 'app.py'
       - 'timemap_*.py'
       - 'trading_monitor.py'
+      - 'trading_groups.py'
       - 'worker_base.py'
       - 'accuracy_guardrails.py'
       - 'research_feedback.py'
@@ -174,7 +176,7 @@ jobs:
           runtime_health.py runtime_health_ui_patch.py runtime_supervisor.py
           persistent_bridge.py ui_replica.py replica_runtime.py
           external_runtime_guard.py runtime_api.py runtime_host.py runtime_host_api.py
-          deployment_preflight.py trading_monitor.py
+          deployment_preflight.py trading_monitor.py trading_groups.py
       - name: Diagnose current production Streamlit endpoint
         run: |
           set +e

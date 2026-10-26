@@ -16,6 +16,24 @@ MAX_CACHE = 64
 COLUMNS = ['ts', 'open', 'high', 'low', 'close', 'volume']
 
 
+def storage_provenance(frame, now=None):
+    """Preserve cached data's origin and original fetch time when persisting it."""
+    current=pd.Timestamp.now(tz='UTC') if now is None else pd.Timestamp(now).tz_convert('UTC')
+    attrs=frame.attrs
+    fallback=bool(attrs.get('fallback') or attrs.get('source')=='LAST GOOD CACHE')
+    source='LAST GOOD CACHE' if fallback else str(attrs.get('source') or 'Yahoo Finance 30m chart')
+    raw=attrs.get('fetched_at')
+    if raw is None and not fallback:
+        return source,current.isoformat()
+    try:
+        fetched=pd.Timestamp(raw)
+        if pd.isna(fetched) or fetched.tzinfo is None or fetched>current:
+            return source,None
+        return source,fetched.tz_convert('UTC').isoformat()
+    except (TypeError,ValueError):
+        return source,None
+
+
 def canonical_ticker(value):
     value = str(value or '').upper().strip().removesuffix('.JK')
     if not re.fullmatch(r'[A-Z0-9]{2,6}', value):
