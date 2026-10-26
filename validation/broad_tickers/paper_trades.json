@@ -1,0 +1,38 @@
+[
+  {
+    "method": "candidate",
+    "ticker": "ACES",
+    "candle_start": "2026-10-16 07:30:00+00:00",
+    "feature_asof": "2026-10-16 07:30:00+00:00",
+    "actual_return_pct": -1.8292682926829285,
+    "retrospective": true,
+    "actual_execution": false
+  },
+  {
+    "method": "candidate",
+    "ticker": "ACES",
+    "candle_start": "2026-10-16 08:00:00+00:00",
+    "feature_asof": "2026-10-16 08:00:00+00:00",
+    "actual_return_pct": 1.2499999999999956,
+    "retrospective": true,
+    "actual_execution": false
+  },
+  {
+    "method": "candidate",
+    "ticker": "AMRT",
+    "candle_start": "2026-10-22 07:00:00+00:00",
+    "feature_asof": "2026-10-22 07:00:00+00:00",
+    "actual_return_pct": -1.4084507042253502,
+    "retrospective": true,
+    "actual_execution": false
+  },
+  {
+    "method": "candidate",
+    "ticker": "AMRT",
+    "candle_start": "2026-10-23 07:30:00+00:00",
+    "feature_asof": "2026-10-23 07:30:00+00:00",
+    "actual_return_pct": 0.0,
+    "retrospective": true,
+    "actual_execution": false
+  }
+]

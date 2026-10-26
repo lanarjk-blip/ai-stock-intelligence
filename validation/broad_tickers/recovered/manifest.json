@@ -1,0 +1,281 @@
+{
+  "checked_at": "2026-10-26T16:35:38.364843+00:00",
+  "results": [
+    {
+      "ticker": "BMRI",
+      "attempts": [
+        {
+          "cutoff": "2026-10-26 16:35:38.364843+00:00",
+          "rows": 0,
+          "source": "UNAVAILABLE",
+          "errors": [
+            "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+            "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+          ]
+        },
+        {
+          "cutoff": "2026-10-19 16:35:38.364843+00:00",
+          "rows": 0,
+          "source": "UNAVAILABLE",
+          "errors": [
+            "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+            "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+          ]
+        },
+        {
+          "cutoff": "2026-10-12 16:35:38.364843+00:00",
+          "rows": 58,
+          "source": "query1.finance.yahoo.com",
+          "errors": []
+        },
+        {
+          "cutoff": "2026-10-05 16:35:38.364843+00:00",
+          "rows": 0,
+          "source": "UNAVAILABLE",
+          "errors": [
+            "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+            "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+          ]
+        },
+        {
+          "cutoff": "2026-09-28 16:35:38.364843+00:00",
+          "rows": 58,
+          "source": "query1.finance.yahoo.com",
+          "errors": []
+        },
+        {
+          "cutoff": "2026-09-21 16:35:38.364843+00:00",
+          "rows": 0,
+          "source": "UNAVAILABLE",
+          "errors": [
+            "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+            "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+          ]
+        },
+        {
+          "cutoff": "2026-09-14 16:35:38.364843+00:00",
+          "rows": 58,
+          "source": "query1.finance.yahoo.com",
+          "errors": []
+        },
+        {
+          "cutoff": "2026-09-07 16:35:38.364843+00:00",
+          "rows": 0,
+          "source": "UNAVAILABLE",
+          "errors": [
+            "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+            "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+          ]
+        }
+      ],
+      "rows": 174,
+      "sha256": "9583bfac201546a1b58f51d70436d648fee1389dffc77cb869683dccb43803e5"
+    },
+    {
+      "ticker": "ASII",
+      "attempts": [
+        {
+          "cutoff": "2026-10-26 16:35:38.364843+00:00",
+          "rows": 0,
+          "source": "UNAVAILABLE",
+          "errors": [
+            "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+            "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+          ]
+        },
+        {
+          "cutoff": "2026-10-19 16:35:38.364843+00:00",
+          "rows": 0,
+          "source": "UNAVAILABLE",
+          "errors": [
+            "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+            "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+          ]
+        },
+        {
+          "cutoff": "2026-10-12 16:35:38.364843+00:00",
+          "rows": 58,
+          "source": "query1.finance.yahoo.com",
+          "errors": []
+        },
+        {
+          "cutoff": "2026-10-05 16:35:38.364843+00:00",
+          "rows": 0,
+          "source": "UNAVAILABLE",
+          "errors": [
+            "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+            "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+          ]
+        },
+        {
+          "cutoff": "2026-09-28 16:35:38.364843+00:00",
+          "rows": 58,
+          "source": "query1.finance.yahoo.com",
+          "errors": []
+        },
+        {
+          "cutoff": "2026-09-21 16:35:38.364843+00:00",
+          "rows": 0,
+          "source": "UNAVAILABLE",
+          "errors": [
+            "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+            "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+          ]
+        },
+        {
+          "cutoff": "2026-09-14 16:35:38.364843+00:00",
+          "rows": 58,
+          "source": "query1.finance.yahoo.com",
+          "errors": []
+        },
+        {
+          "cutoff": "2026-09-07 16:35:38.364843+00:00",
+          "rows": 0,
+          "source": "UNAVAILABLE",
+          "errors": [
+            "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+            "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+          ]
+        }
+      ],
+      "rows": 174,
+      "sha256": "0a920e50f9b97375606cb5ced0cb006c0955013d0934966c1befc842434d064c"
+    },
+    {
+      "ticker": "INDF",
+      "attempts": [
+        {
+          "cutoff": "2026-10-26 16:35:38.364843+00:00",
+          "rows": 58,
+          "source": "query1.finance.yahoo.com",
+          "errors": []
+        },
+        {
+          "cutoff": "2026-10-19 16:35:38.364843+00:00",
+          "rows": 0,
+          "source": "UNAVAILABLE",
+          "errors": [
+            "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+            "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+          ]
+        },
+        {
+          "cutoff": "2026-10-12 16:35:38.364843+00:00",
+          "rows": 58,
+          "source": "query1.finance.yahoo.com",
+          "errors": []
+        },
+        {
+          "cutoff": "2026-10-05 16:35:38.364843+00:00",
+          "rows": 0,
+          "source": "UNAVAILABLE",
+          "errors": [
+            "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+            "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+          ]
+        },
+        {
+          "cutoff": "2026-09-28 16:35:38.364843+00:00",
+          "rows": 58,
+          "source": "query1.finance.yahoo.com",
+          "errors": []
+        },
+        {
+          "cutoff": "2026-09-21 16:35:38.364843+00:00",
+          "rows": 0,
+          "source": "UNAVAILABLE",
+          "errors": [
+            "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+            "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+          ]
+        },
+        {
+          "cutoff": "2026-09-14 16:35:38.364843+00:00",
+          "rows": 58,
+          "source": "query1.finance.yahoo.com",
+          "errors": []
+        },
+        {
+          "cutoff": "2026-09-07 16:35:38.364843+00:00",
+          "rows": 0,
+          "source": "UNAVAILABLE",
+          "errors": [
+            "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+            "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+          ]
+        }
+      ],
+      "rows": 232,
+      "sha256": "32f51a62b1cfaf455e9ee2e48ed4db9489ff3335c11f7aa028ec21d29a838635"
+    },
+    {
+      "ticker": "PGAS",
+      "attempts": [
+        {
+          "cutoff": "2026-10-26 16:35:38.364843+00:00",
+          "rows": 58,
+          "source": "query1.finance.yahoo.com",
+          "errors": []
+        },
+        {
+          "cutoff": "2026-10-19 16:35:38.364843+00:00",
+          "rows": 0,
+          "source": "UNAVAILABLE",
+          "errors": [
+            "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+            "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+          ]
+        },
+        {
+          "cutoff": "2026-10-12 16:35:38.364843+00:00",
+          "rows": 58,
+          "source": "query1.finance.yahoo.com",
+          "errors": []
+        },
+        {
+          "cutoff": "2026-10-05 16:35:38.364843+00:00",
+          "rows": 0,
+          "source": "UNAVAILABLE",
+          "errors": [
+            "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+            "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+          ]
+        },
+        {
+          "cutoff": "2026-09-28 16:35:38.364843+00:00",
+          "rows": 58,
+          "source": "query1.finance.yahoo.com",
+          "errors": []
+        },
+        {
+          "cutoff": "2026-09-21 16:35:38.364843+00:00",
+          "rows": 0,
+          "source": "UNAVAILABLE",
+          "errors": [
+            "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+            "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+          ]
+        },
+        {
+          "cutoff": "2026-09-14 16:35:38.364843+00:00",
+          "rows": 58,
+          "source": "query1.finance.yahoo.com",
+          "errors": []
+        },
+        {
+          "cutoff": "2026-09-07 16:35:38.364843+00:00",
+          "rows": 0,
+          "source": "UNAVAILABLE",
+          "errors": [
+            "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+            "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+          ]
+        }
+      ],
+      "rows": 232,
+      "sha256": "4bff9965aeed6eeab41258302ddce2a149146729bcc954acd0ba8c1a367b480e"
+    }
+  ],
+  "rate_limit_stop": false,
+  "elapsed_seconds": 64.273
+}

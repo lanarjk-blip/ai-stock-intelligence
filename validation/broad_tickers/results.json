@@ -1,0 +1,508 @@
+{
+  "checked_at": "2026-10-26T23:37:17.161271+07:00",
+  "production_enabled": false,
+  "candidate_sha256": "fe115bad7a7cb82f7a307ea8021f2b57b36df81110e460b59b6349a196316c88",
+  "evaluation_dates": [
+    "2026-10-14",
+    "2026-10-15",
+    "2026-10-16",
+    "2026-10-19",
+    "2026-10-20",
+    "2026-10-21",
+    "2026-10-22",
+    "2026-10-23"
+  ],
+  "protocol_sha256": "4d43f0fca3c982d4c61463abdc7bf19fdd7e667c72ddc480f1a69851629fe365",
+  "input_sha256": {
+    "BMRI": {
+      "validation/broad_tickers/inputs/BMRI.csv": "bf7b1d2a4fcd8bfca87901b9f562830dc8e249f45a2ce9ef8f4927c8c5981e2a",
+      "validation/broad_tickers/recovered/BMRI.csv": "9583bfac201546a1b58f51d70436d648fee1389dffc77cb869683dccb43803e5"
+    },
+    "BBNI": {
+      "validation/broad_tickers/inputs/BBNI.csv": "593373b5efe3e18d1bc0f062391e37bc384078d5814fff7202c7a79ba4db51ad"
+    },
+    "ASII": {
+      "validation/broad_tickers/inputs/ASII.csv": "40128affda1ce461a7ae5a5e0c9a1f46be82698a1a9a97024d556cb8a61acd24",
+      "validation/broad_tickers/recovered/ASII.csv": "0a920e50f9b97375606cb5ced0cb006c0955013d0934966c1befc842434d064c"
+    },
+    "UNTR": {
+      "validation/broad_tickers/inputs/UNTR.csv": "cb087becadda014bde0dc024690ad64474d1e3ddca22068f077b21213443f2ed"
+    },
+    "INDF": {
+      "validation/broad_tickers/inputs/INDF.csv": "8b06aa6e867d706cde8c04caec7e58e93dbed5237cb52bf972318eb91523f436",
+      "validation/broad_tickers/recovered/INDF.csv": "32f51a62b1cfaf455e9ee2e48ed4db9489ff3335c11f7aa028ec21d29a838635"
+    },
+    "ICBP": {
+      "validation/broad_tickers/inputs/ICBP.csv": "b924e11594646cd9f28a7fea7305cb9151ca2069a47d173e9e4fb74c591115fa"
+    },
+    "KLBF": {
+      "validation/broad_tickers/inputs/KLBF.csv": "d72ad438015a32747736dcedd1c3ad80c6f5db3b9f30a5b283ad1e6ca47f1555"
+    },
+    "PGAS": {
+      "validation/broad_tickers/inputs/PGAS.csv": "2546d0174b4fdf1da74e552475702d873bfcb35dcd04f9f0c7f6d4d56b63f53c",
+      "validation/broad_tickers/recovered/PGAS.csv": "4bff9965aeed6eeab41258302ddce2a149146729bcc954acd0ba8c1a367b480e"
+    },
+    "MEDC": {
+      "validation/broad_tickers/inputs/MEDC.csv": "5ef2f12819f38a4ce36ddb9ceef14d96412faf54ef16230ea60bbec4be4d8d44"
+    },
+    "ADRO": {
+      "validation/broad_tickers/inputs/ADRO.csv": "26caf2387a2622cc0e26b2b9ecdecd6f24a823202bf21d166d865cd222b514d1"
+    },
+    "ITMG": {
+      "validation/broad_tickers/inputs/ITMG.csv": "f92c8fa245cf3143cb87eb7457fa1fc4e1f5f5c7df2934a72dc41b5d5975e507"
+    },
+    "ADMR": {
+      "validation/broad_tickers/inputs/ADMR.csv": "412680510f73888d19e27eb9ea4ba0c0b99b080fa7dadfec589c0710ef6b4e53"
+    },
+    "AMRT": {
+      "validation/broad_tickers/inputs/AMRT.csv": "885d571dc58e9086e6f31378cc07f1812e8d6f360c4c4c7a7e5c81a3e13ba8dc"
+    },
+    "ACES": {
+      "validation/broad_tickers/inputs/ACES.csv": "71671c0784eb22421b5d5b047734a6e0b1aaf7abf0d8830a1af5a5be12cb819d"
+    },
+    "BRIS": {
+      "validation/broad_tickers/inputs/BRIS.csv": "56df67d2329c6102fe85358e6a6ce4c1e3bcf2800b9e24eb7cfd8774b5ec13b0"
+    },
+    "PTBA": {
+      "validation/broad_tickers/inputs/PTBA.csv": "b6c01172674307a72b59603f1dc47f109fe411f5c3b6aba16e904d5fe8f839d6"
+    },
+    "JPFA": {
+      "validation/broad_tickers/inputs/JPFA.csv": "117b824e2a5286891eaa02d861a9ad7397e23ec5b0ea3b18958d88e3a5fa85f4"
+    },
+    "GOTO": {
+      "validation/broad_tickers/inputs/GOTO.csv": "846c382ecbe601bb6ea03e25992a96468f3c3fb1ce07dce40b648688ead8350f"
+    }
+  },
+  "coverage": [
+    {
+      "ticker": "BMRI",
+      "status": "INSUFFICIENT HISTORY",
+      "history_days": 17,
+      "prior_days": 15,
+      "test_n": 18
+    },
+    {
+      "ticker": "BBNI",
+      "status": "INSUFFICIENT HISTORY",
+      "history_days": 2,
+      "prior_days": 0,
+      "test_n": 13
+    },
+    {
+      "ticker": "ASII",
+      "status": "INSUFFICIENT HISTORY",
+      "history_days": 17,
+      "prior_days": 15,
+      "test_n": 18
+    },
+    {
+      "ticker": "UNTR",
+      "status": "INSUFFICIENT HISTORY",
+      "history_days": 2,
+      "prior_days": 0,
+      "test_n": 13
+    },
+    {
+      "ticker": "INDF",
+      "status": "INSUFFICIENT HISTORY",
+      "history_days": 19,
+      "prior_days": 15,
+      "test_n": 38
+    },
+    {
+      "ticker": "ICBP",
+      "status": "INSUFFICIENT HISTORY",
+      "history_days": 2,
+      "prior_days": 0,
+      "test_n": 13
+    },
+    {
+      "ticker": "KLBF",
+      "status": "INSUFFICIENT HISTORY",
+      "history_days": 2,
+      "prior_days": 0,
+      "test_n": 13
+    },
+    {
+      "ticker": "PGAS",
+      "status": "INSUFFICIENT HISTORY",
+      "history_days": 19,
+      "prior_days": 15,
+      "test_n": 38
+    },
+    {
+      "ticker": "MEDC",
+      "status": "INSUFFICIENT HISTORY",
+      "history_days": 2,
+      "prior_days": 0,
+      "test_n": 13
+    },
+    {
+      "ticker": "ADRO",
+      "status": "INSUFFICIENT HISTORY",
+      "history_days": 2,
+      "prior_days": 0,
+      "test_n": 13
+    },
+    {
+      "ticker": "ITMG",
+      "status": "INSUFFICIENT HISTORY",
+      "history_days": 2,
+      "prior_days": 0,
+      "test_n": 13
+    },
+    {
+      "ticker": "ADMR",
+      "status": "INSUFFICIENT HISTORY",
+      "history_days": 2,
+      "prior_days": 0,
+      "test_n": 13
+    },
+    {
+      "ticker": "EXCL",
+      "status": "NO DATA",
+      "history_days": 0,
+      "test_n": 0
+    },
+    {
+      "ticker": "ISAT",
+      "status": "NO DATA",
+      "history_days": 0,
+      "test_n": 0
+    },
+    {
+      "ticker": "AMRT",
+      "status": "EVALUATED",
+      "history_days": 40,
+      "prior_days": 32,
+      "test_n": 76
+    },
+    {
+      "ticker": "ACES",
+      "status": "EVALUATED",
+      "history_days": 40,
+      "prior_days": 32,
+      "test_n": 76
+    },
+    {
+      "ticker": "BRIS",
+      "status": "INSUFFICIENT HISTORY",
+      "history_days": 2,
+      "prior_days": 0,
+      "test_n": 13
+    },
+    {
+      "ticker": "PTBA",
+      "status": "INSUFFICIENT HISTORY",
+      "history_days": 2,
+      "prior_days": 0,
+      "test_n": 13
+    },
+    {
+      "ticker": "JPFA",
+      "status": "INSUFFICIENT HISTORY",
+      "history_days": 2,
+      "prior_days": 0,
+      "test_n": 13
+    },
+    {
+      "ticker": "GOTO",
+      "status": "INSUFFICIENT HISTORY",
+      "history_days": 2,
+      "prior_days": 0,
+      "test_n": 13
+    }
+  ],
+  "requested": 20,
+  "evaluated_tickers": [
+    "AMRT",
+    "ACES"
+  ],
+  "decision": "NO PROMOTION: retrospective ticker extension, idealized fills and incomplete coverage",
+  "assumptions": "Long only, enter target candle open and exit same candle close; idealized fills, no overlapping positions; not broker execution evidence",
+  "costs_are_assumptions": true,
+  "directional_metrics": {
+    "candidate": {
+      "n": 152,
+      "directional_accuracy": 0.34868421052631576,
+      "balanced_accuracy": 0.3586415882967607,
+      "precision_up": 0.2857142857142857,
+      "precision_down": 0.31666666666666665,
+      "brier": 0.6743843184345979,
+      "ece": 0.09402637846923895,
+      "calibration_bins": [
+        {
+          "n": 56,
+          "confidence": 0.37656950297395975,
+          "accuracy": 0.2857142857142857
+        },
+        {
+          "n": 66,
+          "confidence": 0.44016581478527145,
+          "accuracy": 0.4090909090909091
+        },
+        {
+          "n": 22,
+          "confidence": 0.5471938235689401,
+          "accuracy": 0.2727272727272727
+        },
+        {
+          "n": 8,
+          "confidence": 0.639363683304747,
+          "accuracy": 0.5
+        }
+      ],
+      "actual_counts": [
+        50,
+        44,
+        58
+      ],
+      "predicted_counts": [
+        60,
+        43,
+        49
+      ]
+    },
+    "slot": {
+      "n": 152,
+      "directional_accuracy": 0.3815789473684211,
+      "balanced_accuracy": 0.41299895506792056,
+      "precision_up": 0.375,
+      "precision_down": 0.4423076923076923,
+      "brier": 0.6899533246886221,
+      "ece": 0.06131784837346915,
+      "calibration_bins": [
+        {
+          "n": 28,
+          "confidence": 0.3662706461895104,
+          "accuracy": 0.35714285714285715
+        },
+        {
+          "n": 84,
+          "confidence": 0.4284610395882491,
+          "accuracy": 0.42857142857142855
+        },
+        {
+          "n": 40,
+          "confidence": 0.5263865546218487,
+          "accuracy": 0.3
+        }
+      ],
+      "actual_counts": [
+        50,
+        44,
+        58
+      ],
+      "predicted_counts": [
+        52,
+        92,
+        8
+      ]
+    }
+  },
+  "per_ticker": {
+    "ACES": {
+      "candidate": {
+        "n": 76,
+        "directional_accuracy": 0.3026315789473684,
+        "balanced_accuracy": 0.326984126984127,
+        "precision_up": 0.3181818181818182,
+        "precision_down": 0.24242424242424243,
+        "brier": 0.69390026292568,
+        "ece": 0.14133069712213756,
+        "calibration_bins": [
+          {
+            "n": 24,
+            "confidence": 0.3730970716889395,
+            "accuracy": 0.3333333333333333
+          },
+          {
+            "n": 37,
+            "confidence": 0.4361652926006917,
+            "accuracy": 0.2972972972972973
+          },
+          {
+            "n": 10,
+            "confidence": 0.5479994405212911,
+            "accuracy": 0.2
+          },
+          {
+            "n": 5,
+            "confidence": 0.6337386058618806,
+            "accuracy": 0.4
+          }
+        ],
+        "actual_counts": [
+          21,
+          20,
+          35
+        ],
+        "predicted_counts": [
+          33,
+          21,
+          22
+        ]
+      },
+      "slot": {
+        "n": 76,
+        "directional_accuracy": 0.3815789473684211,
+        "balanced_accuracy": 0.4753968253968253,
+        "precision_up": null,
+        "precision_down": 0.45454545454545453,
+        "brier": 0.7065309250893034,
+        "ece": 0.15238222330674553,
+        "calibration_bins": [
+          {
+            "n": 6,
+            "confidence": 0.3448275862068966,
+            "accuracy": 0.6666666666666666
+          },
+          {
+            "n": 30,
+            "confidence": 0.41351492321066363,
+            "accuracy": 0.43333333333333335
+          },
+          {
+            "n": 40,
+            "confidence": 0.5263865546218487,
+            "accuracy": 0.3
+          }
+        ],
+        "actual_counts": [
+          21,
+          20,
+          35
+        ],
+        "predicted_counts": [
+          22,
+          54,
+          0
+        ]
+      }
+    },
+    "AMRT": {
+      "candidate": {
+        "n": 76,
+        "directional_accuracy": 0.39473684210526316,
+        "balanced_accuracy": 0.39455272363818095,
+        "precision_up": 0.25925925925925924,
+        "precision_down": 0.4074074074074074,
+        "brier": 0.6548683739435157,
+        "ece": 0.12937878648131673,
+        "calibration_bins": [
+          {
+            "n": 32,
+            "confidence": 0.37917382643772496,
+            "accuracy": 0.25
+          },
+          {
+            "n": 29,
+            "confidence": 0.44526992929663184,
+            "accuracy": 0.5517241379310345
+          },
+          {
+            "n": 12,
+            "confidence": 0.5465224761086475,
+            "accuracy": 0.3333333333333333
+          },
+          {
+            "n": 3,
+            "confidence": 0.6487388123761912,
+            "accuracy": 0.6666666666666666
+          }
+        ],
+        "actual_counts": [
+          29,
+          24,
+          23
+        ],
+        "predicted_counts": [
+          27,
+          22,
+          27
+        ]
+      },
+      "slot": {
+        "n": 76,
+        "directional_accuracy": 0.3815789473684211,
+        "balanced_accuracy": 0.3734591037814426,
+        "precision_up": 0.375,
+        "precision_down": 0.43333333333333335,
+        "brier": 0.6733757242879408,
+        "ece": 0.03647226585734104,
+        "calibration_bins": [
+          {
+            "n": 22,
+            "confidence": 0.3721187534574959,
+            "accuracy": 0.2727272727272727
+          },
+          {
+            "n": 54,
+            "confidence": 0.43676443757579647,
+            "accuracy": 0.42592592592592593
+          }
+        ],
+        "actual_counts": [
+          29,
+          24,
+          23
+        ],
+        "predicted_counts": [
+          30,
+          38,
+          8
+        ]
+      }
+    }
+  },
+  "paper_strategies": {
+    "candidate": {
+      "0.3": {
+        "trades": 4,
+        "evaluation_days": 3,
+        "win_rate": 0.25,
+        "mean_gross_return_pct": -0.4969297492270708,
+        "mean_net_return_pct": -0.8969297492270708,
+        "profit_factor": 0.19153984301218335,
+        "day_block_mean_net95": [
+          -1.8084507042253504,
+          -0.4000000000000001
+        ],
+        "fee_round_trip_pct": 0.3,
+        "slippage_round_trip_pct": 0.1,
+        "actual_execution": false
+      },
+      "0.5": {
+        "trades": 4,
+        "evaluation_days": 3,
+        "win_rate": 0.25,
+        "mean_gross_return_pct": -0.4969297492270708,
+        "mean_net_return_pct": -1.0969297492270709,
+        "profit_factor": 0.12902664884621592,
+        "day_block_mean_net95": [
+          -2.0084507042253503,
+          -0.6
+        ],
+        "fee_round_trip_pct": 0.5,
+        "slippage_round_trip_pct": 0.1,
+        "actual_execution": false
+      }
+    },
+    "slot": {
+      "0.3": {
+        "trades": 0,
+        "win_rate": null,
+        "mean_net_return_pct": null,
+        "profit_factor": null,
+        "day_block_mean_net95": null
+      },
+      "0.5": {
+        "trades": 0,
+        "win_rate": null,
+        "mean_net_return_pct": null,
+        "profit_factor": null,
+        "day_block_mean_net95": null
+      }
+    }
+  }
+}
