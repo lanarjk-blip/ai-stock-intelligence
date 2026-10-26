@@ -11,10 +11,14 @@ def test_daily_change_uses_prior_day_not_today_snapshot(ticker):
     assert previous_close(prices,'2026-10-23') is None
 
 def test_today_view_cannot_display_historical_up_as_live():
-    frame=pd.DataFrame({'Data Type':['TODAY CHECKPOINT','HISTORICAL BASELINE'],'Waktu':['14:00','14:00'],'Slot Return %':[-7,None],'Baseline UP %':[60,None],'UP %':[None,60],'Samples':[30,30]})
+    frame=pd.DataFrame({'Data Type':['TODAY CHECKPOINT','HISTORICAL BASELINE'],'Waktu':['14:00','14:00'],'Slot Return %':[-7,None],'Baseline UP %':[60,None],'Baseline DOWN %':[20,None],'Baseline Sideways %':[20,None],'Live Direction':['DOWN',None],'UP %':[None,60],'Samples':[30,30]})
     today,history=timemap_sections(frame)
     assert today['Slot Return %'].iloc[0]==-7
     assert 'Baseline UP %' not in today and 'UP %' not in today
+    assert today['UP historis %'].iloc[0]=='60.00'
+    assert today['DOWN historis %'].iloc[0]=='20.00'
+    assert today['DATAR historis %'].iloc[0]=='20.00'
+    assert list(today.columns)[list(today.columns).index('Live Direction')+1]=='UP historis %'
     assert history['UP %'].iloc[0]==60
     assert 'Slot Return %' not in history
 
