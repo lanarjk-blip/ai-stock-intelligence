@@ -1,0 +1,28 @@
+{
+  "selected_on_validation": "equal_ensemble",
+  "training_end": "2026-10-13",
+  "feature_names": [
+    "lag_return",
+    "momentum3",
+    "volatility5",
+    "range_lag",
+    "volume_ratio",
+    "gap_hours",
+    "clock_sin",
+    "clock_cos",
+    "friday"
+  ],
+  "class_order": [
+    "DOWN",
+    "DATAR",
+    "UP"
+  ],
+  "components": {
+    "frozen_balanced_logistic.json": "28d898167ff2452626a6269966b06a7e1b346a83ef24c2895be713722abd47e7",
+    "frozen_xgboost_small.json": "3ecc36605cb908d010c326b2f3fad4a6a768fa8c5a3cc29bfd60de111c97fc5a",
+    "frozen_mlp_small.json": "7b38f511eb418321cd6908566ee88234603a7a42650c2eeec6d4565a9cc96711"
+  },
+  "protocol_sha256": "0bbb0e0d353470d297ea641d9b96e64e11caa3852a3bd0e7fa8b0577d94418c0",
+  "production_enabled": false,
+  "promotion": "BLOCKED: no independent prospective evaluation"
+}
