@@ -2143,6 +2143,9 @@ def render_app():
         if any(k in x for k in ['WATCH','WAIT','NEAR','DEVELOP','SIDEWAYS','WARNING','MEDIUM','PREPAR']): return 'yellow'
         return 'gray'
 
+    # One strip per dashboard render even if legacy title wrappers are nested.
+    st.session_state['_asi_refresh_strip_drawn'] = False
+    st.session_state['_asi_storage_strip_drawn'] = False
     st.title(f"📈 AI Stock Intelligence V{CFGD.get('mobile_ui_version','1.8.52')}")
     st.caption('Continuous Intelligence • Rank → Opportunity → Alert → Deep Analysis → Risk → Hold → Overnight')
     st.markdown('<div class="asi-row">'+_pill(_dashboard_status, 'green' if ready else 'yellow')+_pill(f'Model {active_name}', 'green' if model else 'gray')+_pill(f'Snapshot {snap_at or "belum ada"}', 'green' if snap_at else 'gray')+'</div>', unsafe_allow_html=True)

@@ -34,3 +34,19 @@ required before merge. No full scan/model retraining was added to page refresh.
 Remaining acceptance: observe production runtime after deploy; check Search,
 Time Map dates/freshness and history. New live candles and physical Android
 cannot be verified before market opens or without an Android device.
+
+Production follow-up: on 27 October at 05:46 WIB the runtime changed to
+LOCAL_RUNTIME_READY_REFRESHING with source fingerprint a2a83a0f33, matching the
+implemented source; at 05:50:13 WIB it was LOCAL_RUNTIME_READY with latest engine
+update 05:46:29 WIB. Search/Ask/Time Map worked for BMRI and BBRI, and stored
+recommendations remained accessible in History. BBRI's Time Map check advanced
+05:47:46 -> 05:49:16 without a manual refresh; the actual candle remained
+26 October 16:00 and WAITING FOR NEW BAR, not live Tuesday data. These are
+pre-market browser observations, not physical Android or open-market acceptance.
+
+A subsequent UI check found nested legacy title wrappers repeating the same
+status/storage strips. Render-scoped session latches now emit each strip once,
+reset at the next dashboard render. This does not bypass access control or
+change market analysis. A Streamlit rendering test exercises five nested calls
+and a subsequent rerun: one refresh button, one clock/status caption, and one
+storage read/caption per run.

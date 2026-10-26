@@ -96,6 +96,9 @@ def _market_status():
 
 
 def _render_refresh_status(st):
+    if st.session_state.get('_asi_refresh_strip_drawn',False):
+        return
+    st.session_state['_asi_refresh_strip_drawn'] = True
     now_wib = datetime.now(_WIB)
     market_label, market_raw = _market_status()
     latest = _latest_persisted_update()
