@@ -46,3 +46,31 @@ The persistence path also retains the original fetched_at and source metadata.
 Fallback bars are stored as LAST GOOD CACHE so neither saving nor refreshing
 can disguise them as newly fetched provider data. Unknown fallback fetch times
 remain absent. Existing provider-recovery tests are included in targeted checks.
+
+## Three-way accounting within two columns
+
+The summary now counts LOLOS SARINGAN, TIDAK LOLOS and BELUM BISA DINILAI.
+Each canonical supported ticker belongs to exactly one category. Data/calendar/
+session/quality/provenance/identity/snapshot completeness checks run before setup
+rejection. A stale HIGH-risk snapshot is unassessed, not proof of a current
+rejected setup. Only complete current evidence can lead to setup rejection or
+acceptance. Gates are not relaxed to force picks.
+
+Counts use the complete universe, independent of search and pagination. Shares
+are percentages of ticker counts, NOT accuracy, confidence, or probability of
+profit. Largest-remainder rounding to two decimals sums to 100.00% for a
+nonempty universe. Empty universes show three zeros. Closed-market classification
+is unassessed and the screen explicitly says live assessment has not started.
+
+The left column contains accepted setups; the right contains rejected and
+unassessed tickers with distinct badges and reasons. Both have independent page
+selectors (40 entries per page), so no ticker is hidden beyond an initial cap.
+An expandable reason/count table explains missing coverage and rejections.
+
+Accuracy of this screened group remains BELUM TERBUKTI. Prior model directional
+accuracy is not substituted for the unmeasured performance of the new screen.
+There is no claim of reduced loss, profitable selection, or a new model.
+Targeted tests cover exclusive three-way partition, exact rounded shares,
+missing-data precedence over rejection, closed sessions, empty universe, every
+page reachable, and invariant full-universe counts during search. Market-open
+and physical Android verification remain separate from CI/browser rendering.
