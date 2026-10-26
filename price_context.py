@@ -21,13 +21,18 @@ def change_pct(price, reference):
         return None
 
 def timemap_sections(frame):
-    """Remove historical probabilities entirely from today's realization view."""
+    """Show clearly labelled historical frequencies beside realized direction."""
     if 'Data Type' not in frame:
         return None
     today = frame.loc[frame['Data Type'].eq('TODAY CHECKPOINT')].copy()
     history = frame.loc[frame['Data Type'].eq('HISTORICAL BASELINE')].copy()
     historical_columns = ['Baseline UP %','Baseline Sideways %','Baseline DOWN %','Samples','UP %','Sideways %','DOWN %','Mean Return %','Confidence %']
+    labels = {'Baseline UP %':'UP historis %','Baseline DOWN %':'DOWN historis %','Baseline Sideways %':'DATAR historis %'}
+    values = {label: today[source].map(lambda v: f'{float(v):.2f}' if pd.notna(v) else '—') for source,label in labels.items() if source in today}
     today = today.drop(columns=historical_columns, errors='ignore')
+    position = list(today.columns).index('Live Direction') + 1 if 'Live Direction' in today else len(today.columns)
+    for offset,(label,value) in enumerate(values.items()):
+        today.insert(position + offset,label,value)
     keep = ['Waktu','Sesi','Market Date','historical_asof','Live Ticker','Samples','UP %','Sideways %','DOWN %','Mean Return %','Catatan']
     history = history[[c for c in keep if c in history]]
     today.attrs['timemap_rendered'] = history.attrs['timemap_rendered'] = True

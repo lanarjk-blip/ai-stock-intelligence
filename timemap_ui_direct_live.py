@@ -427,7 +427,7 @@ def install():
             sections = timemap_sections(data)
             if sections is not None:
                 today, history = sections
-                st.caption('REALISASI HARI INI — bukan prediksi arah berikutnya')
+                st.caption('REALISASI HARI INI • UP/DOWN/DATAR historis di samping arah adalah frekuensi masa lalu, bukan probabilitas live hari ini')
                 result = original(today, *args, **kwargs)
                 with st.expander('Statistik historis — BUKAN prediksi live', expanded=False):
                     st.caption('Frekuensi hari sebelumnya; tidak menyesuaikan arah pasar hari ini.')
