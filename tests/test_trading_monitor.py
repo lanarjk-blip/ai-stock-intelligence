@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from trading_monitor import build_monitor
+from trading_monitor import build_monitor, date_context
 from market_session import session_status
 
 
@@ -150,7 +150,36 @@ render_monitor(history,'PTSP',session_status(now=pd.Timestamp('2026-10-26T14:33:
     compact=app.dataframe[0].value
     assert compact['Waktu WIB'].tolist()==['14:00','15:00']
     assert len(compact.columns)==6
-    assert compact.iloc[0]['Realisasi hari ini'].startswith('DOWN')
+    assert compact.iloc[0]['Realisasi 26-10-2026'].startswith('DOWN')
     assert compact.iloc[1]['Status interval']=='WAIT • NO EDGE'
     assert len(app.dataframe)==3
     assert not app.expander[0].proto.expanded
+    assert any('DATA HARGA: Senin, 26 Oktober 2026 — HARI INI' in m.value for m in app.markdown)
+    assert any('ACUAN JADWAL HISTORIS: BELUM TERVERIFIKASI' in m.value for m in app.markdown)
+
+
+@pytest.mark.parametrize('now,target,relation',[
+    ('2026-10-26T10:00:00+07:00','2026-10-26','HARI INI'),
+    ('2026-10-26T22:00:00+07:00','2026-10-27','BESOK'),
+    ('2026-10-23T22:00:00+07:00','2026-10-26','HARI PERDAGANGAN BERIKUTNYA'),
+    ('2026-12-31T22:00:00+07:00','2027-01-04','HARI PERDAGANGAN BERIKUTNYA'),
+    ('2026-10-27T10:00:00+07:00','2026-10-26','JADWAL LAMA'),
+])
+def test_schedule_date_is_explicit_not_inferred_from_refresh(now,target,relation):
+    f=frame(); f['schedule_date']=target; f['historical_asof']='2026-10-23'
+    checked=pd.Timestamp(now)
+    context=date_context(f,checked,pd.Timestamp('2026-10-23T15:00:00+07:00'))
+    assert context['schedule_date']==target
+    assert context['schedule_relation']==relation
+    assert context['data_label']=='Jumat, 23 Oktober 2026'
+    expected = 'HARI INI' if checked.date() == pd.Timestamp('2026-10-23').date() else 'DATA LAMA / HISTORIS'
+    assert context['data_relation'] == expected
+    assert context['historical_label']=='Jumat, 23 Oktober 2026'
+
+
+@pytest.mark.parametrize('dates', [[],[''],['not a date'],['2026-10-26','2026-10-27']])
+def test_missing_or_conflicting_schedule_does_not_invent_tomorrow(dates):
+    context=date_context(pd.DataFrame({'schedule_date':dates}),pd.Timestamp('2026-10-26T22:00:00+07:00'),None)
+    assert context['schedule_date'] is None
+    assert context['schedule_label']=='BELUM TERVERIFIKASI'
+    assert context['data_relation']=='BELUM ADA DATA'
