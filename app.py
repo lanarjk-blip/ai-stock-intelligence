@@ -1766,10 +1766,16 @@ def stock_search_panel(universe, res, forced_ticker=None):
             tmshow=tm.rename(columns={'time':'Waktu','session':'Sesi','horizon':'Horizon','samples':'Samples','up_pct':'UP %','sideways_pct':'Sideways %','down_pct':'DOWN %','mean_return_pct':'Mean Return %','confidence_pct':'Confidence %','status':'Status','note':'Catatan'}).copy()
             tmshow.attrs['ticker']=str(selected_ticker).upper().removesuffix('.JK')
             from trading_monitor import render_monitor
+            from trading_groups import render_groups, latest_candles
+            from dynamic_opportunity_ui import _quality_gate_state
             # Read the current opportunity snapshot on every fragment refresh.
             # Never reuse the detail page's older outer-scope Dynamic row.
+            _tm_dynamic=read_dynamic_opportunities(2000)
             render_monitor(tmshow, selected_ticker, _tm_context, dict(tm.attrs),
-                           read_dynamic_opportunities(2000))
+                           _tm_dynamic)
+            render_groups(universe, _tm_dynamic, latest_candles(DB), _tm_context,
+                          _quality_gate_state(), key='ticker_groups_analysis',
+                          threshold_pct=float(CFGD.get('time_return_threshold',.002))*100)
 
         _render_time_map()
 
@@ -2249,6 +2255,15 @@ def render_app():
         render_premarket_panel()
 
     with tab_opp:
+        @st.fragment(run_every=90)
+        def _render_opportunity_groups():
+            from trading_groups import render_groups, latest_candles
+            from dynamic_opportunity_ui import _quality_gate_state
+            render_groups(universe, read_dynamic_opportunities(2000), latest_candles(DB),
+                          market_session.session_status(CFGD), _quality_gate_state(),
+                          key='ticker_groups_opportunity',
+                          threshold_pct=float(CFGD.get('time_return_threshold',.002))*100)
+        _render_opportunity_groups()
         st.subheader('🚀 Dynamic Opportunity Engine')
         dyn=read_dynamic_opportunities(int(CFGD.get('dynamic_opportunity_count',5)))
         render_actionable_dynamic(dyn, render_clickable_dataframe)
