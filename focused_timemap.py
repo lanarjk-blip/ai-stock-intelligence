@@ -35,7 +35,7 @@ def compact_plan(bundle,records,now,cfg=None):
     return short,display,plan_coverage(bundle,records,now,cfg)
 
 
-def render_plan(bundle,records,now,cfg=None):
+def render_plan(bundle,records,now,cfg=None,evidence=None):
     st.markdown('### Proyeksi 09.00 sampai penutupan')
     st.warning('BELUM ADA PREDIKSI TERPERCAYA. Angka berikut adalah proyeksi uji, bukan sinyal beli/jual.')
     short,detail,coverage=compact_plan(bundle,records,now,cfg)
@@ -46,6 +46,19 @@ def render_plan(bundle,records,now,cfg=None):
         st.caption(f"Tanggal target: {bundle['trading_date']} • Ticker: {bundle['ticker']}")
         st.caption('Data pembentuk model: '+str(bundle.get('training_end') or 'belum cukup')+'; berbeda dari tanggal target.')
         st.caption(f"Dibuat sebelum 09.00 WIB: {coverage['preopen']}/{coverage['expected']} interval. Semua versi asli tetap tersimpan.")
+        if evidence is not None:
+            st.markdown('**Hasil prediksi asli yang sudah tercatat**')
+            if evidence.get('error'):
+                st.caption('Evaluasi belum tersedia; tidak dianggap akurasi nol.')
+            else:
+                st.caption(f"{evidence['n']} hasil selesai • {evidence['days']} hari • {evidence['pending']} menunggu hasil. {evidence['status']}.")
+                if evidence['accuracy_pct'] is not None:
+                    st.caption(f"Ketepatan tercatat: {evidence['correct']}/{evidence['direction_n']} ({evidence['accuracy_pct']:.2f}%). Ini hasil lampau, bukan peluang trade berikutnya.")
+                    st.caption(f"Brier: {evidence['brier']:.4f} (uniform 0.6667; lebih kecil lebih baik). Pemantauan: {evidence['drift']}.")
+                if evidence['rejected']:st.caption(f"{evidence['rejected']} interval dikeluarkan karena bukti tidak valid.")
+            st.caption('Satu prediksi pertama per interval; revisi yang lebih berhasil tidak menggantikannya. Status tetap NO EDGE.')
+        from local_runtime_health import source_fingerprint
+        st.caption('Versi pemeriksaan: '+source_fingerprint()[:10])
         for row in detail.to_dict('records'):
             if row['Versi tercatat']:
                 st.text(f"{row['Interval WIB']} | dibuat {row['Dibuat WIB']} WIB | input {row['Input tersedia WIB']} WIB | {row['Sumber']}")
