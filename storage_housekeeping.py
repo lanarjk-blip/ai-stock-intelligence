@@ -96,9 +96,9 @@ def plan_cleanup(now=None):
         for table, (column, key, default_days) in DISPOSABLE_RULES.items():
             if table in PROTECTED_TABLES or not _table_exists(con, table):
                 continue
-            days = max(1, int(cfg.get(key, default_days)))
+            days = max(60 if table == "intraday" else 1, int(cfg.get(key, default_days)))
             cutoff = (current - timedelta(days=days)).isoformat()
-            count = int(con.execute(f"SELECT COUNT(*) FROM {table} WHERE {column} < ?", (cutoff,)).fetchone()[0])
+            count = int(con.execute(f"SELECT COUNT(*) FROM {table} WHERE julianday({column}) < julianday(?)", (cutoff,)).fetchone()[0])
             plan.append({"table": table, "column": column, "cutoff": cutoff, "days": days, "rows": count})
     finally:
         con.close()
@@ -141,6 +141,11 @@ def run_cleanup(*, dry_run=None, force=False):
     if dry_run or total <= 0:
         return {"status": "DRY_RUN" if dry_run else "NOOP", "deleted": 0, "planned": total, "plan": plan}
 
+    # Enforce at the mutation boundary too, not just in the scheduler.
+    # Missing/unverified calendar or clock failure must never allow deletion.
+    if _market_is_live():
+        return {"status": "DEFERRED_MARKET", "deleted": 0, "planned": total, "plan": plan}
+
     con = _connect()
     try:
         check = con.execute("PRAGMA quick_check").fetchone()
@@ -158,7 +163,7 @@ def run_cleanup(*, dry_run=None, force=False):
             table = item["table"]
             if table in PROTECTED_TABLES or table not in DISPOSABLE_RULES:
                 raise RuntimeError(f"blocked table: {table}")
-            cur = con.execute(f"DELETE FROM {table} WHERE {item['column']} < ?", (item["cutoff"],))
+            cur = con.execute(f"DELETE FROM {table} WHERE julianday({item['column']}) < julianday(?)", (item["cutoff"],))
             deleted += max(0, int(cur.rowcount or 0))
         now = datetime.now(timezone.utc).isoformat()
         _state_set(con, "housekeeping_last_completed_at", now)
@@ -187,9 +192,10 @@ def _market_is_live():
     try:
         import market_session
         status = market_session.session_status(_cfg())
-        return bool(status.get("live")) or str(status.get("status") or "").upper() == "BREAK"
+        return (not status.get("calendar_verified") or
+                str(status.get("status") or "").upper() not in {"CLOSED", "AFTER_MARKET", "WEEKEND", "HOLIDAY"})
     except Exception:
-        return False
+        return True
 
 
 def run_forever():
