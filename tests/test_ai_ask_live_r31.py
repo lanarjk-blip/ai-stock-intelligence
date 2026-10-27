@@ -33,7 +33,8 @@ def test_today_live_stale_intraday_is_wait_even_if_entry_ready():
 def test_today_live_fresh_entry_ready_can_buy():
     import ai_stock_ask
     snap=_strong(state='ENTRY READY',entry_status='ACTIVE',live_required=True,intraday_fresh=True,market_status='SESSION_1',price_source='LIVE_INTRADAY')
-    answer=ai_stock_ask.answer_stock(snap,'TODAY')
+    snap.update(generated_at='2026-10-15T09:31:00+07:00',live_info={'ticker':'AAA','source':'TEST PROVIDER','fresh':True,'price':100.,'ts':'2026-10-15T09:30:00+07:00'})
+    answer=ai_stock_ask.answer_stock(snap,'TODAY',now=pd.Timestamp('2026-10-15T09:32:00+07:00'))
     assert answer['action']=='BUY'
     assert answer['intraday_fresh'] is True
     assert answer['price_source']=='LIVE_INTRADAY'
@@ -57,13 +58,13 @@ def test_ai_ask_snapshot_dynamic_and_live_price_override_daily():
     import app
     universal=pd.Series(_strong(close=100.0,entry_low=97.0,entry_high=101.0))
     dynamic=pd.Series({
-        'ticker':'AAA','close':120.0,'entry_low':118.0,'entry_high':124.0,
+        'ticker':'AAA','close':123.0,'generated_at':'2026-10-15T09:31:00+07:00','entry_low':118.0,'entry_high':124.0,
         'stop_loss':112.0,'target_1':130.0,'target_2':138.0,
         'entry_status':'ACTIVE','state':'ENTRY READY','candidate_mode':'STRICT',
         'decision':'BUY','ai_score':88.0,'risk':'LOW','market_regime':'BULLISH',
     })
-    session={'status':'SESSION_1','live':True}
-    live_info={'fresh':True,'price':123.0,'ts':'2026-10-15T02:30:00+00:00'}
+    session={'status':'SESSION_1','live':True,'calendar_verified':True,'market_date':'2026-10-15','wib':'2026-10-15T09:32:00+07:00'}
+    live_info={'ticker':'AAA','source':'TEST PROVIDER','fresh':True,'price':123.0,'ts':'2026-10-15T02:30:00+00:00'}
     snapshot=app.build_ai_ask_snapshot(universal,dynamic,'AAA',session=session,live_info=live_info)
     assert snapshot['close']==123.0
     assert snapshot['entry_low']==118.0

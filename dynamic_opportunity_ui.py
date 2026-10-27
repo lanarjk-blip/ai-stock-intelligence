@@ -260,6 +260,19 @@ def render_actionable_dynamic(dyn, render_table=None, table_limit=None):
     if risk_high and bearish:
         st.warning('⚠️ Mode konservatif: terdapat Risk HIGH saat IHSG BEARISH. Prioritaskan BUY WINDOW yang benar-benar ACTIVE; kandidat lain tetap WAIT.')
 
+    from live_evidence import current_dynamic,current_timestamp
+    import market_session
+    session=market_session.session_status()
+    dyn=dyn.copy()
+    for idx,row in dyn.iterrows():
+        if (not current_dynamic(row.get('ticker'),row,session)
+            or not current_timestamp(row.get('intraday_at'),session)
+            or not bool(row.get('intraday_fresh'))
+            or str(row.get('price_source') or '').upper()!='LIVE_INTRADAY'):
+            dyn.loc[idx,'state']='MONITOR'
+            dyn.loc[idx,'entry_status']='WAIT'
+            dyn.loc[idx,'candidate_mode']='MONITOR_FALLBACK'
+    st.caption('Snapshot lama/tanpa timestamp terverifikasi hanya MONITOR; bukan BUY WINDOW sesi saat ini.')
     cards = []
     for pos, (_, row) in enumerate(dyn.head(5).iterrows(), start=1):
         icon, state_label, entry_label, css_kind, action_label = _status_meta(

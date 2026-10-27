@@ -1,14 +1,17 @@
 from ai_stock_ask import answer_stock
+import pandas as pd
 
 
 def test_buy_when_strong_and_live_entry_ready():
     r=answer_stock({
         "ticker":"TEST","decision":"BUY","ai_score":80,"jst_p_up":.70,
+        "generated_at":"2026-10-15T09:31:00+07:00",
+        "live_info":{"ticker":"TEST","source":"TEST PROVIDER","fresh":True,"price":101.,"ts":"2026-10-15T09:30:00+07:00"},
         "entry_status":"ACTIVE","state":"ENTRY READY",
         "live_required":True,"intraday_fresh":True,"price_source":"LIVE_INTRADAY",
         "risk":"MEDIUM","market_regime":"BULLISH",
         "entry_low":100,"entry_high":102,"stop_loss":95,"target_1":110
-    },"TODAY")
+    },"TODAY",now=pd.Timestamp("2026-10-15T09:32:00+07:00"))
     assert r["action"]=="BUY"
     assert r["levels"]["entry_low"]==100
 

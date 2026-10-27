@@ -44,7 +44,7 @@ def _pct(v: Any) -> Optional[float]:
     return x * 100.0 if abs(x) <= 1.0 else x
 
 
-def answer_stock(snapshot: Optional[Dict[str, Any]], horizon: str = "TODAY") -> Dict[str, Any]:
+def answer_stock(snapshot: Optional[Dict[str, Any]], horizon: str = "TODAY", now=None) -> Dict[str, Any]:
     s = dict(snapshot or {})
     ticker = str(s.get("ticker") or "").upper().replace(".JK", "").strip()
     if not ticker:
@@ -66,6 +66,16 @@ def answer_stock(snapshot: Optional[Dict[str, Any]], horizon: str = "TODAY") -> 
     monitor_only = candidate_mode == "MONITOR_FALLBACK"
     live_required = bool(s.get("live_required"))
     intraday_fresh = bool(s.get("intraday_fresh"))
+    if today:
+        import pandas as pd
+        import market_session
+        from live_evidence import current_dynamic,valid_live_info
+        session=market_session.session_status(now=pd.Timestamp.now(tz='Asia/Jakarta') if now is None else now)
+        intraday_fresh=intraday_fresh and valid_live_info(ticker,s.get('live_info') or {},session)
+        if not current_dynamic(ticker,s,session):
+            opportunity_state='WAIT'
+            entry='NEUTRAL'
+        live_required=bool(session.get('live')) and live_required
     price_source = str(s.get("price_source") or "DAILY").upper().strip()
     market_status = str(s.get("market_status") or "").upper().strip()
 

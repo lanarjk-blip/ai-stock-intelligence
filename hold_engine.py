@@ -49,37 +49,8 @@ def _daily_context(ticker):
     except Exception: return {'trend':'UNKNOWN','ret5':0.0,'vol_ratio':1.0}
 
 def _live_intraday_context(ticker, now=None):
-    session=market_session.session_status(CFG,now=now)
-    live=bool(session.get('live'))
-    market_date=str(session.get('market_date') or '')
-    result={'live_required':live,'fresh':False,'price':None,'ts':'','age_minutes':None,'market_date':market_date}
-    if not live:
-        return result
-    try:
-        con=dbcon()
-        d=pd.read_sql_query(
-            'SELECT ts,close FROM intraday WHERE ticker=? ORDER BY ts DESC LIMIT 20',
-            con,params=(str(ticker).upper().replace('.JK',''),)
-        )
-        con.close()
-        if d.empty:return result
-        d['ts']=pd.to_datetime(d['ts'],utc=True,errors='coerce')
-        d=d.dropna(subset=['ts','close'])
-        if d.empty:return result
-        d['wib']=d['ts'].dt.tz_convert('Asia/Jakarta')
-        d=d[d['wib'].dt.date.astype(str)==market_date]
-        if d.empty:return result
-        row=d.sort_values('ts').iloc[-1]
-        local_now=pd.Timestamp(session.get('wib'))
-        if local_now.tzinfo is None:local_now=local_now.tz_localize('Asia/Jakarta')
-        age=max(0.0,(local_now.tz_convert('UTC')-row['ts']).total_seconds()/60.0)
-        limit=max(45,int(CFG.get('intraday_live_stale_minutes',45)),int(CFG.get('intraday_refresh_minutes',30))+10)
-        result.update({'fresh':age<=limit,'price':float(row['close']),'ts':row['ts'].isoformat(),'age_minutes':age})
-        return result
-    except Exception:
-        try:con.close()
-        except Exception:pass
-        return result
+    from live_evidence import read_intraday_context
+    return read_intraday_context(dbcon,ticker,CFG,now)
 
 
 def _time(ticker, now=None):
