@@ -56,6 +56,8 @@ def _prepare_day(base, ticker):
         "live_required": bool(live_required),
         "wib": wib,
         "fresh": False,
+        "data_status": "DATA UNAVAILABLE",
+        "latest_candle": None,
         "age_min": None,
         "reason": "",
         "source": "DIRECT PROVIDER",
@@ -69,6 +71,13 @@ def _prepare_day(base, ticker):
             result["reason"] = "NO INTRADAY BARS: " + "; ".join(result.get("provider_errors", []))
             return result
         provider_failed = bool(data.attrs.get("fallback") or data.attrs.get("source") == "LAST GOOD CACHE")
+        from timemap_data import clean, bar_freshness
+        metadata = dict(data.attrs)
+        data = clean(data, ticker, pd.Timestamp(wib))
+        data.attrs.update(metadata)
+        result["data_status"] = bar_freshness(data, pd.Timestamp(wib))
+        if not data.empty:
+            result["latest_candle"] = data.iloc[-1].ts.tz_convert("Asia/Jakarta").isoformat()
         data = data.copy()
         data["ts"] = pd.to_datetime(data["ts"], utc=True, errors="coerce")
         for col in ("open", "high", "low", "close", "volume"):
@@ -222,7 +231,9 @@ def _blank_today_row(history_row, ticker, day_state):
             "Hari": ("Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu")[pd.Timestamp(day_state["market_date"]).dayofweek],
             "Diperiksa WIB": day_state.get("wib"),
             "Data Terakhir WIB": day_state["frame"].iloc[-1]["wib"].isoformat() if not day_state["frame"].empty else None,
-            "Kesegaran": ("ARSIP • MARKET TUTUP" if day_state.get("market_status") in {"CLOSED", "AFTER_MARKET"} else "JEDA SESI • ARSIP HARI INI" if day_state.get("reason") == "SESSION PAUSE" else "FRESH" if day_state.get("fresh") else "STALE / NO DATA"),
+            # Completed-window eligibility is independent of provider freshness.
+            "Kesegaran": day_state.get("data_status", "DATA UNAVAILABLE"),
+            "Candle Provider WIB": day_state.get("latest_candle"),
             "Market Status": day_state.get("market_status"),
             "Live Source": day_state.get("source"),
             "Checkpoint State": "WAIT",
@@ -427,7 +438,7 @@ def _augment(frame, st):
 
     out = pd.concat([today[history.columns], history], ignore_index=True)
     preferred = [
-        "Waktu", "Sesi", "Hari", "Market Date", "Live Ticker", "Kesegaran", "Data Terakhir WIB", "Diperiksa WIB", "Data Type", "Horizon", "Market Status",
+        "Waktu", "Sesi", "Hari", "Market Date", "Live Ticker", "Kesegaran", "Candle Provider WIB", "Data Terakhir WIB", "Diperiksa WIB", "Data Type", "Horizon", "Market Status",
         "Checkpoint State", "Checkpoint Bar", "Hasil Tersedia WIB", "Slot Return %", "Live Price", "Live Return %", "Live Momentum %",
         "Volume Ratio", "Range Pos %", "Vs VWAP %", "Live Score", "Live Confidence %", "Live Direction",
         "Live Confirmation", "Live Match", "Match %", "Live Age m", "Live Bars", "Live Reason", "Live Source",

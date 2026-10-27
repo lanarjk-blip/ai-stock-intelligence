@@ -64,7 +64,7 @@ def test_future_bars_never_count_as_live():
 
 
 def test_provider_rejects_future_and_friday_break():
-    data = pd.DataFrame({'ts': pd.to_datetime(['2026-10-23T02:00Z', '2026-10-23T06:30Z', '2026-10-23T07:30Z']), 'close': [100., 200., 300.]})
+    data = pd.DataFrame({'ts': pd.to_datetime(['2026-10-23T02:00Z', '2026-10-23T06:30Z', '2026-10-23T07:30Z']), 'open': [100., 200., 300.], 'high': [100., 200., 300.], 'low': [100., 200., 300.], 'volume': [100., 100., 100.], 'close': [100., 200., 300.]})
     base = SimpleNamespace(_session=lambda: ('BREAK', False, '2026-10-23', '2026-10-23T13:40:00+07:00'),
                            _provider_frame=lambda _: data, _cfg=lambda: {})
     state = cp._prepare_day(base, 'TEST')
@@ -83,4 +83,4 @@ def test_checkpoint_clock_and_friday_labels(monkeypatch):
     assert out.loc['14:00', 'Hari'] == 'Jumat'
     assert out.loc['14:00', 'Market Date'] == '2026-10-23'
     assert out.loc['14:00', 'Status'] == 'WAIT'
-    assert out.loc['14:00', 'Kesegaran'] == 'STALE / NO DATA'
+    assert out.loc['14:00', 'Kesegaran'] == 'DATA UNAVAILABLE'
