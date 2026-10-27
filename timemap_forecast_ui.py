@@ -174,14 +174,15 @@ def table(bundle,records,now,revision='latest'):
     return pd.DataFrame(rows)
 
 
-def render_forecast(tape,ticker,session):
+def render_forecast(tape,ticker,session,compact=False):
     import streamlit as st
     from trading_monitor import _date_label
     now=pd.Timestamp(session['wib']).tz_convert('Asia/Jakarta')
     path=str(DB_PATH)
-    st.markdown('### 🗓️ Proyeksi hari ini sampai penutupan • UJI BAYANGAN')
-    st.caption(f"{ticker} • {_date_label(now.date())} • horizon setiap interval reguler 30 menit • {VERSION}")
-    st.warning('EKSPERIMENTAL • NO EDGE. Angka adalah proyeksi model bersyarat, belum terbukti akurat atau menguntungkan dan tidak menjadi sinyal BUY. Baris bertanda — berarti dasar datanya belum cukup.')
+    if not compact:
+        st.markdown('### 🗓️ Proyeksi hari ini sampai penutupan • UJI BAYANGAN')
+        st.caption(f"{ticker} • {_date_label(now.date())} • horizon setiap interval reguler 30 menit • {VERSION}")
+        st.warning('EKSPERIMENTAL • NO EDGE. Angka adalah proyeksi model bersyarat, belum terbukti akurat atau menguntungkan dan tidak menjadi sinyal BUY. Baris bertanda — berarti dasar datanya belum cukup.')
     # Reuse saved prior-day history without treating stored current-day bars as
     # newly received provider data. The selected ticker alone is queried.
     con=None
@@ -209,6 +210,10 @@ def render_forecast(tape,ticker,session):
         records=saved(path,ticker,now.date().isoformat())
     except (sqlite3.Error,ValueError) as exc:
         st.error('Proyeksi ditahan: pencatatan prediksi belum dapat diverifikasi ('+type(exc).__name__+').')
+        return
+    if compact:
+        from focused_timemap import render_plan
+        render_plan(bundle,records,now,cfg)
         return
     st.caption('Prediksi lengkap dapat dibuat sebelum pembukaan jika histori cukup. Pembaruan memakai candle 30 menit yang sudah selesai dan harga pembukaan yang tersedia; refresh layar tidak otomatis mengubah probabilitas atau waktu prediksi. Angka lama tidak ditimpa setelah hasil diketahui.')
     if bundle['reason']:st.info('WAIT — '+bundle['reason'])

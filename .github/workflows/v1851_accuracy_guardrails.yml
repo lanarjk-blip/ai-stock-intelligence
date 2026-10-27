@@ -5,6 +5,7 @@ on:
     paths:
       - 'app.py'
       - 'live_evidence.py'
+      - 'focused_timemap.py'
       - 'timemap_*.py'
       - 'trading_monitor.py'
       - 'trading_groups.py'
@@ -45,6 +46,7 @@ on:
     paths:
       - 'app.py'
       - 'live_evidence.py'
+      - 'focused_timemap.py'
       - 'timemap_*.py'
       - 'trading_monitor.py'
       - 'trading_groups.py'
