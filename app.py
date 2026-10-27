@@ -2115,7 +2115,7 @@ def render_premarket_panel():
         show=ev.rename(columns={'ticker':'ticker','decision':'Decision','outcome':'Outcome','verdict':'Verdict','return_pct':'Return %','session_close':'Close'})
         render_clickable_dataframe(show,[c for c in ['ticker','Decision','Outcome','Verdict','Return %','Close'] if c in show.columns],2)
 
-def render_app():
+def render_legacy_app():
     st.set_page_config(page_title=f"AI Stock Intelligence V{CFGD.get('mobile_ui_version','1.8.52')}", page_icon='📈', layout='wide')
     st.markdown("""
     <style>
@@ -2404,6 +2404,14 @@ def render_app():
         with st.expander('📊 Semua Ranking AI'):
             if res.empty: st.info('Belum ada ranking tersimpan.')
             else: render_smart_dataframe(res,round_digits=3)
+
+def render_app():
+    # Only the focused Time Map screen is executed. Legacy screens remain in
+    # source for reproducible rollback, not as hidden computation on each open.
+    st.set_page_config(page_title=f"AI Stock Intelligence V{CFGD.get('mobile_ui_version','1.8.58')}",page_icon='📈',layout='wide')
+    from focused_timemap import render_focused_app
+    render_focused_app(load_universe,search_stock_matches)
+
 
 if __name__ == '__main__':
     render_app()
