@@ -1,0 +1,108 @@
+{
+  "started_at": "2026-10-27T13:56:32.610356+00:00",
+  "completed_at": "2026-10-27T13:57:01.405993+00:00",
+  "results": [
+    {
+      "ticker": "BBCA",
+      "first_attempt": {
+        "ticker": "BBCA",
+        "source": "UNAVAILABLE",
+        "errors": [
+          "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+          "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+        ],
+        "rows": 0,
+        "latest": null
+      },
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ],
+      "rows": 0,
+      "latest": null
+    },
+    {
+      "ticker": "BBRI",
+      "first_attempt": {
+        "ticker": "BBRI",
+        "source": "UNAVAILABLE",
+        "errors": [
+          "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+          "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+        ],
+        "rows": 0,
+        "latest": null
+      },
+      "source": "UNAVAILABLE",
+      "errors": [
+        "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+        "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+      ],
+      "rows": 0,
+      "latest": null
+    },
+    {
+      "ticker": "ANTM",
+      "first_attempt": {
+        "ticker": "ANTM",
+        "source": "UNAVAILABLE",
+        "errors": [
+          "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+          "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+        ],
+        "rows": 0,
+        "latest": null
+      },
+      "source": "query1.finance.yahoo.com",
+      "errors": [],
+      "rows": 12,
+      "latest": "2026-10-27 09:00:00+00:00"
+    },
+    {
+      "ticker": "TLKM",
+      "first_attempt": {
+        "ticker": "TLKM",
+        "source": "UNAVAILABLE",
+        "errors": [
+          "query1.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query1.finance.yahoo.com', port=443): R",
+          "query2.finance.yahoo.com: ReadTimeout: HTTPSConnectionPool(host='query2.finance.yahoo.com', port=443): R"
+        ],
+        "rows": 0,
+        "latest": null
+      },
+      "source": "query1.finance.yahoo.com",
+      "errors": [],
+      "rows": 12,
+      "latest": "2026-10-27 09:00:00+00:00"
+    },
+    {
+      "ticker": "AMRT",
+      "source": "query1.finance.yahoo.com",
+      "errors": [],
+      "rows": 12,
+      "latest": "2026-10-27 09:00:00+00:00"
+    },
+    {
+      "ticker": "ACES",
+      "source": "query1.finance.yahoo.com",
+      "errors": [],
+      "rows": 12,
+      "latest": "2026-10-27 09:00:00+00:00"
+    },
+    {
+      "ticker": "MPXL",
+      "source": "query1.finance.yahoo.com",
+      "errors": [],
+      "rows": 12,
+      "latest": "2026-10-27 09:00:00+00:00"
+    },
+    {
+      "ticker": "PTSP",
+      "source": "query1.finance.yahoo.com",
+      "errors": [],
+      "rows": 12,
+      "latest": "2026-10-27 09:00:00+00:00"
+    }
+  ]
+}

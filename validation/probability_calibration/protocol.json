@@ -1,0 +1,14 @@
+{
+  "purpose": "Reduce probability overconfidence; not a directional-accuracy or profit claim",
+  "fixed_before_new_evaluation": true,
+  "tickers": ["BBCA", "BBRI", "ANTM", "TLKM", "AMRT", "ACES", "MPXL", "PTSP"],
+  "validation_dates": ["2026-10-07", "2026-10-08", "2026-10-09", "2026-10-12", "2026-10-13", "2026-10-14"],
+  "test_date": "2026-10-27",
+  "issue_times": ["08:50", "09:30", "13:30"],
+  "model_weights": [0.0, 0.25, 0.5, 0.75, 1.0],
+  "selection": "Minimum mean day-level validation Brier; ties prefer smaller model weight. Freeze before acquiring test-date bars.",
+  "candidate": "alpha * unchanged conditional analogue probabilities + (1-alpha) / 3",
+  "signal_filter": {"minimum_probability": 0.45, "minimum_margin": 0.10},
+  "promotion": "disabled: one retrospective test day and previously inspected validation dates are insufficient independent evidence",
+  "evaluation_warning": "Ideal timestamp availability, not recorded live predictions; repeated issue anchors are not independent outcomes. No execution costs."
+}

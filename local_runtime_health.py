@@ -26,7 +26,7 @@ FILES = (
     "persistent_bridge.py", "ui_replica.py", "replica_runtime.py",
     "external_runtime_guard.py", "runtime_api.py", "sitecustomize.py", "config.json",
     "data/idx_holidays.json",
-    "focused_timemap.py", "live_evidence.py", "timemap_data.py", "timemap_statistics.py", "trading_monitor.py", "trading_groups.py",
+    "timemap_evidence.py", "focused_timemap.py", "live_evidence.py", "timemap_data.py", "timemap_statistics.py", "trading_monitor.py", "trading_groups.py",
     "timemap_forecast.py", "timemap_forecast_ui.py",
 )
 

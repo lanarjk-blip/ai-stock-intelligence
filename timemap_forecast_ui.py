@@ -236,7 +236,10 @@ def render_forecast(tape,ticker,session,compact=False):
         return
     if compact:
         from focused_timemap import render_plan
-        render_plan(bundle,records,now,cfg)
+        from timemap_evidence import read_evidence
+        try:evidence=read_evidence(path,ticker,now)
+        except (sqlite3.Error,ValueError):evidence={'error':True}
+        render_plan(bundle,records,now,cfg,evidence=evidence)
         return
     st.caption('Prediksi lengkap dapat dibuat sebelum pembukaan jika histori cukup. Pembaruan memakai candle 30 menit yang sudah selesai dan harga pembukaan yang tersedia; refresh layar tidak otomatis mengubah probabilitas atau waktu prediksi. Angka lama tidak ditimpa setelah hasil diketahui.')
     if bundle['reason']:st.info('WAIT — '+bundle['reason'])
