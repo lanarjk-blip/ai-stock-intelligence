@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - 'app.py'
+      - 'live_evidence.py'
       - 'timemap_*.py'
       - 'trading_monitor.py'
       - 'trading_groups.py'
@@ -43,6 +44,7 @@ on:
     branches: [main]
     paths:
       - 'app.py'
+      - 'live_evidence.py'
       - 'timemap_*.py'
       - 'trading_monitor.py'
       - 'trading_groups.py'

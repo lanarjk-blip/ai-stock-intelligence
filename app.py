@@ -1359,8 +1359,18 @@ def build_ai_ask_snapshot(universal_row, dynamic_row, ticker, session=None, live
             except Exception:return {}
         return {}
 
+    from live_evidence import current_dynamic,valid_live_info
+    session=dict(session or market_session.session_status(CFGD) or {})
     snapshot=as_dict(universal_row)
     dynamic=as_dict(dynamic_row)
+    if str(snapshot.get('ticker') or ticker).upper().removesuffix('.JK')!=str(ticker).upper().removesuffix('.JK'):
+        snapshot={}
+    if not current_dynamic(ticker,dynamic,session):
+        dynamic={}
+    # Daily analysis may remain context, but cannot inherit a live entry state.
+    snapshot['state']='WAIT'
+    snapshot['entry_status']='NEUTRAL'
+    snapshot['candidate_mode']='MONITOR_FALLBACK'
     authoritative=(
         'close','entry_low','entry_high','stop_loss','target_1','target_2',
         'entry_status','state','candidate_mode','decision','ai_score','risk',
@@ -1390,14 +1400,22 @@ def build_ai_ask_snapshot(universal_row, dynamic_row, ticker, session=None, live
         except Exception:
             live_info={}
     live_info=dict(live_info or {})
-    snapshot['intraday_fresh']=bool(snapshot['live_required'] and live_info.get('fresh'))
+    snapshot['intraday_fresh']=valid_live_info(ticker,live_info,session)
+    snapshot['generated_at']=dynamic.get('generated_at')
+    snapshot['checked_at']=session.get('wib')
+    snapshot['live_info']=live_info
     if snapshot['intraday_fresh'] and live_info.get('price') is not None:
         try:snapshot['close']=float(live_info.get('price'))
         except Exception:pass
         snapshot['price_source']='LIVE_INTRADAY'
         snapshot['intraday_at']=str(live_info.get('ts') or '')
+        try:coherent=np.isclose(float(dynamic.get('close')),float(live_info['price']),rtol=1e-9,atol=1e-6)
+        except (TypeError,ValueError):coherent=False
+        if not coherent:
+            snapshot['state']='WAIT'
+            snapshot['entry_status']='NEUTRAL'
     else:
-        snapshot['price_source']=str(dynamic.get('price_source') or ('STALE_INTRADAY' if snapshot['live_required'] else 'DAILY'))
+        snapshot['price_source']='STALE_INTRADAY' if snapshot['live_required'] else 'DAILY'
         snapshot['intraday_at']=str(live_info.get('ts') or '')
     return snapshot
 
@@ -1411,10 +1429,11 @@ def resolve_stock_display_price(ticker, daily_close, session=None, live_info=Non
         except Exception:
             live_info={}
     live_info=dict(live_info or {})
-    if live_required and live_info.get('fresh') and live_info.get('price') is not None:
+    from live_evidence import valid_live_info
+    if live_required and valid_live_info(ticker,live_info,session):
         try:price=float(live_info.get('price'))
         except Exception:price=float(daily_close)
-        return {'price':price,'label':'Harga live','source':'LIVE_INTRADAY','fresh':True,'at':str(live_info.get('ts') or '')}
+        return {'price':price,'label':'Harga intraday','source':'LIVE_INTRADAY','fresh':True,'at':str(live_info.get('ts') or '')}
     return {'price':float(daily_close),'label':'Daily close','source':'DAILY_CLOSE','fresh':False,'at':''}
 
 def stock_search_panel(universe, res, forced_ticker=None):

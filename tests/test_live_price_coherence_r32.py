@@ -57,11 +57,11 @@ def test_stock_display_price_uses_fresh_live_and_labels_source():
     import app
     live=app.resolve_stock_display_price(
         'AAA',100.0,
-        session={'status':'SESSION_1','live':True},
-        live_info={'fresh':True,'price':123.0,'ts':'2026-10-15T02:30:00+00:00'}
+        session={'status':'SESSION_1','live':True,'calendar_verified':True,'market_date':'2026-10-15','wib':'2026-10-15T09:32:00+07:00'},
+        live_info={'ticker':'AAA','source':'TEST PROVIDER','fresh':True,'price':123.0,'ts':'2026-10-15T02:30:00+00:00'}
     )
     assert live['price']==123.0
-    assert live['label']=='Harga live'
+    assert live['label']=='Harga intraday'
     assert live['source']=='LIVE_INTRADAY'
     assert live['fresh'] is True
 
