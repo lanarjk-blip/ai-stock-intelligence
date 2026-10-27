@@ -235,7 +235,7 @@ def render_forecast(tape,ticker,session):
         pass
     research=st.checkbox('Lihat angka proyeksi uji bayangan — belum layak sebagai sinyal trading',
                          value=False,key='shadow_forecast_'+ticker)
-    revision=st.radio('Versi proyeksi', ['Rencana pertama tercatat','Pembaruan terbaru'],
+    revision=st.radio('Versi proyeksi', ['Pembaruan terbaru','Rencana pertama tercatat'],
                       index=0,horizontal=True,key='forecast_revision_'+ticker)
     coverage=plan_coverage(bundle,records,now,cfg)
     st.caption(f"Rencana tersimpan {coverage['recorded']}/{coverage['expected']} interval reguler • "

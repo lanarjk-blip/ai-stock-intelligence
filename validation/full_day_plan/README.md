@@ -2,7 +2,7 @@
 
 The conditional forecast model and its validation gate are unchanged. This update improves preparation, preservation and inspection of the 09:00-to-close plan; it does not establish higher predictive accuracy.
 
-- Default view: first recorded forecast for each interval. Latest-revision view remains available. Original issue time, feature timestamp, source and revision count are shown separately from the realized return.
+- Default view: latest recorded revision for each interval, so new valid inputs appear automatically. First-recorded view preserves the original plan for comparison. Original issue time, feature timestamp, source and revision count are shown separately from the realized return.
 - Coverage distinguishes all regular intervals, intervals recorded at any time, and forecasts actually recorded before 09:00 WIB. Missing past intervals are never backfilled.
 - Only the requested ticker, trading date and model version are eligible for display. Caller record order cannot change the original forecast.
 - Pre-open worker preparation rotates over recently viewed tickers (last seven days), at most 20 per normal worker cycle. Missing-history tickers cannot permanently starve tickers beyond the first batch. This is not a claim that all exchange tickers have enough history or are precomputed at opening.

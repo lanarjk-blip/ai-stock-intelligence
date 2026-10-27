@@ -111,6 +111,8 @@ render_forecast(fixture(),'BBCA',session_status(now=pd.Timestamp('2026-10-27T08:
 ''').run(timeout=20)
     assert not app.exception
     app.checkbox[0].check().run(timeout=20)
+    assert app.dataframe[0].value.iloc[0]['Dibuat WIB']=='27-10 08:45:00'
+    app.radio[0].set_value('Rencana pertama tercatat').run(timeout=20)
     assert app.dataframe[0].value.iloc[0]['Dibuat WIB']=='27-10 08:40:00'
     app.radio[0].set_value('Pembaruan terbaru').run(timeout=20)
     assert not app.exception
