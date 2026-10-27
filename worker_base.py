@@ -452,6 +452,14 @@ def refresh_intraday_candidates(res, now=None, force=False):
             except Exception as exc:
                 errors.append(f"{ticker}: {str(exc)[:300]}")
 
+    try:
+        from timemap_forecast_ui import settle_pending
+        _shadow_eval=settle_pending(app.DB,pd.Timestamp(now) if now is not None else pd.Timestamp.now(tz='UTC'),CFG)
+        app.state_set('timemap_shadow_evaluation_at',datetime.now(timezone.utc).isoformat())
+        app.state_set('timemap_shadow_new_outcomes',_shadow_eval['new_outcomes'])
+    except Exception:
+        log('TIME_MAP_SHADOW','SETTLE_ERROR',traceback.format_exc()[-500:])
+
     market_date = str(session.get("market_date") or "")
     app.state_set("last_intraday_market_date", market_date)
     app.state_set("last_intraday_ok", ok)
@@ -1651,8 +1659,10 @@ def cycle():
     # Prepare a bounded recently-viewed shadow watchlist before market opens.
     # No universe scan, retraining, or additional provider requests.
     try:
-        from timemap_forecast_ui import prepare_watched
-        prepare_watched(app.DB,pd.Timestamp.now(tz='UTC'),CFG)
+        from timemap_forecast_ui import prepare_watched,settle_pending
+        _shadow_now=pd.Timestamp.now(tz='UTC')
+        prepare_watched(app.DB,_shadow_now,CFG)
+        settle_pending(app.DB,_shadow_now,CFG)
     except Exception:
         log('TIME_MAP_SHADOW','PREPARE_ERROR',traceback.format_exc()[-500:])
     cycle_started = datetime.now(timezone.utc).isoformat()

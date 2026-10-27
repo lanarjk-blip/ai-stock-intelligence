@@ -1,0 +1,35 @@
+{
+  "selected_on_validation": "xgboost@1.0",
+  "uniform_mix_alpha": 1.0,
+  "training_end": "2026-10-14",
+  "features": [
+    "prior_return",
+    "prior_volatility",
+    "opening_gap",
+    "opening_known",
+    "prefix_return",
+    "prefix_volume",
+    "prefix_known",
+    "prefix_bars",
+    "issue_clock",
+    "target_sin",
+    "target_cos",
+    "horizon_hours",
+    "friday"
+  ],
+  "class_order": [
+    "DOWN",
+    "DATAR",
+    "UP"
+  ],
+  "components": {
+    "frozen_xgboost.json": "66fa044e1b45f06321820f0a4174e961b07c05772aa8f03f1613d4f57f61ee74"
+  },
+  "protocol_sha256": "7381f8a1d1a86e94c68a97d3eae6c574dab952773b93c5ac927d8add0b7426b3",
+  "frozen_at": "2026-10-27T03:14:37.333828+00:00",
+  "production_enabled": false,
+  "retrospective_test": true,
+  "independent_prospective_evidence": false,
+  "feature_engine_sha256": "587737504cd696c93649adcd080f8da50d5a6765778565feb4e773a42f42f73e",
+  "metadata_note": "Feature-engine digest added after scoring; trained weights and original frozen_at are unchanged."
+}

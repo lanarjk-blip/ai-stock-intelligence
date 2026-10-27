@@ -31,6 +31,7 @@ def connect(path):
         actual_label INTEGER NOT NULL,return_pct REAL NOT NULL,evaluated_at TEXT NOT NULL,
         source TEXT NOT NULL, PRIMARY KEY(ticker,trading_date,slot))''')
     con.execute('CREATE TABLE IF NOT EXISTS timemap_forecast_watch(ticker TEXT PRIMARY KEY,last_viewed TEXT NOT NULL)')
+    con.execute('CREATE TABLE IF NOT EXISTS timemap_forecast_eval_state(ticker TEXT PRIMARY KEY,last_checked TEXT NOT NULL,status TEXT NOT NULL)')
     return con
 
 
@@ -186,6 +187,16 @@ def render_forecast(tape,ticker,session):
                        f"{diagnostic['forecast_instances']} proyeksi atas {diagnostic['unique_outcomes']} interval unik; bukan pengujian prospektif dan bukan peluang untung.")
     except (OSError,ValueError,KeyError):
         st.caption('Laporan uji arsip versi ini belum tersedia; model tetap tidak dipromosikan.')
+    try:
+        candidate=json.loads((Path(__file__).parent/'validation/day_candidates/results.json').read_text())
+        selected=candidate['selected_on_validation']
+        with st.expander('Pengujian kandidat tambahan — tidak diaktifkan',expanded=False):
+            st.caption(f"Kandidat terpilih pada validasi: {selected}; uji arsip terpisah "
+                       f"{candidate['final_metrics'][selected]['directional_accuracy']*100:.2f}% "
+                       f"vs R90 {candidate['final_metrics']['R90']['directional_accuracy']*100:.2f}%. "
+                       'Hasil tidak lebih baik; kandidat tidak mengganti proyeksi yang sekarang dan bukan sinyal trading.')
+    except (OSError,ValueError,KeyError):
+        pass
     research=st.checkbox('Lihat angka proyeksi uji bayangan — belum layak sebagai sinyal trading',
                          value=False,key='shadow_forecast_'+ticker)
     display=table(bundle,records,now)
@@ -200,7 +211,7 @@ def render_forecast(tape,ticker,session):
     if summary['n']:detail+=f" • ketepatan {summary['accuracy_pct']:.1f}% • Brier {summary['brier']:.3f}"
     st.caption(detail+' • evaluasi awal ini belum membuktikan keunggulan trading.')
     if bundle.get('feature_asof'):
-        st.caption(f"Input model tersedia sampai {bundle['feature_asof']} • training historis sampai {bundle['training_end']} • sumber {bundle['source']}. Waktu prediksi asli ada pada setiap baris.")
+        st.caption(f"Input model tersedia sampai {pd.Timestamp(bundle['feature_asof']).tz_convert('Asia/Jakarta'):%d-%m-%Y %H:%M} WIB • training historis sampai {bundle['training_end']} • sumber {bundle['source']}. Waktu prediksi asli ada pada setiap baris.")
 
 
 def prepare_watched(path,now,cfg=None):
@@ -226,4 +237,45 @@ def prepare_watched(path,now,cfg=None):
             except (ValueError,sqlite3.Error,pd.errors.DatabaseError):
                 continue
         return {'checked':len(watched),'recorded':count}
+    finally:con.close()
+
+
+def settle_pending(path,now,cfg=None,limit=20):
+    """Round-robin settlement from existing bars, even with the APK closed."""
+    now=pd.Timestamp(now).tz_convert('Asia/Jakarta')
+    limit=max(1,min(20,int(limit)))
+    con=connect(path)
+    checked=0;scored=0
+    try:
+        pending=con.execute('''SELECT f.ticker,MIN(f.slot) AS first_slot
+            FROM timemap_forecast_log f
+            LEFT JOIN timemap_forecast_outcomes o USING(ticker,trading_date,slot)
+            LEFT JOIN timemap_forecast_eval_state e ON e.ticker=f.ticker
+            WHERE o.actual_label IS NULL
+              AND julianday(f.generated_at)<=julianday(f.slot)
+              AND julianday(f.slot)+30.0/1440<=julianday(?)
+            GROUP BY f.ticker
+            ORDER BY COALESCE(julianday(e.last_checked),0),first_slot,f.ticker LIMIT ?''',
+            (now.isoformat(),limit)).fetchall()
+        for ticker,_ in pending:
+            checked+=1;status='WAITING FOR VERIFIED BAR'
+            try:
+                frame=pd.read_sql_query('SELECT ts,open,high,low,close,volume,source FROM intraday WHERE ticker=? AND julianday(ts)>=julianday(?) AND julianday(ts)<=julianday(?) ORDER BY julianday(ts)',
+                    con,params=(ticker,(now-pd.Timedelta(days=59)).isoformat(),now.isoformat()))
+                # A fresh quote must not certify a cached/unknown target bar.
+                source=frame.source.fillna('').astype(str).str.strip().str.upper()
+                valid=~source.isin(['','UNKNOWN','UNAVAILABLE','NAN','NONE']) & ~source.str.contains('CACHE',regex=False)
+                frame=frame[valid].copy()
+                if len(frame):
+                    frame.attrs={'ticker':ticker,'source':str(frame.iloc[-1].source)}
+                    before=con.execute('SELECT COUNT(*) FROM timemap_forecast_outcomes WHERE ticker=?',(ticker,)).fetchone()[0]
+                    evaluate(path,ticker,frame,now,cfg)
+                    after=con.execute('SELECT COUNT(*) FROM timemap_forecast_outcomes WHERE ticker=?',(ticker,)).fetchone()[0]
+                    scored+=after-before
+                    status='SETTLED' if after>before else status
+            except (ValueError,sqlite3.Error,pd.errors.DatabaseError):
+                status='DATA UNAVAILABLE'
+            con.execute('INSERT OR REPLACE INTO timemap_forecast_eval_state VALUES(?,?,?)',(ticker,now.isoformat(),status))
+            con.commit()
+        return {'checked':checked,'new_outcomes':scored}
     finally:con.close()
