@@ -104,7 +104,8 @@ jobs:
           assert cfg['data_quality_gate_enabled'] is True
           assert cfg['runtime_heartbeat_max_age_seconds']==180
           assert cfg['housekeeping_enabled'] is True
-          assert cfg['housekeeping_intraday_retention_days']==45
+          assert cfg['housekeeping_intraday_retention_days']>=60
+          assert cfg['housekeeping_dry_run'] is False
           assert cfg['housekeeping_engine_log_retention_days']==21
           calendar=json.loads(Path('data/idx_holidays.json').read_text(encoding='utf-8'))
           assert set(calendar['holidays']['2026']) == set(cfg['market_holidays'])
