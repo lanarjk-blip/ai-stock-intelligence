@@ -1,0 +1,91 @@
+{
+  "revision": "full-day-candidates-v2",
+  "status": "fixed before this experiment; previously inspected archive outcomes are not an untouched holdout",
+  "tickers": [
+    "BBCA",
+    "BBRI",
+    "ANTM",
+    "TLKM",
+    "AMRT",
+    "ACES",
+    "MPXL",
+    "PTSP"
+  ],
+  "minimum_coverage_days": 35,
+  "minimum_training_dates": 20,
+  "validation_dates": "six complete dates immediately preceding the frozen final eight dates",
+  "test_dates": [
+    "2026-10-15",
+    "2026-10-16",
+    "2026-10-19",
+    "2026-10-20",
+    "2026-10-21",
+    "2026-10-22",
+    "2026-10-23",
+    "2026-10-26"
+  ],
+  "issue_times_wib": [
+    "08:50",
+    "09:30",
+    "13:30"
+  ],
+  "threshold": 0.002,
+  "features": [
+    "prior_return",
+    "prior_volatility",
+    "opening_gap",
+    "opening_known",
+    "prefix_return",
+    "prefix_volume",
+    "prefix_known",
+    "prefix_bars",
+    "issue_clock",
+    "target_sin",
+    "target_cos",
+    "horizon_hours",
+    "friday"
+  ],
+  "models": {
+    "logistic": {
+      "C": 0.1,
+      "max_iter": 400,
+      "class_weight": null
+    },
+    "xgboost": {
+      "n_estimators": 80,
+      "max_depth": 2,
+      "min_child_weight": 10,
+      "learning_rate": 0.04,
+      "subsample": 0.8,
+      "colsample_bytree": 0.9,
+      "reg_lambda": 20,
+      "reg_alpha": 1,
+      "random_state": 92,
+      "n_jobs": 1,
+      "objective": "multi:softprob",
+      "num_class": 3,
+      "eval_metric": "mlogloss"
+    },
+    "mlp": {
+      "hidden_layer_sizes": [
+        12
+      ],
+      "activation": "tanh",
+      "solver": "adam",
+      "alpha": 10,
+      "max_iter": 200,
+      "random_state": 92,
+      "early_stopping": false,
+      "shuffle": false
+    }
+  },
+  "ensemble": "equal mean of the three fixed classifiers",
+  "calibration": "mix probability with uniform using alpha in [0.25,0.5,1.0]; select model/alpha on validation Brier only",
+  "comparison": [
+    "R90 same-ticker slot baseline",
+    "uniform",
+    "previous conditional day analogue"
+  ],
+  "promotion": "disabled; independent prospective and cost/risk evidence required",
+  "comparison_coverage": "Final scoring uses exactly the 1008 forecast identities in the immutable previous replay; excludes 36 Friday 13:30 issue instances the earlier ingestion gate did not cover. Identity alignment fixed before final metrics were computed."
+}
