@@ -1,0 +1,18 @@
+{
+  "model_version": "conditional-day-analogue-v1",
+  "fixed_before_evaluation": true,
+  "label": "regular 30-minute open-to-close return; DOWN below -0.2%, DATAR within +/-0.2%, UP above +0.2%",
+  "minimum_prior_days": 13,
+  "minimum_samples_per_target_slot": 12,
+  "lookback_calendar_days": 59,
+  "features": ["prior full-bar session return", "prior full-bar RMS volatility", "known opening gap versus prior last full bar", "completed same-day prefix return", "completed prefix volume versus prior session mean"],
+  "distance": "mean squared standardized feature distance; inverse 1+distance weights normalized to mean one",
+  "probability": "70% Laplace-smoothed weighted class counts plus 30% same-slot Laplace baseline",
+  "selection": "one fixed candidate; no outcome-based model selection or parameter tuning",
+  "test_days_per_ticker": 8,
+  "issue_times_wib": ["08:50", "09:30", "13:30"],
+  "tickers": ["BBCA", "BBRI", "ANTM", "TLKM", "AMRT", "ACES", "MPXL", "PTSP"],
+  "baselines": ["same-ticker same-slot frequencies using strictly prior days", "uniform"],
+  "promotion": "disabled; existing archives are retrospective and previously inspected; prospective evidence required",
+  "production_actionable": false
+}

@@ -245,14 +245,17 @@ def render_monitor(history, ticker, session, metadata, opportunities):
         st.info(f"Kolom realisasi khusus {dates['realization_label']}. Acuan jadwal historis {dates['schedule_label']}; tanggal berikutnya belum terjadi, bukan data live besok.")
     elif dates['schedule_date'] and dates['schedule_date'] < dates['realization_date']:
         st.warning(f"Jadwal historis masih mengacu {dates['schedule_label']}; bukan jadwal hari ini.")
-    st.caption('Peta sampai penutupan: angka UP/DATAR/DOWN adalah frekuensi historis, bukan peluang live. Prediksi jam berikutnya belum tervalidasi; NO EDGE.')
-    if not view['schedule'].empty:
-        st.caption(f"Tabel realisasi: {dates['realization_label']} • Acuan kolom historis: {dates['schedule_label']}")
-        display = view['schedule'].rename(columns={'Realisasi hari ini': f"Realisasi {view['checked_at']:%d-%m-%Y}"})
-        display.attrs['timemap_rendered'] = True
-        st.dataframe(display, hide_index=True, width='stretch')
-    else:
-        st.info('Jadwal dan sampel Time Map belum tersedia untuk saham ini.')
+    from timemap_forecast_ui import render_forecast
+    render_forecast(tape,ticker,session)
+    with st.expander('Realisasi dan acuan historis — bukan proyeksi baru',expanded=False):
+        st.caption('Peta sampai penutupan: angka UP/DATAR/DOWN adalah frekuensi historis, bukan peluang live. Prediksi jam berikutnya belum tervalidasi; NO EDGE.')
+        if not view['schedule'].empty:
+            st.caption(f"Tabel realisasi: {dates['realization_label']} • Acuan kolom historis: {dates['schedule_label']}")
+            display = view['schedule'].rename(columns={'Realisasi hari ini': f"Realisasi {view['checked_at']:%d-%m-%Y}"})
+            display.attrs['timemap_rendered'] = True
+            st.dataframe(display, hide_index=True, width='stretch')
+        else:
+            st.info('Jadwal dan sampel Time Map belum tersedia untuk saham ini.')
     with st.expander('Detail data, evaluasi, dan tabel lengkap', expanded=False):
         st.caption(f"Sumber {view['source']} • model R90 statistical baseline • kalender terverifikasi: {bool(session.get('calendar_verified'))}")
         st.caption(f"Historis sampai: {history['historical_asof'].iloc[0] if not history.empty and 'historical_asof' in history else '—'} • dihitung {metadata.get('calculated_at', '—')} • waktu refresh bukan waktu candle atau forecast.")
@@ -262,7 +265,7 @@ def render_monitor(history, ticker, session, metadata, opportunities):
             st.caption(f"Uji kronologis: {evaluation['n']} hasil • ketepatan {evaluation['accuracy_pct']:.1f}% • Brier {evaluation['brier']:.3f} • {evaluation['status']}. Belum membuktikan keunggulan trading.")
         if evaluation.get('baseline_brier') is not None:
             st.caption(f"Pembanding Brier {evaluation['baseline_brier']:.3f} • {evaluation['evaluation_days']} hari uji • balanced accuracy {evaluation['balanced_accuracy_pct']:.1f}% • galat kalibrasi {evaluation['ece']:.3f}.")
-        st.caption(f"Candle baru: {bool(metadata.get('new_candle'))} • pengambilan {metadata.get('elapsed_ms', '—')} ms • forecast dibuat: belum ada model live tervalidasi.")
+        st.caption(f"Candle baru: {bool(metadata.get('new_candle'))} • pengambilan {metadata.get('elapsed_ms', '—')} ms • proyeksi bersyarat dicatat pada tabel UJI BAYANGAN; belum ada sinyal trading tervalidasi.")
         st.caption('Sampel arah hanya memakai bar bervolume positif dan horizon 30 menit penuh dalam satu sesi. Jumat sesi II mulai 14.00 WIB. Rencana jam berikutnya tidak menjamin waktu beli atau jual.')
         if metadata.get('errors'):
             st.warning('; '.join(map(str, metadata['errors'])))

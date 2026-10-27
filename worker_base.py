@@ -1648,6 +1648,13 @@ def _refresh_closing_overnight(res, now=None):
 
 def cycle():
     ensure_tables()
+    # Prepare a bounded recently-viewed shadow watchlist before market opens.
+    # No universe scan, retraining, or additional provider requests.
+    try:
+        from timemap_forecast_ui import prepare_watched
+        prepare_watched(app.DB,pd.Timestamp.now(tz='UTC'),CFG)
+    except Exception:
+        log('TIME_MAP_SHADOW','PREPARE_ERROR',traceback.format_exc()[-500:])
     cycle_started = datetime.now(timezone.utc).isoformat()
     app.state_set("engine_cycle_started_at", cycle_started)
     app.state_set("engine_cycle_status", "RUNNING")

@@ -128,9 +128,11 @@ def test_shared_monitor_supports_any_valid_ticker(ticker):
     assert v['schedule'].iloc[0]['Realisasi hari ini']=='DOWN -6.67%'
 
 
-def test_renderer_shows_compact_full_day_and_preserves_details(monkeypatch):
+def test_renderer_shows_compact_full_day_and_preserves_details(monkeypatch,tmp_path):
     import timemap_ui_direct_live as layer
     import timemap_data
+    import timemap_forecast_ui
+    monkeypatch.setattr(timemap_forecast_ui,'DB_PATH',tmp_path/'market.db')
     from streamlit.testing.v1 import AppTest
     now=pd.Timestamp('2026-10-26T14:33:00+07:00')
     session=session_status(now=now)
@@ -147,12 +149,12 @@ history.attrs['ticker']='PTSP'
 render_monitor(history,'PTSP',session_status(now=pd.Timestamp('2026-10-26T14:33:00+07:00')),{},pd.DataFrame())
 ''').run(timeout=20)
     assert not app.exception
-    compact=app.dataframe[0].value
+    compact=next(f.value for f in app.dataframe if 'Waktu WIB' in f.value)
     assert compact['Waktu WIB'].tolist()==['14:00','15:00']
     assert len(compact.columns)==6
     assert compact.iloc[0]['Realisasi 26-10-2026'].startswith('DOWN')
     assert compact.iloc[1]['Status interval']=='WAIT • NO EDGE'
-    assert len(app.dataframe)==3
+    assert len(app.dataframe)==4
     assert not app.expander[0].proto.expanded
     assert any('DATA HARGA: Senin, 26 Oktober 2026 — HARI INI' in m.value for m in app.markdown)
     assert any('ACUAN JADWAL HISTORIS: BELUM TERVERIFIKASI' in m.value for m in app.markdown)
