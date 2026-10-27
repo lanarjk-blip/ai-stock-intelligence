@@ -41,6 +41,21 @@ def connect(path):
 def record(path,bundle):
     if bundle.get('model_version')!=MODEL_ID:
         raise ValueError('Model identity mismatch')
+    # Validate WIB identity before any write; a new label cannot renew old evidence.
+    ticker=canonical_ticker(bundle.get('ticker'))
+    def aware(value):
+        stamp=pd.Timestamp(value)
+        if pd.isna(stamp) or stamp.tzinfo is None:raise ValueError('Aware forecast timestamp required')
+        return stamp.tz_convert('Asia/Jakarta')
+    issued=aware(bundle['generated_at'])
+    if issued.date().isoformat()!=bundle['trading_date']:raise ValueError('Forecast day mismatch')
+    active=[row for row in bundle['rows'] if row['p'] is not None]
+    if active:
+        if aware(bundle['feature_asof'])>issued or aware(bundle['latest_candle'])>issued:
+            raise ValueError('Future forecast evidence')
+        source=str(bundle.get('source') or '').upper()
+        if source in {'','UNKNOWN','UNAVAILABLE','NONE','NAN'} or 'CACHE' in source:
+            raise ValueError('Unverified forecast source')
     con=connect(path)
     try:
         for row in bundle['rows']:
@@ -48,16 +63,16 @@ def record(path,bundle):
             p=np.asarray(row['p'],dtype=float)
             if p.shape!=(3,) or not np.isfinite(p).all() or (p<0).any() or (p>1).any() or not np.isclose(p.sum(),1):
                 raise ValueError('Invalid probabilities')
-            if (pd.Timestamp(row['start']).date().isoformat()!=bundle['trading_date']
-                or pd.Timestamp(bundle['generated_at']).date().isoformat()!=bundle['trading_date']
-                or pd.Timestamp(bundle['training_end']).date()>=pd.Timestamp(row['start']).date()):
+            if (aware(row['start']).date().isoformat()!=bundle['trading_date']
+                or issued.date().isoformat()!=bundle['trading_date']
+                or pd.Timestamp(bundle['training_end']).date()>=aware(row['start']).date()):
                 raise ValueError('Invalid forecast date boundary')
             if pd.Timestamp(bundle['generated_at'])>pd.Timestamp(row['start']):
                 raise ValueError('Cannot record a forecast after interval begins')
             if pd.Timestamp(bundle['feature_asof'])>pd.Timestamp(bundle['generated_at']):
                 raise ValueError('Future feature timestamp')
             con.execute('INSERT OR IGNORE INTO timemap_forecast_log VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                (bundle['ticker'],bundle['trading_date'],row['start'],MODEL_ID,bundle['input_hash'],
+                (ticker,bundle['trading_date'],row['start'],MODEL_ID,bundle['input_hash'],
                  bundle['generated_at'],bundle['feature_asof'],bundle['training_end'],bundle['latest_candle'],
                  bundle['source'],bundle['phase'],json.dumps(row['p']),row['n']))
         con.commit()
@@ -72,7 +87,10 @@ def evaluate(path,ticker,tape,now,cfg=None):
     d=clean(tape,ticker,now)
     con=connect(path)
     try:
-        slots=con.execute('SELECT DISTINCT trading_date,slot FROM timemap_forecast_log WHERE ticker=? AND julianday(generated_at)<=julianday(slot)',(ticker,)).fetchall()
+        slots=con.execute('''SELECT DISTINCT f.trading_date,f.slot FROM timemap_forecast_log f
+            WHERE f.ticker=? AND julianday(f.generated_at)<=julianday(f.slot)
+            AND NOT EXISTS (SELECT 1 FROM timemap_forecast_outcomes o
+                WHERE o.ticker=f.ticker AND o.trading_date=f.trading_date AND o.slot=f.slot)''',(ticker,)).fetchall()
         for day,slot in slots:
             start=pd.Timestamp(slot)
             if (start+pd.Timedelta(minutes=30)>now or d.empty
@@ -121,6 +139,7 @@ def plan_records(bundle,records,now):
     """Isolate the day's original ledger, independent of caller ordering."""
     now=pd.Timestamp(now).tz_convert('Asia/Jakarta')
     valid=[]
+    if bundle.get('trading_date')!=now.date().isoformat():return valid
     for item in records:
         if (item.get('ticker')!=bundle['ticker'] or item.get('trading_date')!=bundle['trading_date']
             or item.get('model_version')!=bundle['model_version']):continue
@@ -128,8 +147,12 @@ def plan_records(bundle,records,now):
             issued=pd.Timestamp(item['generated_at']);slot=pd.Timestamp(item['slot'])
             if issued.tzinfo is None or slot.tzinfo is None:continue
             if issued>now or issued>slot:continue
+            if issued.tz_convert('Asia/Jakarta').date().isoformat()!=bundle['trading_date']:continue
+            feature=pd.Timestamp(item['feature_asof']);candle=pd.Timestamp(item['latest_candle'])
+            if feature.tzinfo is None or candle.tzinfo is None or feature>issued or candle>issued:continue
+            if pd.Timestamp(item['training_end']).date()>=slot.tz_convert('Asia/Jakarta').date():continue
             if slot.tz_convert('Asia/Jakarta').date().isoformat()!=bundle['trading_date']:continue
-        except (ValueError,TypeError):continue
+        except (KeyError,ValueError,TypeError):continue
         valid.append(item)
     return sorted(valid,key=lambda r:(pd.Timestamp(r['generated_at']).value,r['input_hash']))
 

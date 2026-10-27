@@ -25,7 +25,7 @@ def test_today_daily_buy_without_live_dynamic_confirmation_is_wait():
 def test_today_live_stale_intraday_is_wait_even_if_entry_ready():
     import ai_stock_ask
     snap=_strong(state='ENTRY READY',entry_status='ACTIVE',live_required=True,intraday_fresh=False,market_status='SESSION_1')
-    answer=ai_stock_ask.answer_stock(snap,'TODAY')
+    answer=ai_stock_ask.answer_stock(snap,'TODAY',now=pd.Timestamp('2026-10-15T09:32:00+07:00'))
     assert answer['action']=='WAIT'
     assert 'belum segar' in answer['guardrail']
 
