@@ -27,6 +27,7 @@ FILES = (
     "external_runtime_guard.py", "runtime_api.py", "sitecustomize.py", "config.json",
     "data/idx_holidays.json",
     "timemap_data.py", "timemap_statistics.py", "trading_monitor.py", "trading_groups.py",
+    "timemap_forecast.py", "timemap_forecast_ui.py",
 )
 
 

@@ -178,6 +178,7 @@ _WATCH = (
     "render.yaml",
     "sitecustomize.py",
     "timemap_data.py", "timemap_statistics.py", "trading_monitor.py", "trading_groups.py",
+    "timemap_forecast.py", "timemap_forecast_ui.py",
 )
 
 

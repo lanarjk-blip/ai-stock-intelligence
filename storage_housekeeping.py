@@ -20,6 +20,7 @@ BACKUP_DIR = os.path.join(BASE, "db", "backups")
 WIB = ZoneInfo("Asia/Jakarta")
 
 PROTECTED_TABLES = {
+    "timemap_forecast_log", "timemap_forecast_outcomes", "timemap_forecast_watch",
     "prices", "market_index", "state", "universe_registry",
     "recommendation_history", "shadow_portfolio", "premarket_picks",
     "premarket_runs", "dynamic_opportunities", "model_validation",

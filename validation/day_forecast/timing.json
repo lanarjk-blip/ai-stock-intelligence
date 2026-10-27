@@ -1,0 +1,13 @@
+{
+  "environment": "local offline; not provider or production latency",
+  "ms": [
+    65.32531299990296,
+    51.94775999962076,
+    53.49339699978373,
+    64.3727689998741,
+    62.56908500017744
+  ],
+  "median_ms": 62.56908500017744,
+  "raw_rows": 266,
+  "plans": 5
+}
