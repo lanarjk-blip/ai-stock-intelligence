@@ -8,7 +8,8 @@ def test_r45_config_and_single_source_android_versioning():
     assert cfg['mobile_ui_version'] == '1.8.58'
     assert cfg['production_stabilization_version'] == '1.8.57'
     assert cfg['housekeeping_enabled'] is True
-    assert cfg['housekeeping_intraday_retention_days'] == 45
+    assert cfg['housekeeping_intraday_retention_days'] == 60
+    assert cfg['housekeeping_dry_run'] is False
     assert cfg['housekeeping_engine_log_retention_days'] == 21
     gradle = Path('android-app/app/build.gradle').read_text(encoding='utf-8')
     assert "new JsonSlurper().parse(file('../../config.json'))" in gradle
