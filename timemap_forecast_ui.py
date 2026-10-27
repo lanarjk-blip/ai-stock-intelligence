@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from timemap_data import clean,canonical_ticker
-from timemap_forecast import VERSION,MODEL_ID,MODEL_SHA256,THRESHOLD,predict
+from timemap_forecast import VERSION,MODEL_ID,MODEL_SHA256,THRESHOLD,predict,schedule
 from timemap_statistics import full_regular_bar
 
 
@@ -32,6 +32,9 @@ def connect(path):
         source TEXT NOT NULL, PRIMARY KEY(ticker,trading_date,slot))''')
     con.execute('CREATE TABLE IF NOT EXISTS timemap_forecast_watch(ticker TEXT PRIMARY KEY,last_viewed TEXT NOT NULL)')
     con.execute('CREATE TABLE IF NOT EXISTS timemap_forecast_eval_state(ticker TEXT PRIMARY KEY,last_checked TEXT NOT NULL,status TEXT NOT NULL)')
+    con.execute('''CREATE TABLE IF NOT EXISTS timemap_forecast_prepare_state(
+        ticker TEXT NOT NULL,trading_date TEXT NOT NULL,last_checked TEXT NOT NULL,
+        status TEXT NOT NULL,PRIMARY KEY(ticker,trading_date))''')
     return con
 
 
@@ -114,12 +117,44 @@ def percentages(p):
     return [f'{v/100:.2f}' for v in units]
 
 
-def table(bundle,records,now):
-    now=pd.Timestamp(now).tz_convert('Asia/Jakarta');latest={}
-    for item in records:latest[item['slot']]=item
+def plan_records(bundle,records,now):
+    """Isolate the day's original ledger, independent of caller ordering."""
+    now=pd.Timestamp(now).tz_convert('Asia/Jakarta')
+    valid=[]
+    for item in records:
+        if (item.get('ticker')!=bundle['ticker'] or item.get('trading_date')!=bundle['trading_date']
+            or item.get('model_version')!=bundle['model_version']):continue
+        try:
+            issued=pd.Timestamp(item['generated_at']);slot=pd.Timestamp(item['slot'])
+            if issued.tzinfo is None or slot.tzinfo is None:continue
+            if issued>now or issued>slot:continue
+            if slot.tz_convert('Asia/Jakarta').date().isoformat()!=bundle['trading_date']:continue
+        except (ValueError,TypeError):continue
+        valid.append(item)
+    return sorted(valid,key=lambda r:(pd.Timestamp(r['generated_at']).value,r['input_hash']))
+
+
+def plan_coverage(bundle,records,now,cfg=None):
+    slots={x['start'].isoformat() for x in schedule(now,cfg) if x['regular']}
+    first={}
+    for r in plan_records(bundle,records,now):first.setdefault(r['slot'],r)
+    opening=pd.Timestamp(now).tz_convert('Asia/Jakarta').normalize()+pd.Timedelta(hours=9)
+    preopen=sum(slot in slots and pd.Timestamp(r['generated_at'])<opening for slot,r in first.items())
+    return {'expected':len(slots),'recorded':len(slots.intersection(first)),
+            'preopen':preopen,'missing':[pd.Timestamp(x).strftime('%H:%M') for x in sorted(slots-set(first))]}
+
+
+def table(bundle,records,now,revision='latest'):
+    if revision not in {'first','latest'}:raise ValueError('Unknown plan revision')
+    now=pd.Timestamp(now).tz_convert('Asia/Jakarta');latest={};first={};counts={}
+    for item in plan_records(bundle,records,now):
+        first.setdefault(item['slot'],item)
+        latest[item['slot']]=item
+        counts[item['slot']]=counts.get(item['slot'],0)+1
+    selected=first if revision=='first' else latest
     rows=[]
     for row in bundle['rows']:
-        start=pd.Timestamp(row['start']);end=pd.Timestamp(row['end']);prior=latest.get(row['start'])
+        start=pd.Timestamp(row['start']);end=pd.Timestamp(row['end']);prior=selected.get(row['start'])
         p=None;issued='—';status=row['status'];realized='—';source='—';cutoff='—'
         if prior:
             p=json.loads(prior['probabilities']);issued=pd.Timestamp(prior['generated_at']).tz_convert('Asia/Jakarta').strftime('%d-%m %H:%M:%S')
@@ -134,7 +169,8 @@ def table(bundle,records,now):
         rows.append({'Interval WIB':f'{start:%H:%M}–{end:%H:%M}' if start!=end else f'{start:%H:%M} PENUTUPAN',
                      'Prediksi UP % (uji)':up,'Prediksi DATAR % (uji)':flat,'Prediksi DOWN % (uji)':down,
                      'Dibuat WIB':issued,'Realisasi':realized,'Status':status,
-                     'Input tersedia WIB':cutoff,'Sampel latih':prior['samples'] if prior else 0,'Sumber':source})
+                     'Input tersedia WIB':cutoff,'Sampel latih':prior['samples'] if prior else 0,'Sumber':source,
+                     'Versi tercatat':counts.get(row['start'],0)})
     return pd.DataFrame(rows)
 
 
@@ -199,11 +235,21 @@ def render_forecast(tape,ticker,session):
         pass
     research=st.checkbox('Lihat angka proyeksi uji bayangan — belum layak sebagai sinyal trading',
                          value=False,key='shadow_forecast_'+ticker)
-    display=table(bundle,records,now)
+    revision=st.radio('Versi proyeksi', ['Rencana pertama tercatat','Pembaruan terbaru'],
+                      index=0,horizontal=True,key='forecast_revision_'+ticker)
+    coverage=plan_coverage(bundle,records,now,cfg)
+    st.caption(f"Rencana tersimpan {coverage['recorded']}/{coverage['expected']} interval reguler • "
+               f"dibuat sebelum 09.00 WIB: {coverage['preopen']}/{coverage['expected']}. "
+               'Rencana pertama = prediksi pertama per interval; bisa dibuat setelah pembukaan jika belum tercatat pagi hari.')
+    if coverage['missing']:
+        st.caption('Belum tercatat: '+', '.join(coverage['missing'])+' WIB. Interval yang sudah dimulai tidak diisi prediksi susulan.')
+    st.caption('Pilih Pembaruan terbaru untuk melihat perubahan berdasarkan input yang baru tersedia. '
+               'Semua versi tetap tersimpan; ketepatan dinilai dari prediksi pertama, bukan versi yang dipilih setelah melihat hasil.')
+    display=table(bundle,records,now,revision='first' if revision=='Rencana pertama tercatat' else 'latest')
     if not research and not gate['approved']:
         for column in ['Prediksi UP % (uji)','Prediksi DATAR % (uji)','Prediksi DOWN % (uji)']:
             display[column]='—'
-        pending=display.Realisasi.eq('—')
+        pending=display.Realisasi.eq('—') & display['Versi tercatat'].gt(0)
         display.loc[pending,'Status']='WAIT • MODEL BELUM LOLOS VALIDASI'
     st.dataframe(display,hide_index=True,width='stretch')
     summary=prospective_summary(records)
@@ -214,28 +260,44 @@ def render_forecast(tape,ticker,session):
         st.caption(f"Input model tersedia sampai {pd.Timestamp(bundle['feature_asof']).tz_convert('Asia/Jakarta'):%d-%m-%Y %H:%M} WIB • training historis sampai {bundle['training_end']} • sumber {bundle['source']}. Waktu prediksi asli ada pada setiap baris.")
 
 
-def prepare_watched(path,now,cfg=None):
-    """Bounded pre-open preparation for recently viewed tickers, no downloads."""
+def prepare_watched(path,now,cfg=None,limit=20):
+    """Prepare daily plans fairly in bounded batches, using existing bars only."""
     from market_session import session_status
     now=pd.Timestamp(now).tz_convert('Asia/Jakarta')
     if session_status(cfg,now=now)['status']!='PRE_MARKET':return {'checked':0,'recorded':0}
+    needed=sum(x['regular'] for x in schedule(now,cfg))
+    limit=max(1,min(20,int(limit)))
     con=connect(path)
     try:
-        watched=con.execute('SELECT ticker FROM timemap_forecast_watch WHERE julianday(last_viewed)>=julianday(?) AND julianday(last_viewed)<=julianday(?) ORDER BY julianday(last_viewed) DESC LIMIT 20',
-                            ((now-pd.Timedelta(days=7)).isoformat(),now.isoformat())).fetchall()
+        watched=con.execute('''SELECT w.ticker FROM timemap_forecast_watch w
+            LEFT JOIN timemap_forecast_prepare_state p ON p.ticker=w.ticker AND p.trading_date=?
+            WHERE julianday(w.last_viewed)>=julianday(?) AND julianday(w.last_viewed)<=julianday(?)
+              AND (SELECT COUNT(DISTINCT f.slot) FROM timemap_forecast_log f
+                   WHERE f.ticker=w.ticker AND f.trading_date=? AND f.model_version=?
+                     AND julianday(f.generated_at)<julianday(?)) < ?
+            ORDER BY COALESCE(julianday(p.last_checked),0),julianday(w.last_viewed) DESC,w.ticker LIMIT ?''',
+            (now.date().isoformat(),(now-pd.Timedelta(days=7)).isoformat(),now.isoformat(),
+             now.date().isoformat(),MODEL_ID,(now.normalize()+pd.Timedelta(hours=9)).isoformat(),needed,limit)).fetchall()
         count=0
         for (ticker,) in watched:
+            status='WAITING FOR HISTORY'
             try:
                 frame=pd.read_sql_query('SELECT ts,open,high,low,close,volume,source FROM intraday WHERE ticker=? AND julianday(ts)>=julianday(?) AND julianday(ts)<julianday(?) ORDER BY julianday(ts)',
                     con,params=(ticker,(now-pd.Timedelta(days=59)).isoformat(),now.isoformat()))
-                if frame.empty:continue
-                frame.attrs={'ticker':ticker,'source':str(frame.iloc[-1].source)}
-                bundle=predict(frame,ticker,now,cfg)
-                record(path,bundle)
-                count+=sum(r['p'] is not None for r in bundle['rows'])
-                evaluate(path,ticker,frame,now,cfg)
+                if not frame.empty:
+                    source=frame.source.fillna('').astype(str).str.strip().str.upper()
+                    frame=frame[~source.isin(['','UNKNOWN','UNAVAILABLE','NAN','NONE']) & ~source.str.contains('CACHE',regex=False)].copy()
+                if not frame.empty:
+                    frame.attrs={'ticker':ticker,'source':str(frame.iloc[-1].source)}
+                    bundle=predict(frame,ticker,now,cfg)
+                    record(path,bundle)
+                    count+=sum(r['p'] is not None for r in bundle['rows'])
+                    status=bundle['reason'] or 'SHADOW PLAN RECORDED'
             except (ValueError,sqlite3.Error,pd.errors.DatabaseError):
-                continue
+                status='DATA UNAVAILABLE'
+            con.execute('INSERT OR REPLACE INTO timemap_forecast_prepare_state VALUES(?,?,?,?)',
+                        (ticker,now.date().isoformat(),now.isoformat(),status))
+            con.commit()
         return {'checked':len(watched),'recorded':count}
     finally:con.close()
 

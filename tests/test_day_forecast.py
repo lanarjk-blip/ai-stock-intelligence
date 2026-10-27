@@ -210,7 +210,7 @@ def test_preopen_worker_records_recently_viewed_plan_without_open_app_or_network
     assert prepare_watched(path,now)=={'checked':1,'recorded':10}
     rows=saved(path,'BBCA','2026-10-27')
     assert len(rows)==10 and all(pd.Timestamp(r['generated_at'])<pd.Timestamp(r['slot']) for r in rows)
-    assert prepare_watched(path,now+pd.Timedelta(minutes=5))['checked']==1
+    assert prepare_watched(path,now+pd.Timedelta(minutes=5))=={'checked':0,'recorded':0}
     assert {r['generated_at'] for r in saved(path,'BBCA','2026-10-27')}=={now.isoformat()}
     assert prepare_watched(path,pd.Timestamp('2026-10-27T09:30:00+07:00'))=={'checked':0,'recorded':0}
 
