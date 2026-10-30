@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 BASE = os.path.dirname(os.path.abspath(__file__))
 DB = os.path.join(BASE, "db", "market.db")
 FILES = (
+    "runtime_profile.py", "timemap_runtime.py", "timemap_worker.py",
     "app.py", "worker_base.py", "accuracy_guardrails.py", "dynamic_engine.py",
     "dynamic_opportunity_ui.py", "top5_timeline.py", "recommendation_history.py",
     "market_session.py", "premarket_scheduler.py", "premarket_preliminary.py",
