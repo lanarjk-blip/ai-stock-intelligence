@@ -193,6 +193,18 @@ def _local_db_is_warm():
     return _local_db_price_rows() >= WARM_PRICE_ROWS
 
 
+def _local_has_forecasts():
+    """Never roll back a forecast ledger just because legacy daily prices are cold."""
+    if not os.path.exists(LOCAL_DB):
+        return False
+    con = sqlite3.connect(LOCAL_DB, timeout=10)
+    try:
+        return (_local_table_exists(con, 'timemap_forecast_log')
+                and con.execute('SELECT 1 FROM timemap_forecast_log LIMIT 1').fetchone() is not None)
+    finally:
+        con.close()
+
+
 def _local_model_artifacts():
     if not os.path.isdir(DB_DIR):
         return []
@@ -400,6 +412,41 @@ def sync_local_to_remote(runtime_identity=None):
         con.close()
 
 
+def sync_timemap_runtime(runtime_identity=None):
+    """Mirror runtime diagnostics only; do not republish/delete legacy snapshots."""
+    if not postgres_enabled():
+        return {'status':'DISABLED'}
+    ensure_remote_schema()
+    local = sqlite3.connect(LOCAL_DB,timeout=10)
+    try:
+        rows = local.execute('''SELECT key,value FROM state
+            WHERE key LIKE 'local_worker_%' OR key LIKE 'engine_%'
+               OR key LIKE 'timemap_%' OR key='runtime_workload'
+               OR key IN ('data_quality_status','data_quality_reasons') ''').fetchall()
+    finally:
+        local.close()
+    con = _pg_connect()
+    try:
+        with con.cursor() as cur:
+            for key,value in rows:
+                cur.execute('''INSERT INTO asi_state(key,value,updated_at) VALUES(%s,%s,now())
+                    ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at''',
+                    (key,value))
+            if runtime_identity:
+                cur.execute('''INSERT INTO asi_runtime_heartbeat
+                    (singleton,worker_pid,worker_generation,runtime_build,heartbeat_at,bridge_version)
+                    VALUES(1,%s,%s,%s,now(),%s)
+                    ON CONFLICT(singleton) DO UPDATE SET worker_pid=excluded.worker_pid,
+                    worker_generation=excluded.worker_generation,runtime_build=excluded.runtime_build,
+                    heartbeat_at=excluded.heartbeat_at,bridge_version=excluded.bridge_version''',
+                    (int(runtime_identity.get('pid') or 0),str(runtime_identity.get('generation') or ''),
+                     str(runtime_identity.get('build') or ''),BRIDGE_VERSION))
+        con.commit()
+        return {'status':'SYNCED','mode':'timemap','state':len(rows)}
+    finally:
+        con.close()
+
+
 def _consistent_sqlite_bytes():
     """Return a gzip-compressed transactionally consistent SQLite backup."""
     if not os.path.exists(LOCAL_DB):
@@ -455,7 +502,7 @@ def sync_worker_checkpoint(runtime_identity=None, force=False):
     if not _checkpoint_due(force=force):
         return {"status": "NOT_DUE"}
     price_rows = _local_db_price_rows()
-    if price_rows < WARM_PRICE_ROWS:
+    if price_rows < WARM_PRICE_ROWS and not _local_has_forecasts():
         return {
             "status": "SKIP_COLD",
             "price_rows": price_rows,
@@ -617,8 +664,10 @@ def restore_worker_checkpoint_if_needed(force=False):
     if not postgres_enabled():
         return {"status": "DISABLED"}
     local_rows = _local_db_price_rows()
-    need_db = bool(force or local_rows < WARM_PRICE_ROWS)
-    need_artifacts = bool(force or not _has_model_artifact())
+    has_forecasts = _local_has_forecasts()
+    need_db = bool(force or (local_rows < WARM_PRICE_ROWS and not has_forecasts))
+    from runtime_profile import timemap_only
+    need_artifacts = bool(force or (not timemap_only() and not _has_model_artifact()))
     if not need_db and not need_artifacts:
         return {"status": "LOCAL_WARM", "price_rows": local_rows}
 
@@ -911,7 +960,9 @@ def run_forever(runtime_identity=None):
     time.sleep(8)
     while True:
         try:
-            result = sync_local_to_remote(runtime_identity=runtime_identity)
+            from runtime_profile import timemap_only
+            sync = sync_timemap_runtime if timemap_only() else sync_local_to_remote
+            result = sync(runtime_identity=runtime_identity)
             print(f"[PERSIST_BRIDGE] sync {result}", flush=True)
         except Exception as exc:
             print(f"[PERSIST_BRIDGE] sync error {exc!r}", flush=True)

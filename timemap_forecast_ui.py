@@ -222,6 +222,15 @@ def render_forecast(tape,ticker,session,compact=False):
     from timemap_ui_direct_live import _cfg
     cfg=_cfg()
     bundle=predict(combined,ticker,now,cfg)
+    # Share verified observations with background outcome settlement. This is
+    # not a fresh-data label: stored bars retain candle and fetch timestamps.
+    from timemap_runtime import persist_verified,mark_refresh
+    try:
+        persist_verified(path,ticker,tape,now)
+        from timemap_data import bar_freshness
+        mark_refresh(path,ticker,session,now,bar_freshness(tape,now))
+    except (sqlite3.Error,ValueError):
+        st.caption('Penyimpanan candle belum tersedia; evaluasi latar belakang menunggu data terverifikasi.')
     watch=connect(path)
     try:
         watch.execute('INSERT OR REPLACE INTO timemap_forecast_watch VALUES(?,?)',(canonical_ticker(ticker),now.isoformat()))

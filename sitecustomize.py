@@ -6,6 +6,9 @@ import os
 import sys
 import threading
 import time
+from runtime_profile import timemap_only
+
+_TIME_MAP_ONLY = timemap_only()
 
 _BASE = os.path.dirname(os.path.abspath(__file__))
 _RUNTIME_IDENTITY = None
@@ -108,11 +111,13 @@ try:
     if _IS_REAL_WORKER and persistent_bridge.postgres_enabled():
         checkpoint = persistent_bridge.restore_worker_checkpoint_if_needed()
         print(f"[PERSIST_BRIDGE] checkpoint restore {checkpoint}", flush=True)
-        restored = persistent_bridge.restore_local_from_postgres()
-        print(f"[PERSIST_BRIDGE] control restore {restored}", flush=True)
+        if not _TIME_MAP_ONLY:
+            restored = persistent_bridge.restore_local_from_postgres()
+            print(f"[PERSIST_BRIDGE] control restore {restored}", flush=True)
         persistent_bridge.start_worker_bridge(_RUNTIME_IDENTITY)
-        import replica_runtime
-        replica_runtime.start_worker_replica()
+        if not _TIME_MAP_ONLY:
+            import replica_runtime
+            replica_runtime.start_worker_replica()
     elif (
         not _IS_RUNTIME_API
         and os.environ.get("AI_ENGINE_WORKER") != "1"
@@ -121,11 +126,12 @@ try:
         if persistent_bridge.api_enabled():
             import external_runtime_guard
             external_runtime_guard.install()
-            import replica_runtime
-            pulled = replica_runtime.pull_ui_once()
-            print(f"[UI_REPLICA] initial UI pull {pulled}", flush=True)
-            replica_runtime.start_ui_pull()
-        else:
+            if not _TIME_MAP_ONLY:
+                import replica_runtime
+                pulled = replica_runtime.pull_ui_once()
+                print(f"[UI_REPLICA] initial UI pull {pulled}", flush=True)
+                replica_runtime.start_ui_pull()
+        elif not _TIME_MAP_ONLY:
             restored = persistent_bridge.restore_local_from_remote()
             print(f"[PERSIST_BRIDGE] UI direct restore {restored}", flush=True)
 except Exception as exc:
@@ -179,6 +185,7 @@ _WATCH = (
     "sitecustomize.py",
     "timemap_data.py", "timemap_statistics.py", "trading_monitor.py", "trading_groups.py",
     "timemap_forecast.py", "timemap_forecast_ui.py",
+    "runtime_profile.py", "timemap_worker.py", "timemap_runtime.py", "timemap_evidence.py",
 )
 
 
@@ -248,9 +255,10 @@ def _run_premarket_preliminary():
 if _IS_REAL_WORKER:
     threading.Thread(target=_watch_worker, name="asi-runtime-watchdog", daemon=True).start()
     threading.Thread(target=_run_local_worker_heartbeat, name="asi-local-heartbeat", daemon=True).start()
-    threading.Thread(target=_run_premarket_scheduler, name="asi-premarket-h10", daemon=True).start()
-    threading.Thread(target=_run_premarket_preliminary, name="asi-premarket-preliminary", daemon=True).start()
-elif not _IS_RUNTIME_API and os.environ.get("AI_ENGINE_WORKER") != "1":
+    if not _TIME_MAP_ONLY:
+        threading.Thread(target=_run_premarket_scheduler, name="asi-premarket-h10", daemon=True).start()
+        threading.Thread(target=_run_premarket_preliminary, name="asi-premarket-preliminary", daemon=True).start()
+elif not _TIME_MAP_ONLY and not _IS_RUNTIME_API and os.environ.get("AI_ENGINE_WORKER") != "1":
     try:
         import premarket_ui_patch
         premarket_ui_patch.install()

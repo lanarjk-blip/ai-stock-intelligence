@@ -132,6 +132,9 @@ def _run_startup_selfcheck():
 
 
 def _start_worker_premarket_daemons():
+    from runtime_profile import timemap_only
+    if timemap_only():
+        return
     if os.environ.get("AI_ENGINE_WORKER") != "1":
         return
     if os.path.basename(str(sys.argv[0] or "")) != "worker_base.py":

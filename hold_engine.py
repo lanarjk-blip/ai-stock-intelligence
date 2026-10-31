@@ -35,8 +35,10 @@ def read_current():
     except Exception: return pd.DataFrame()
 
 def _daily_context(ticker):
+    con=None
     try:
-        con=dbcon(); d=pd.read_sql_query('SELECT date,close,volume FROM prices WHERE ticker=? ORDER BY date',(str(ticker),)); con.close()
+        con=dbcon()
+        d=pd.read_sql_query('SELECT date,close,volume FROM prices WHERE ticker=? ORDER BY date',con,params=(str(ticker),))
         if d.empty: return {'trend':'UNKNOWN','ret5':0.0,'vol_ratio':1.0}
         d['close']=pd.to_numeric(d.close,errors='coerce'); d['volume']=pd.to_numeric(d.volume,errors='coerce'); d=d.dropna(subset=['close'])
         ret5=float(d.close.iloc[-1]/d.close.iloc[-6]-1) if len(d)>=6 else 0.0
@@ -47,6 +49,8 @@ def _daily_context(ticker):
         vr=float(d.volume.iloc[-1]/v20) if v20>0 and pd.notna(d.volume.iloc[-1]) else 1.0
         return {'trend':trend,'ret5':ret5,'vol_ratio':vr}
     except Exception: return {'trend':'UNKNOWN','ret5':0.0,'vol_ratio':1.0}
+    finally:
+        if con is not None:con.close()
 
 def _live_intraday_context(ticker, now=None):
     from live_evidence import read_intraday_context

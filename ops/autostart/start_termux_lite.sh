@@ -11,7 +11,8 @@ export AI_ENGINE_WORKER="1"
 
 # Make project root visible during Python startup so sitecustomize.py is loaded.
 # That bootstrap installs runtime supervisor, Neon lease, persistent bridge,
-# heartbeat, UI replica sync, and pre-market schedulers before worker_base runs.
+# heartbeat and checkpoint persistence before worker_base runs. config.json now
+# selects the focused Time Map workload; legacy schedulers do not start.
 if [ -n "${PYTHONPATH:-}" ]; then
   export PYTHONPATH="$ROOT:$PYTHONPATH"
 else
@@ -30,5 +31,5 @@ pkill -f "python .*hybrid_worker.py.*--device hp" 2>/dev/null || true
 # If started before the IDX worker window, the daemon sleeps and wakes automatically.
 # During the active window it starts worker_base through the hybrid path, which is the
 # only supported path for Neon lease + persistent bridge synchronization.
-echo "[TERMUX_LITE] Starting authoritative HP hybrid launcher (native-heavy ML disabled locally)."
+echo "[TERMUX_LITE] Starting supervised Time Map worker (legacy scans disabled by config)."
 exec python hybrid_worker.py --device hp --daemon

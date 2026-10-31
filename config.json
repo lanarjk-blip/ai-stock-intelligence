@@ -1,4 +1,6 @@
 {
+  "runtime_workload": "timemap",
+  "timemap_worker_batch_size": 4,
   "provider": "yahoo_chart_prototype",
   "daily_interval": "1d",
   "daily_period_days": 180,

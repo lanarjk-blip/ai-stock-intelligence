@@ -9,6 +9,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 os.environ.setdefault("STREAMLIT_SERVER_HEADLESS", "true")
 os.environ["AI_ENGINE_WORKER"] = "1"
 
+# Dispatch before app/legacy imports can start scans, patches or ML schedulers.
+# Keep this entrypoint so existing Termux/Render launchers retain singleton/lease.
+if __name__ == "__main__":
+    from runtime_profile import timemap_only
+    if timemap_only():
+        from timemap_worker import run_forever as run_timemap
+        run_timemap()
+        raise SystemExit(0)
+
 import pandas as pd
 import app
 import dynamic_engine
